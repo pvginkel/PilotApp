@@ -1,9 +1,11 @@
 """The dashboard's catalogue (F154.4), what a view may name, read through
 one route, a part at a call, with what the dashboard stores (F155); a view's
 address (F159), its state checked and written back in its normal form; a
-view's rows (F154.1), answered from the record at the query; and a view's
-series and its events strip (F163.3, F164.6), each a route of its own."""
+view's rows (F154.1), answered from the record at the query; a view's series
+and its events strip (F163.3, F164.6), its lanes (F164.6), and its items and
+a conversation's calls (F165), each a route of its own."""
 
+import uuid
 from typing import Any
 
 from dependency_injector.wiring import Provide, inject
@@ -18,7 +20,9 @@ from app.api.dashboard_store import (
 )
 from app.dashboard.address import AddressService
 from app.dashboard.assembly import CatalogueService
-from app.dashboard.catalogue import Catalogue
+from app.dashboard.catalogue import Catalogue, Dimension, Grain
+from app.dashboard.items import Calls, Column, Detail, Items, ItemsService, Listed
+from app.dashboard.lanes import Lanes, LanesService
 from app.dashboard.planner import Window
 from app.dashboard.rows import (
     ByRow,
@@ -39,17 +43,28 @@ from app.schemas.dashboard import (
     BandSchema,
     BucketSchema,
     ByRowSchema,
+    CallEventSchema,
+    CallSchema,
+    CallsResponseSchema,
     CatalogueQuerySchema,
     CatalogueResponseSchema,
     ColorSchema,
     ColorValueSchema,
     DimensionSchema,
     DotSchema,
+    EventDetailSchema,
     FactSchema,
     FigureSchema,
     GrainSchema,
+    ItemColumnSchema,
+    ItemSchema,
+    ItemsResponseSchema,
+    LaneEventSchema,
+    LaneSchema,
+    LanesResponseSchema,
     LineSchema,
     MarkerSchema,
+    OpenedSchema,
     PanelSchema,
     PointSchema,
     RatioSchema,
@@ -58,7 +73,9 @@ from app.schemas.dashboard import (
     RowsMeasureSchema,
     RowsResponseSchema,
     SeenKindSchema,
+    SelectedSchema,
     SeriesResponseSchema,
+    ShownSchema,
     SightingSchema,
     SortSchema,
     SpanSchema,
@@ -67,6 +84,7 @@ from app.schemas.dashboard import (
     StripResponseSchema,
     TimeRangeSchema,
     ValueSchema,
+    WaitSchema,
 )
 from app.services.container import ServiceContainer
 from app.services.dashboard_store_service import DashboardStoreService
@@ -257,6 +275,121 @@ def get_series_events(
     return _strip(strip_service.strip(query.state)).model_dump(mode="json")
 
 
+@dashboard_bp.route("/lanes", methods=["GET"])
+@api.validate(
+    query=StateQuerySchema,
+    resp=SpectreeResponse(
+        HTTP_200=LanesResponseSchema,
+        HTTP_400=ApiErrorResponseSchema,
+        HTTP_401=ApiErrorResponseSchema,
+        HTTP_403=ApiErrorResponseSchema,
+        HTTP_409=ApiErrorResponseSchema,
+    ),
+)
+@inject
+def get_lanes(
+    query: StateQuerySchema,
+    lanes_service: LanesService = Provide[ServiceContainer.lanes_service],
+) -> Any:
+    """Answer a view's lanes from the record at the query: a lane per row of
+    the By that holds Calls, the earliest first, with each measure on it,
+    its waits and its events, each event with its detail, merged past a
+    bound on how many the lanes carry; its time as instants, with the zone
+    its days are in.
+
+    Returns:
+        200: The view's lanes, with its address, its look-only parts and a
+            note for each part dropped
+        400: The state has faults, or is not in lanes: the error names every
+            one, and ends on a correct example of each kind of part refused
+        401: No one is signed in
+        403: The caller lacks the editor role
+        409: The view passed the engine's bounds: a statement past its
+            timeout (`QUERY_TIMEOUT`), one past the database's limit on
+            temporary files (`QUERY_TEMP_FILE_LIMIT`), or no slot among its
+            statements at once freed in time (`QUERY_BUSY`)
+    """
+    return _lanes(lanes_service.lanes(query.state)).model_dump(mode="json")
+
+
+@dashboard_bp.route("/items", methods=["GET"])
+@api.validate(
+    query=StateQuerySchema,
+    resp=SpectreeResponse(
+        HTTP_200=ItemsResponseSchema,
+        HTTP_400=ApiErrorResponseSchema,
+        HTTP_401=ApiErrorResponseSchema,
+        HTTP_403=ApiErrorResponseSchema,
+        HTTP_409=ApiErrorResponseSchema,
+    ),
+)
+@inject
+def get_items(
+    query: StateQuerySchema,
+    items_service: ItemsService = Provide[ServiceContainer.items_service],
+) -> Any:
+    """Answer a view's items from the record at the query: those of the row
+    selected, else of every row, at the view's grain of items, or an opened
+    item's calls, each with the columns the catalogue gives its grain, the
+    earliest first; under a threshold on the By's rows those of the rows it
+    keeps; its time as instants, with the zone its days are in.
+
+    Returns:
+        200: The view's items, with its address, its look-only parts and a
+            note for each part dropped
+        400: The state has faults: the error names every one, and ends on a
+            correct example of each kind of part refused
+        401: No one is signed in
+        403: The caller lacks the editor role
+        409: The view passed the engine's bounds: a statement past its
+            timeout (`QUERY_TIMEOUT`), one past the database's limit on
+            temporary files (`QUERY_TEMP_FILE_LIMIT`), or no slot among its
+            statements at once freed in time (`QUERY_BUSY`)
+    """
+    return _items(items_service.items(query.state)).model_dump(mode="json")
+
+
+@dashboard_bp.route("/conversations/<uuid:transcript_id>/calls", methods=["GET"])
+@api.validate(
+    query=StateQuerySchema,
+    resp=SpectreeResponse(
+        HTTP_200=CallsResponseSchema,
+        HTTP_400=ApiErrorResponseSchema,
+        HTTP_401=ApiErrorResponseSchema,
+        HTTP_403=ApiErrorResponseSchema,
+        HTTP_404=ApiErrorResponseSchema,
+        HTTP_409=ApiErrorResponseSchema,
+    ),
+)
+@inject
+def get_conversation_calls(
+    transcript_id: uuid.UUID,
+    query: StateQuerySchema,
+    items_service: ItemsService = Provide[ServiceContainer.items_service],
+) -> Any:
+    """Answer a conversation's calls from the record at the query: every
+    Call of the thread over all time with no chips, in its file's order,
+    each with the call's columns, its events with their details and whether
+    the view's window and scope hold it.
+
+    Returns:
+        200: The calls, with the view's address, its look-only parts and a
+            note for each part dropped
+        400: The state has faults: the error names every one, and ends on a
+            correct example of each kind of part refused
+        401: No one is signed in
+        403: The caller lacks the editor role
+        404: The record holds no such thread
+        409: The read passed the engine's bounds: a statement past its
+            timeout (`QUERY_TIMEOUT`), one past the database's limit on
+            temporary files (`QUERY_TEMP_FILE_LIMIT`), or no slot among its
+            statements at once freed in time (`QUERY_BUSY`)
+    """
+    return _calls(items_service.calls(query.state, transcript_id)).model_dump(
+        mode="json"
+    )
+
+
 def _rows(found: Rows) -> RowsResponseSchema:
     return RowsResponseSchema(
         address=found.address.address,
@@ -371,6 +504,182 @@ def _strip(found: Strip) -> StripResponseSchema:
             for bucket in found.buckets
         ],
         refused=found.refused,
+    )
+
+
+def _lanes(found: Lanes) -> LanesResponseSchema:
+    return LanesResponseSchema(
+        address=found.address.address,
+        look=list(found.address.look),
+        notes=list(found.address.notes),
+        zone=found.zone,
+        window=_window(found.window),
+        by=_dimension(found.by),
+        measures=[RowsMeasureSchema(**_measure(measure)) for measure in found.measures],
+        color=_color(found.color),
+        all=LineSchema(**_line(found.all)),
+        lanes=[
+            LaneSchema(
+                **_by_row(lane),
+                starts_at=lane.starts_at,
+                ends_at=lane.ends_at,
+                waits=[
+                    WaitSchema(
+                        starts_at=wait.starts_at,
+                        ends_at=wait.ends_at,
+                        conversation=wait.conversation,
+                        call=wait.call,
+                        past_ttl=wait.past_ttl,
+                        n=wait.n,
+                    )
+                    for wait in lane.waits
+                ],
+                events=[
+                    LaneEventSchema(
+                        at=event.at,
+                        kind=event.kind,
+                        is_error=event.is_error,
+                        key=event.key,
+                        conversation=event.conversation,
+                        call=event.call,
+                        cost=event.cost,
+                        detail=_detail(event.detail),
+                        n=event.n,
+                    )
+                    for event in lane.events
+                ],
+            )
+            for lane in found.lanes
+        ],
+        total_lanes=found.total_lanes,
+        starts_at=found.starts_at,
+        ends_at=found.ends_at,
+        weeks=list(found.weeks),
+        kinds=[
+            SeenKindSchema(
+                key=kind.key, label=kind.label, is_error=kind.is_error, total=kind.total
+            )
+            for kind in found.kinds
+        ],
+        wait_seconds=found.wait_seconds,
+        resolution=found.resolution,
+    )
+
+
+def _items(found: Items) -> ItemsResponseSchema:
+    return ItemsResponseSchema(
+        address=found.address.address,
+        look=list(found.address.look),
+        notes=list(found.address.notes),
+        zone=found.zone,
+        window=_window(found.window),
+        grain=_grain(found.grain),
+        by=_dimension(found.by),
+        selected=None
+        if found.selected is None
+        else SelectedSchema(key=found.selected.value),
+        opened=None
+        if found.opened is None
+        else OpenedSchema(grain=found.opened.grain, key=found.opened.key),
+        figures=_columns(found.figures),
+        shows=[_dimension(dimension) for dimension in found.shows],
+        items=[ItemSchema(**_item(item)) for item in found.items],
+        total=found.total,
+    )
+
+
+def _calls(found: Calls) -> CallsResponseSchema:
+    return CallsResponseSchema(
+        address=found.address.address,
+        look=list(found.address.look),
+        notes=list(found.address.notes),
+        zone=found.zone,
+        window=_window(found.window),
+        conversation=found.conversation,
+        figures=_columns(found.figures),
+        shows=[_dimension(dimension) for dimension in found.shows],
+        calls=[
+            CallSchema(
+                **_item(call),
+                position=call.position,
+                in_scope=call.in_scope,
+                events=[
+                    CallEventSchema(
+                        key=event.key,
+                        kind=event.kind,
+                        label=event.label,
+                        is_error=event.is_error,
+                        at=event.at,
+                        detail=EventDetailSchema(**_detail_fields(event.detail)),
+                    )
+                    for event in call.events
+                ],
+            )
+            for call in found.calls
+        ],
+        total=found.total,
+    )
+
+
+def _item(item: Listed) -> dict[str, Any]:
+    return {
+        "key": item.key,
+        "label": item.label,
+        "first": item.first,
+        "last": item.last,
+        "values": list(item.values),
+        "kinds": [None if one is None else list(one) for one in item.kinds],
+        "shown": [ShownSchema(key=one.key, label=one.label) for one in item.shown],
+        "focus": item.focus,
+        "conversation": item.conversation,
+        "session": item.session,
+        "turn_seq": item.turn_seq,
+        "call": item.call,
+        "detail": _detail(item.detail),
+    }
+
+
+def _columns(columns: tuple[Column, ...]) -> list[ItemColumnSchema]:
+    return [
+        ItemColumnSchema(
+            key=column.key,
+            label=column.label,
+            format=column.format,
+            kinds=None if column.kinds is None else list(column.kinds),
+        )
+        for column in columns
+    ]
+
+
+def _detail(detail: Detail | None) -> EventDetailSchema | None:
+    return None if detail is None else EventDetailSchema(**_detail_fields(detail))
+
+
+def _detail_fields(detail: Detail) -> dict[str, Any]:
+    return {
+        "qualifier": detail.qualifier,
+        "tool": detail.tool,
+        "characters": detail.characters,
+        "denial": detail.denial,
+        "command": detail.command,
+        "trigger": detail.trigger,
+        "model": detail.model,
+    }
+
+
+def _dimension(dimension: Dimension) -> RowsDimensionSchema:
+    return RowsDimensionSchema(
+        key=dimension.key, label=dimension.label, group=dimension.group
+    )
+
+
+def _grain(grain: Grain) -> GrainSchema:
+    return GrainSchema(
+        key=grain.key,
+        one=grain.one,
+        many=grain.many,
+        figures=list(grain.figures),
+        shows=list(grain.shows),
     )
 
 

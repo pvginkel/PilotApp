@@ -30,6 +30,7 @@ from typing import Literal, cast
 from sqlalchemy import Date, DateTime, Integer, Uuid
 
 from app.dashboard.catalogue import COUNT, Catalogue, Dimension, Figure
+from app.dashboard.facts import read_event_key
 from app.dashboard.refusal import Fault, listed, nearest, refused
 from app.dashboard.state import (
     DIRECTIONS,
@@ -1035,10 +1036,35 @@ class _Reader:
             return None
         dimension = self.dimensions.get(grain)
         if dimension is None:
-            text = self.decoded(part, written)
-            return Item(grain, text) if text is not None else None
+            return self.event(part, grain, written)
         ok, value = self.value(part, dimension, written)
         return Item(grain, value) if ok else None
+
+    def event(self, part: _Part, grain: str, written: str) -> Item | None:
+        """An item of the one grain that is a fact's own rows and no part,
+        the events: its key, `<kind>:<id>` (`facts.event_key`)."""
+        text = self.decoded(part, written)
+        if text is None:
+            return None
+        read = read_event_key(text)
+        if read is None:
+            self.fault(
+                part,
+                f'"{text}" is no event\'s key',
+                allowed="An event's key reads <kind>:<id>, the id of the row "
+                "that records it",
+            )
+            return None
+        kinds = [value.code for value in self.dimensions[EVENT_KIND].values or ()]
+        if read[0] not in kinds:
+            self.fault(
+                part,
+                f'"{read[0]}" is no kind of event',
+                nearest(read[0], kinds),
+                "The catalogue's event_kind lists the kinds",
+            )
+            return None
+        return Item(grain, text)
 
     def call(self, part: _Part, item: Item | None) -> int | None:
         if item is None or item.grain != READER:

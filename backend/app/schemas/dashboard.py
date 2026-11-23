@@ -1,9 +1,11 @@
 """Schemas for GET /api/dashboard/catalogue, what a view of the dashboard may
 name, a part at a call (F154.4), with what the dashboard stores (F155); for
 GET /api/dashboard/address, a view's state checked and written back in its
-normal form (F159); for GET /api/dashboard/rows, a view's rows (F154.1); and
-for GET /api/dashboard/series and its events strip, a view's series (F163.3,
-F164.6)."""
+normal form (F159); for GET /api/dashboard/rows, a view's rows (F154.1); for
+GET /api/dashboard/series and its events strip, a view's series (F163.3,
+F164.6); for GET /api/dashboard/lanes, a view's lanes (F164.6); and for GET
+/api/dashboard/items and a conversation's calls, a view's items (F165).
+"""
 
 import uuid
 from datetime import date, datetime
@@ -710,3 +712,262 @@ class StripResponseSchema(BaseModel):
     refused: str | None = Field(
         description="Why it holds none, where the events lack the dimension"
     )
+
+
+class WaitSchema(BaseModel):
+    """A gap between a lane's rows."""
+
+    starts_at: datetime = Field(description="The moment of the row before it")
+    ends_at: datetime = Field(description="The moment of the row that ends it")
+    conversation: uuid.UUID | None = Field(
+        description="The thread of the row that ends it; null for a Turn standing in"
+    )
+    call: int | None = Field(
+        description="The Call that ends it; null for a Turn standing in"
+    )
+    past_ttl: bool = Field(
+        description=(
+            "Whether that Call waited past the cache's lifetime, its own wait "
+            "spanning the gap"
+        )
+    )
+    n: int = Field(description="The waits merged into it")
+
+
+class EventDetailSchema(BaseModel):
+    """An event's one short detail, from the fact behind it; each part null
+    where its fact has none, as one not read yet."""
+
+    qualifier: str | None = Field(
+        description=(
+            "A stored event's one qualifier as its source gives it: an API "
+            "error's status"
+        ),
+        examples=["529"],
+    )
+    tool: str | None = Field(
+        description="The tool whose output was saved, or whose use was denied",
+        examples=["Bash"],
+    )
+    characters: int | None = Field(
+        description="A saved output's full size, in characters", examples=[90000]
+    )
+    denial: str | None = Field(description="A denial's kind", examples=["rule"])
+    command: str | None = Field(description="A failed hook's command")
+    trigger: str | None = Field(description="A compaction's trigger", examples=["auto"])
+    model: str | None = Field(
+        description="A fallback's model: the one that answered in the asked one's place"
+    )
+
+
+class LaneEventSchema(BaseModel):
+    """An event on a lane."""
+
+    at: datetime
+    kind: str = Field(examples=["api_error"])
+    is_error: bool = Field(description="Whether its kind counts as an error")
+    key: str = Field(
+        description="Its key as an item: its kind and the id of the row that records it",
+        examples=["api_error:12"],
+    )
+    conversation: uuid.UUID | None = Field(description="Its thread")
+    call: int = Field(description="The Call it is held on")
+    cost: float | None = Field(
+        description="The cost of the Calls it is held on, a cache miss's its cost"
+    )
+    detail: EventDetailSchema | None = Field(
+        description="Its detail; null where it holds more than one"
+    )
+    n: int = Field(description="The events of its kind merged into it")
+
+
+class LaneSchema(ByRowSchema):
+    """A lane: a row of the By that holds Calls in the window and the scope."""
+
+    starts_at: datetime | None = Field(description="Its first row's moment")
+    ends_at: datetime | None = Field(description="Its last row's moment")
+    waits: list[WaitSchema] = Field(description="In time order")
+    events: list[LaneEventSchema] = Field(description="In time order")
+
+
+class LanesResponseSchema(BaseModel):
+    """A view's lanes."""
+
+    address: str = Field(
+        description="The view's address, its state in its normal form after `#dash/`"
+    )
+    look: list[str] = Field(
+        description="Its look-only parts as the address writes them"
+    )
+    notes: list[str] = Field(description="A note for each part it dropped")
+    zone: str = Field(examples=["Europe/Amsterdam"])
+    window: list[SpanSchema] | None = Field(
+        description="The time it reads; null for all time, empty for none of it"
+    )
+    by: RowsDimensionSchema
+    measures: list[RowsMeasureSchema]
+    color: ColorSchema | None
+    all: LineSchema
+    lanes: list[LaneSchema] = Field(
+        description=(
+            "The By's rows that hold Calls, the earliest first, those a "
+            "threshold or the outlier rows' chip keeps"
+        )
+    )
+    total_lanes: int = Field(description="The lanes, those answered and the rest")
+    starts_at: datetime | None = Field(description="The first lane's first moment")
+    ends_at: datetime | None = Field(description="The lanes' last moment")
+    weeks: list[datetime] = Field(
+        description="The instants a quota week starts at within the span"
+    )
+    kinds: list[SeenKindSchema] = Field(
+        description="The kinds of event the lanes hold, the errors first"
+    )
+    wait_seconds: float = Field(
+        description="The gap between a lane's rows from which it is a wait"
+    )
+    resolution: float | None = Field(
+        description=(
+            "The seconds within which waits and events were merged, past the "
+            "bound on how many the lanes carry; null where none were"
+        )
+    )
+
+
+class ItemColumnSchema(BaseModel):
+    """A figure an item carries."""
+
+    key: str = Field(examples=["cost"])
+    label: str = Field(examples=["Cost"])
+    format: Format
+    kinds: list[str] | None = Field(
+        description="The token kinds it splits by, where it has them"
+    )
+
+
+class ShownSchema(BaseModel):
+    """The value of a dimension shown with an item."""
+
+    key: Key = Field(description="The value, typed as its dimension reads it")
+    label: str | None = Field(description="Its label; null where the key is its own")
+
+
+class ItemSchema(BaseModel):
+    """An item."""
+
+    key: Key = Field(
+        description=(
+            "The item, typed as its grain reads it: an event's key is its kind "
+            "and the id of the row that records it; null on a Turn standing in "
+            "for its Calls"
+        )
+    )
+    label: str | None = Field(description="Its name; null where the key is its own")
+    first: datetime | None = Field(description="Its first row's moment")
+    last: datetime | None = Field(description="Its last row's moment")
+    values: list[float | None] = Field(
+        description="Each of the grain's figures, taken together over its rows"
+    )
+    kinds: list[list[float] | None] = Field(
+        description="Each figure's split by its token kinds, null for one without"
+    )
+    shown: list[ShownSchema] = Field(
+        description="Each dimension the grain shows, on an item that is one row"
+    )
+    focus: bool = Field(description="Whether it is the view's focus")
+    conversation: uuid.UUID | None = Field(
+        description="An item that is one row: its thread"
+    )
+    session: uuid.UUID | None = Field(
+        description="An item that is one row: its Session of Pilot's"
+    )
+    turn_seq: int | None = Field(description="An item that is one row: its Turn")
+    call: int | None = Field(description="An item that is one row: its Call")
+    detail: EventDetailSchema | None = Field(description="An event's detail")
+
+
+class SelectedSchema(BaseModel):
+    """The row of the view the items are of."""
+
+    key: Key = Field(description="Its key, null for the row with none")
+
+
+class OpenedSchema(BaseModel):
+    """The item whose calls the items are."""
+
+    grain: str = Field(examples=["conversation"])
+    key: Key
+
+
+class ItemsResponseSchema(BaseModel):
+    """A view's items."""
+
+    address: str = Field(
+        description="The view's address, its state in its normal form after `#dash/`"
+    )
+    look: list[str] = Field(
+        description="Its look-only parts as the address writes them"
+    )
+    notes: list[str] = Field(description="A note for each part it dropped")
+    zone: str = Field(examples=["Europe/Amsterdam"])
+    window: list[SpanSchema] | None = Field(
+        description="The time it reads; null for all time, empty for none of it"
+    )
+    grain: GrainSchema
+    by: RowsDimensionSchema = Field(
+        description="The dimension the view asks its rows by"
+    )
+    selected: SelectedSchema | None = Field(
+        description="The row the items are of; null for every row"
+    )
+    opened: OpenedSchema | None = Field(
+        description="The item whose calls they are, where one is opened"
+    )
+    figures: list[ItemColumnSchema] = Field(description="What each item carries")
+    shows: list[RowsDimensionSchema] = Field(
+        description="The dimensions shown with an item that is one row"
+    )
+    items: list[ItemSchema] = Field(description="The earliest first")
+    total: int = Field(description="The items, those answered and the rest")
+
+
+class CallEventSchema(BaseModel):
+    """An event of a call."""
+
+    key: str = Field(examples=["api_error:12"])
+    kind: str = Field(examples=["api_error"])
+    label: str = Field(examples=["API error"])
+    is_error: bool
+    at: datetime
+    detail: EventDetailSchema
+
+
+class CallSchema(ItemSchema):
+    """A call of a conversation."""
+
+    position: int | None = Field(description="Its place in its file, from 1")
+    in_scope: bool = Field(description="Whether the view's window and scope hold it")
+    events: list[CallEventSchema] = Field(description="In time order")
+
+
+class CallsResponseSchema(BaseModel):
+    """A conversation's calls over all time, with no chips."""
+
+    address: str = Field(
+        description="The view's address, its state in its normal form after `#dash/`"
+    )
+    look: list[str] = Field(
+        description="Its look-only parts as the address writes them"
+    )
+    notes: list[str] = Field(description="A note for each part it dropped")
+    zone: str = Field(examples=["Europe/Amsterdam"])
+    window: list[SpanSchema] | None = Field(
+        description="The time the view reads, which `in_scope` holds a call to"
+    )
+    conversation: uuid.UUID
+    figures: list[ItemColumnSchema] = Field(description="What each call carries")
+    shows: list[RowsDimensionSchema] = Field(
+        description="The dimensions shown with each call"
+    )
+    calls: list[CallSchema] = Field(description="In their file's order")
+    total: int = Field(description="The calls, those answered and the rest")

@@ -6,7 +6,11 @@ joins their rows reach the record through (F154.3; DB decision 79.42).
   has its Turn's tokens by the kinds a Turn counts, and no Call's facts.
 - **Turn**: a Turn of Pilot's.
 - **Event**: an Event, or an occurrence of a kind another entity records
-  (DB 560), each at its own moment on the Call it is held on.
+  (DB 560), each at its own moment on the Call it is held on, with its one
+  short detail from the fact behind it: an API error's status, a saved
+  output's tool and size, a denial's kind and tool, a hook's command, a
+  compaction's trigger, a fallback's model. An event is an item by its key,
+  its kind and the id of the row that records it (`event_key`).
 
 Every source carries the columns the joins start from, whatever the fact:
 `transcript_id` the thread, `session_id` and `turn_seq` Pilot's Session and
@@ -14,6 +18,7 @@ Turn, `at` the row's moment. A Call's and an Event's also carry the Call's
 own facts and its `launch_id`. No join here loses or doubles a row.
 """
 
+import re
 from dataclasses import dataclass
 from datetime import timedelta
 from typing import Any
@@ -84,6 +89,40 @@ OCCURRENCES = (
 
 _ERROR = {kind.code: str(kind.is_error).lower() for kind in OCCURRENCES}
 
+DETAIL: tuple[tuple[str, TypeEngine[Any]], ...] = (
+    ("detail", Text()),
+    ("tool_code", Text()),
+    ("saved_characters", Integer()),
+    ("denial_kind_code", Text()),
+    ("hook_command", Text()),
+    ("trigger_code", Text()),
+    ("fallback_model_code", Text()),
+)
+"""The Event fact's columns of an event's detail, each its source's: a
+stored Event's own qualifier, an API error's status; the tool whose output
+was saved or whose use was denied; a saved output's full size in
+characters; a denial's kind; a failed hook's command; a compaction's
+trigger; the model a fallback's Call was answered by."""
+
+_EVENT_KEY = re.compile(r"([a-z0-9_]+):([1-9][0-9]*)")
+
+
+def event_key(kind: str, source_id: int) -> str:
+    """An event's key as an item: its kind and the id of the row that
+    records it, an Event's, a Call's, a Tool Call's or a Hook Run's, which
+    its kind says, `cache_miss:42`."""
+    return f"{kind}:{source_id}"
+
+
+def read_event_key(written: str) -> tuple[str, int] | None:
+    """An event's kind and the id of the row that records it, from its key;
+    none where the key is not of that form."""
+    found = _EVENT_KEY.fullmatch(written)
+    if found is None:
+        return None
+    return found[1], int(found[2])
+
+
 # A Call's own columns as every fact that reaches one carries them, over
 # `c`, a Call, and `l`, its Launch.
 _OF_A_CALL: tuple[tuple[str, str, TypeEngine[Any]], ...] = (
@@ -113,6 +152,7 @@ _OF_A_CALL: tuple[tuple[str, str, TypeEngine[Any]], ...] = (
     ("output_tokens", "c.output_tokens", BigInteger()),
     ("context_tokens", "c.context_tokens", Integer()),
     ("cost", "c.cost", Numeric()),
+    ("position", "c.position", Integer()),
 )
 
 _CALLS = (
@@ -133,7 +173,7 @@ UNION ALL
 SELECT NULL, NULL, NULL, t.session_id, t.seq, coalesce(t.ended_at, t.started_at),
     NULL, NULL, NULL, NULL, NULL, NULL, false, false, false, NULL,
     coalesce(k.input_tokens, 0), coalesce(k.cache_write_tokens, 0),
-    coalesce(k.cache_read_tokens, 0), coalesce(k.output_tokens, 0), NULL, t.cost,
+    coalesce(k.cache_read_tokens, 0), coalesce(k.output_tokens, 0), NULL, t.cost, NULL,
     coalesce(t.ended_at, t.started_at), true
 FROM turns AS t
 JOIN sessions AS s ON s.id = t.session_id
@@ -159,39 +199,52 @@ LEFT JOIN transcripts AS x ON x.session_id = s.conversation_id AND x.agent_id IS
 
 # What the other entities record, each under its Event Kind: a Call's own,
 # with its Compaction's; a Tool Call's; and a failed Hook Run's, held on the
-# last Call of the Prompt whose run it ended.
+# last Call of the Prompt whose run it ended. `source_id` is the id of the row
+# that records it, and the detail's columns are those of its source.
 _EVENT = f"""
-SELECT o.event_id, o.kind_code, o.is_error, o.at, calls.*
+SELECT o.event_id, o.source_id, o.kind_code, o.is_error, o.at, o.detail, o.tool_code,
+    o.saved_characters, o.denial_kind_code, o.hook_command, o.trigger_code,
+    o.fallback_model_code, calls.*
 FROM (
-    SELECT e.id AS event_id, e.call_id, e.kind_code, k.is_error, e.at
+    SELECT e.id AS event_id, e.id AS source_id, e.call_id, e.kind_code, k.is_error, e.at,
+        e.detail, NULL AS tool_code, NULL::integer AS saved_characters,
+        NULL AS denial_kind_code, NULL AS hook_command, NULL AS trigger_code,
+        NULL AS fallback_model_code
     FROM events AS e JOIN event_kinds AS k ON k.code = e.kind_code
     UNION ALL
-    SELECT NULL, c.id, o.kind_code, o.is_error, o.at
+    SELECT NULL, c.id, c.id, o.kind_code, o.is_error, o.at, NULL, NULL, NULL, NULL, NULL,
+        o.trigger_code, o.model_code
     FROM calls AS c
     LEFT JOIN compactions AS m ON m.id = c.compaction_id
     CROSS JOIN LATERAL (VALUES
-        ('compaction', m.id IS NOT NULL, {_ERROR["compaction"]}, m.at),
-        ('rewind', c.rewind, {_ERROR["rewind"]}, c.completed_at),
-        ('cache_miss', c.cache_miss, {_ERROR["cache_miss"]}, c.completed_at),
-        ('past_ttl', c.past_ttl, {_ERROR["past_ttl"]}, c.completed_at),
+        ('compaction', m.id IS NOT NULL, {_ERROR["compaction"]}, m.at, m.trigger_code,
+            NULL),
+        ('rewind', c.rewind, {_ERROR["rewind"]}, c.completed_at, NULL, NULL),
+        ('cache_miss', c.cache_miss, {_ERROR["cache_miss"]}, c.completed_at, NULL, NULL),
+        ('past_ttl', c.past_ttl, {_ERROR["past_ttl"]}, c.completed_at, NULL, NULL),
         ('model_fallback', c.requested_model_code IS NOT NULL,
-            {_ERROR["model_fallback"]}, c.completed_at),
+            {_ERROR["model_fallback"]}, c.completed_at, NULL, c.model_code),
         ('max_tokens', c.stop_reason_code = 'max_tokens',
-            {_ERROR["max_tokens"]}, c.completed_at),
-        ('refusal', c.stop_reason_code = 'refusal', {_ERROR["refusal"]}, c.completed_at)
-    ) AS o (kind_code, occurred, is_error, at)
+            {_ERROR["max_tokens"]}, c.completed_at, NULL, NULL),
+        ('refusal', c.stop_reason_code = 'refusal', {_ERROR["refusal"]}, c.completed_at,
+            NULL, NULL)
+    ) AS o (kind_code, occurred, is_error, at, trigger_code, model_code)
     WHERE o.occurred
     UNION ALL
-    SELECT NULL, r.call_id, o.kind_code, o.is_error,
-        coalesce(r.returned_at, r.requested_at)
+    SELECT NULL, r.id, r.call_id, o.kind_code, o.is_error,
+        coalesce(r.returned_at, r.requested_at), NULL, r.tool_code, o.saved_characters,
+        o.denial_kind_code, NULL, NULL, NULL
     FROM tool_calls AS r
     CROSS JOIN LATERAL (VALUES
-        ('output_saved', r.saved_characters IS NOT NULL, {_ERROR["output_saved"]}),
-        ('denied', r.denial_kind_code IS NOT NULL, {_ERROR["denied"]})
-    ) AS o (kind_code, occurred, is_error)
+        ('output_saved', r.saved_characters IS NOT NULL, {_ERROR["output_saved"]},
+            r.saved_characters, NULL),
+        ('denied', r.denial_kind_code IS NOT NULL, {_ERROR["denied"]}, NULL,
+            r.denial_kind_code)
+    ) AS o (kind_code, occurred, is_error, saved_characters, denial_kind_code)
     WHERE o.occurred
     UNION ALL
-    SELECT NULL, c.id, 'hook_error', {_ERROR["hook_error"]}, c.completed_at
+    SELECT NULL, h.id, c.id, 'hook_error', {_ERROR["hook_error"]}, c.completed_at, NULL,
+        NULL, NULL, NULL, h.command, NULL, NULL
     FROM hook_runs AS h
     JOIN prompts AS p ON p.id = h.prompt_id
     CROSS JOIN LATERAL (
@@ -261,9 +314,11 @@ EVENT = Fact(
         "event",
         _EVENT,
         ("event_id", BigInteger()),
+        ("source_id", BigInteger()),
         ("kind_code", Text()),
         ("is_error", Boolean()),
         ("at", DateTime(timezone=True)),
+        *DETAIL,
         *_OF_A_CALL_TYPED,
     ),
     counts="events",

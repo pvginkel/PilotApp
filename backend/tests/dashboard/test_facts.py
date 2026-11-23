@@ -9,7 +9,17 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session as DbSession
 
 from app import models
-from app.dashboard.facts import CALL, EVENT, FACTS, OCCURRENCES, TURN, own_joins
+from app.dashboard.facts import (
+    CALL,
+    DETAIL,
+    EVENT,
+    FACTS,
+    OCCURRENCES,
+    TURN,
+    event_key,
+    own_joins,
+    read_event_key,
+)
 from app.models import Project, QuotaWeek, User
 from app.models.call import RECORDED_ELSEWHERE
 from tests.support import transcripts
@@ -53,6 +63,24 @@ class TestCall:
         assert first[2:] == second[2:] == explored[2:] == (held.work.id, 1)
         assert stand_in[2:] == (held.chat.id, 1)
         assert by_hand[2:] == (None, None)
+
+    def test_a_call_carries_its_place_in_its_file_and_a_stand_in_none(
+        self, session: DbSession, held: Record
+    ) -> None:
+        source = CALL.source
+
+        places = session.execute(
+            select(source.c.call_id, source.c.position).order_by(source.c.at)
+        ).all()
+
+        assert [tuple(row) for row in places] == [
+            (held.calls[0].id, 1),
+            (held.calls[1].id, 2),
+            (held.calls[3].id, 1),
+            (held.calls[2].id, 3),
+            (None, None),
+            (held.calls[4].id, 1),
+        ]
 
     def test_a_turn_whose_thread_is_collected_does_not_stand_in(
         self, session: DbSession, held: Record
@@ -286,6 +314,65 @@ class TestEvent:
             transcripts.OPUS,
             "high",
         )
+
+    def test_each_carries_the_id_of_the_row_that_records_it(
+        self, session: DbSession, held: Record
+    ) -> None:
+        source = EVENT.source
+        first, second, third = held.calls[:3]
+        tool_calls = {
+            row.call_id: row.id for row in session.scalars(select(models.ToolCall))
+        }
+        event = session.scalar(select(models.Event.id))
+        hook = session.scalar(select(models.HookRun.id))
+
+        found = dict(
+            session.execute(select(source.c.kind_code, source.c.source_id)).all()
+        )
+
+        assert found == {
+            "api_error": event,
+            "cache_miss": third.id,
+            "compaction": third.id,
+            "denied": tool_calls[second.id],
+            "hook_error": hook,
+            "max_tokens": second.id,
+            "model_fallback": second.id,
+            "output_saved": tool_calls[first.id],
+            "past_ttl": second.id,
+            "rewind": second.id,
+        }
+
+    def test_each_carries_its_detail_from_the_fact_behind_it(
+        self, session: DbSession, held: Record
+    ) -> None:
+        source = EVENT.source
+        details = [source.c[column] for column, _ in DETAIL]
+
+        found = {
+            row[0]: tuple(row[1:])
+            for row in session.execute(select(source.c.kind_code, *details))
+        }
+
+        assert found == {
+            "api_error": ("529", None, None, None, None, None, None),
+            "cache_miss": (None,) * 7,
+            "compaction": (None, None, None, None, None, "auto", None),
+            "denied": (None, "Bash", None, "rule", None, None, None),
+            "hook_error": (None, None, None, None, "signal_activity.sh", None, None),
+            "max_tokens": (None,) * 7,
+            "model_fallback": (None, None, None, None, None, None, transcripts.OPUS),
+            "output_saved": (None, "Bash", 90_000, None, None, None, None),
+            "past_ttl": (None,) * 7,
+            "rewind": (None,) * 7,
+        }
+
+    def test_an_events_key_reads_back(self) -> None:
+        assert read_event_key(event_key("cache_miss", 42)) == ("cache_miss", 42)
+        assert [
+            read_event_key(written)
+            for written in ("cache_miss", "cache_miss:0", "Cache:1", "a:1:2", "a:x")
+        ] == [None] * 5
 
     def test_a_hook_that_did_not_fail_is_no_event(
         self, session: DbSession, held: Record

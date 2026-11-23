@@ -33,6 +33,17 @@ A series reads more, each a statement of one fact (`Read`):
 - **the events by bucket**: by the By and the event's kind, their count and
   whether the kind counts as an error.
 
+The lanes read, each a statement of one fact: **the spans**, by the By its
+rows' first and last moment; **the waits**, each row that comes a gap or
+more after the one before it of its value of the By, with that one's moment,
+a window's lag; and **the events**, by the By in time order, each with its
+detail. The items read, by index of the thing they are about: **a part's
+items**, by each item its first and last moment and each figure taken
+together, the earliest first, with the count of all; **a fact's own rows as
+items**, each with the dimensions shown on it; and **a thread's calls and
+its events** over all time, each call saying whether the plan's window and
+scope hold it.
+
 A condition on each item reads its figure over each item's rows of all
 time, its own filters keeping them: on a fact's own rows the row's figure,
 on a part the items whose figure, taken together as it says, passes. The
@@ -49,6 +60,7 @@ it ignores the row.
 
 from __future__ import annotations
 
+import uuid
 from collections.abc import Sequence
 from dataclasses import dataclass, replace
 from datetime import datetime
@@ -73,7 +85,9 @@ from sqlalchemy import (
 )
 from sqlalchemy.dialects.postgresql import ARRAY
 
+from app.dashboard.assembly import EVENT_KIND
 from app.dashboard.catalogue import COUNT, Catalogue, Dimension, Figure, Row
+from app.dashboard.facts import DETAIL
 from app.dashboard.planner import (
     Kept,
     Plan,
@@ -89,7 +103,7 @@ SCANNED = ("sum", COUNT, "max", "mean")
 
 PERCENTILES = {"median": 0.5, "p90": 0.9}
 
-_LENGTH = 24_000
+LENGTH = 24_000
 """The bound of a statement, which carries its fact's source as SQL text,
 some 2,400 characters for the Call fact, and every measure's and filter's
 expressions over it."""
@@ -241,6 +255,16 @@ def described(found: Plan, catalogue: Catalogue) -> list[dict[str, Any]]:
             entry["through"] = dict(statement.through)
         entries.append(entry)
     return entries
+
+
+def read_described(read: Read) -> dict[str, Any]:
+    """One of a presentation's reads as the file of states holds it: its
+    fact, the joins it reads and each dimension it reads through another
+    fact's conversations."""
+    entry: dict[str, Any] = {"fact": read.fact, "joins": list(read.joins)}
+    if read.through:
+        entry["through"] = dict(read.through)
+    return entry
 
 
 class _Builder:
@@ -479,7 +503,7 @@ class _Builder:
             select(*outer)
             .select_from(inner)
             .group_by(func.grouping_sets(*sets))
-            .execution_options(max_statement_length=_LENGTH)
+            .execution_options(max_statement_length=LENGTH)
         )
         return Scan(
             fact=self.row.fact.key,
@@ -559,7 +583,7 @@ class _Builder:
         return Items(
             fact=self.row.fact.key,
             grain=grain,
-            select=statement.execution_options(max_statement_length=_LENGTH),
+            select=statement.execution_options(max_statement_length=LENGTH),
             joins=self.row.taken,
             through=tuple(self.through.items()),
             measures=tuple(answered),
@@ -599,7 +623,7 @@ class _Builder:
             select=select(*outer)
             .select_from(inner)
             .group_by(inner.c.b)
-            .execution_options(max_statement_length=_LENGTH),
+            .execution_options(max_statement_length=LENGTH),
             joins=self.row.taken,
             through=tuple(self.through.items()),
             measures=tuple(marking),
@@ -610,7 +634,7 @@ class _Builder:
     def read(self, statement: Select[Any]) -> Read:
         return Read(
             fact=self.row.fact.key,
-            select=statement.execution_options(max_statement_length=_LENGTH),
+            select=statement.execution_options(max_statement_length=LENGTH),
             joins=self.row.taken,
             through=tuple(self.through.items()),
         )
@@ -746,6 +770,308 @@ class _Builder:
                 func.count().label("n"),
             ).group_by(rows.c.b, rows.c.kind)
         )
+
+    # ------------------------------------------------------------ the lanes'
+
+    def spans(self) -> Read:
+        b = self.by().path(self.row)
+        at = self.row["at"]
+        where = self.scoped()
+        rows = (
+            select(b.label("b"), at.label("at"))
+            .select_from(self.row.source())
+            .where(*where)
+            .subquery("r")
+        )
+        return self.read(
+            select(
+                rows.c.b,
+                func.min(rows.c.at).label("first"),
+                func.max(rows.c.at).label("last"),
+            ).group_by(rows.c.b)
+        )
+
+    def waits(self, least: float) -> Read:
+        b = self.by().path(self.row)
+        at, call = self.row["at"], self.row["call_id"]
+        where = self.scoped()
+        rows = (
+            select(
+                b.label("b"),
+                self.row["transcript_id"].label("transcript_id"),
+                call.label("call_id"),
+                at.label("at"),
+                self.row["past_ttl"].label("past_ttl"),
+                self.row["waited_seconds"].label("waited_seconds"),
+                func.lag(at).over(partition_by=b, order_by=(at, call)).label("since"),
+            )
+            .select_from(self.row.source())
+            .where(*where)
+            .subquery("r")
+        )
+        gap = func.extract("epoch", rows.c.at - rows.c.since)
+        return self.read(
+            select(*rows.c)
+            .where(gap >= least)
+            .order_by(rows.c.b, rows.c.at, rows.c.call_id)
+        )
+
+    def happened(self) -> Read:
+        """The events of the lanes, each with its detail and the cost of
+        the Call it is held on."""
+        b = self.by().path(self.row)
+        columns = [
+            b.label("b"),
+            *(
+                self.row[name].label(name)
+                for name in (
+                    "at",
+                    "kind_code",
+                    "is_error",
+                    "source_id",
+                    "call_id",
+                    "transcript_id",
+                    "cost",
+                    *(column for column, _ in DETAIL),
+                )
+            ),
+        ]
+        where = self.scoped()
+        rows = (
+            select(*columns).select_from(self.row.source()).where(*where).subquery("r")
+        )
+        return self.read(
+            select(*rows.c).order_by(
+                rows.c.b, rows.c.at, rows.c.kind_code, rows.c.source_id
+            )
+        )
+
+    # ------------------------------------------------------------ the items'
+
+    def grouped(
+        self,
+        part: Dimension,
+        figures: Sequence[Figure],
+        also: Sequence[ColumnElement[bool]],
+        most: int | None,
+        keys: Sequence[Value] | None = None,
+    ) -> Read:
+        """By each item of `part` the scope and `also` keep, its first and
+        last moment and each figure taken together as it says, the earliest
+        first, at most `most`, each with the count of all."""
+        item = part.path(self.row)
+        columns: list[ColumnElement[Any]] = [
+            item.label("item"),
+            self.row["at"].label("at"),
+            *(
+                figure.path(self.row).label(f"v{index}")
+                for index, figure in enumerate(figures)
+            ),
+            *self.kinds(figures),
+        ]
+        if part.name is not None:
+            columns.append(part.name(self.row).label("name"))
+        where = [*self.scoped(), *also]
+        if keys is not None:
+            where.append(_among(item, keys))
+        rows = (
+            select(*columns).select_from(self.row.source()).where(*where).subquery("r")
+        )
+        first = func.min(rows.c.at)
+        grouped: list[ColumnElement[Any]] = [
+            rows.c.item,
+            first.label("first"),
+            func.max(rows.c.at).label("last"),
+            *(
+                _within(figure, rows.c[f"v{index}"]).label(f"v{index}")
+                for index, figure in enumerate(figures)
+            ),
+            *(
+                func.sum(rows.c[name]).label(name)
+                for name in rows.c.keys()
+                if name.startswith("k")
+            ),
+            func.count().over().label("total"),
+        ]
+        if "name" in rows.c:
+            grouped.append(func.max(rows.c.name).label("name"))
+        statement = select(*grouped).group_by(rows.c.item).order_by(first, rows.c.item)
+        return self.read(statement if most is None else statement.limit(most))
+
+    def own_key(self) -> list[ColumnElement[Any]]:
+        """The columns a row's key as an item is formed from: its part's,
+        where its fact's row is one; else, on the one fact whose row is no
+        part, the events, its kind and the id of the row that records it."""
+        part = self.row.fact.part
+        if part is not None:
+            return [self.catalogue.dimension(part).path(self.row)]
+        return [self.row["kind_code"], self.row["source_id"]]
+
+    def own(
+        self,
+        figures: Sequence[Figure],
+        shown: Sequence[Dimension],
+        also: Sequence[ColumnElement[bool]],
+        most: int,
+        scoped: bool = True,
+        order: Sequence[ColumnElement[Any]] = (),
+    ) -> Read:
+        """The fact's rows as items, each its own: the columns its key is
+        formed from, its moment, its thread, Session, Turn and Call, its
+        place in its file where it has one, each figure and dimension shown
+        on it, and an event's kind and detail; those the scope and `also`
+        keep, or with `scoped` false those `also` keeps, each then saying
+        whether the window and the scope hold it; in `order`, else the
+        earliest first; at most `most`, each with the count of all."""
+        key = self.own_key()
+        at = self.row["at"]
+        columns: list[ColumnElement[Any]] = [
+            *(column.label(f"key{index}") for index, column in enumerate(key)),
+            at.label("at"),
+            *(
+                self.row[name].label(name)
+                for name in ("transcript_id", "session_id", "turn_seq", "call_id")
+            ),
+            *(
+                figure.path(self.row).label(f"v{index}")
+                for index, figure in enumerate(figures)
+            ),
+            *self.kinds(figures),
+        ]
+        if "position" in self.row.fact.source.c:
+            columns.append(self.row["position"].label("position"))
+        for index, dimension in enumerate(shown):
+            columns.append(dimension.path(self.row).label(f"s{index}"))
+            if dimension.name is not None:
+                columns.append(dimension.name(self.row).label(f"s{index}_name"))
+        if self.row.fact.key in self.catalogue.offered(EVENT_KIND):
+            columns += [
+                self.row[name].label(name)
+                for name in ("kind_code", "is_error", *(column for column, _ in DETAIL))
+            ]
+        where = list(also)
+        if scoped:
+            where = [*self.scoped(), *where]
+        else:
+            columns.append(
+                func.coalesce(and_(*self.scoped()), false()).label("in_scope")
+            )
+        return self.read(
+            select(*columns, func.count().over().label("total"))
+            .select_from(self.row.source())
+            .where(*where)
+            .order_by(*(order or (at, *key)))
+            .limit(most)
+        )
+
+    def thread_events(self, conversation: uuid.UUID) -> Read:
+        """The events of one thread over all time, each with its detail, in
+        time order."""
+        thread = self.row["transcript_id"] == conversation
+        columns = [
+            self.row[name].label(name)
+            for name in (
+                "at",
+                "kind_code",
+                "is_error",
+                "source_id",
+                "call_id",
+                *(column for column, _ in DETAIL),
+            )
+        ]
+        return self.read(
+            select(*columns)
+            .select_from(self.row.source())
+            .where(thread)
+            .order_by(self.row["at"], self.row["kind_code"], self.row["source_id"])
+        )
+
+    def kinds(self, figures: Sequence[Figure]) -> list[ColumnElement[Any]]:
+        """Each figure's split by the token kinds, where it has one."""
+        return [
+            path(self.row).label(f"k{index}_{kind}")
+            for index, figure in enumerate(figures)
+            if figure.kinds is not None
+            for kind, path in figure.kinds.items()
+        ]
+
+
+def spans(found: Plan, catalogue: Catalogue, fact: str) -> Read:
+    """By the By, the first and last moment of its rows of `fact` that the
+    plan reads."""
+    return _Builder(found, catalogue, fact).spans()
+
+
+def waits(found: Plan, catalogue: Catalogue, fact: str, least: float) -> Read:
+    """The rows of `fact` the plan reads that come `least` seconds or more
+    after the one before them of their value of the By, each with that
+    one's moment, by the By and in time order."""
+    return _Builder(found, catalogue, fact).waits(least)
+
+
+def grouped(
+    found: Plan,
+    catalogue: Catalogue,
+    fact: str,
+    part: Dimension,
+    figures: Sequence[Figure],
+    most: int | None,
+    keys: Sequence[Value] | None = None,
+) -> Read:
+    """By each item of `part` the plan reads of `fact`, or of those among
+    `keys`, its first and last moment and each of `figures` taken together
+    as it says, the earliest first, at most `most`."""
+    return _Builder(found, catalogue, fact).grouped(part, figures, (), most, keys)
+
+
+def own(
+    found: Plan,
+    catalogue: Catalogue,
+    fact: str,
+    figures: Sequence[Figure],
+    shown: Sequence[Dimension],
+    most: int,
+) -> Read:
+    """The rows of `fact` the plan reads, each an item of its own, the
+    earliest first, at most `most`."""
+    return _Builder(found, catalogue, fact).own(figures, shown, (), most)
+
+
+def thread(
+    found: Plan,
+    catalogue: Catalogue,
+    fact: str,
+    figures: Sequence[Figure],
+    shown: Sequence[Dimension],
+    conversation: uuid.UUID,
+    most: int,
+) -> Read:
+    """The rows of `fact` of one thread over all time with no chips, each
+    an item of its own saying whether the plan's window and scope hold it,
+    in their file's order, at most `most`."""
+    builder = _Builder(replace(found, rows=None), catalogue, fact)
+    return builder.own(
+        figures,
+        shown,
+        [builder.row["transcript_id"] == conversation],
+        most,
+        scoped=False,
+        order=[builder.row["position"], builder.row["call_id"]],
+    )
+
+
+def thread_events(found: Plan, catalogue: Catalogue, conversation: uuid.UUID) -> Read:
+    """The events of one thread over all time, on the first fact that has
+    their kind, in time order."""
+    fact = catalogue.offered(EVENT_KIND)[0]
+    return _Builder(found, catalogue, fact).thread_events(conversation)
+
+
+def happened(found: Plan, catalogue: Catalogue) -> Read:
+    """The events the plan reads, of the first fact that has their kind, by
+    the By and in time order."""
+    fact = catalogue.offered(EVENT_KIND)[0]
+    return _Builder(found, catalogue, fact).happened()
 
 
 def bucketed(found: Plan, catalogue: Catalogue, planned: Planned, most: int) -> Read:

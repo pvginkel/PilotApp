@@ -70,7 +70,7 @@ from app.dashboard.rows import (
     ran,
 )
 from app.dashboard.state import Roll, Sort, Value, measure_key
-from app.dashboard.statements import Read
+from app.dashboard.statements import Read, read_described
 from app.dashboard.strip import strip_read
 
 DOTS = 4_000
@@ -536,7 +536,9 @@ def described(view: View, now: datetime) -> dict[str, Any] | None:
             dots.append(
                 {
                     "measure": measure_key(measured.measure),
-                    **_read(statement.bucketed(found, catalogue, measured, DOTS + 1)),
+                    **read_described(
+                        statement.bucketed(found, catalogue, measured, DOTS + 1)
+                    ),
                     "items": measured.grain,
                 }
             )
@@ -558,7 +560,9 @@ def described(view: View, now: datetime) -> dict[str, Any] | None:
         [
             {
                 "kind": marker.key,
-                **_read(statement.sightings(found, catalogue, marker.dimension)),
+                **read_described(
+                    statement.sightings(found, catalogue, marker.dimension)
+                ),
             }
             for marker in catalogue.markers
             if catalogue.offered(marker.dimension)
@@ -567,12 +571,5 @@ def described(view: View, now: datetime) -> dict[str, Any] | None:
         else None
     )
     counted = strip_read(found, catalogue)
-    entry["events"] = counted if isinstance(counted, str) else _read(counted)
-    return entry
-
-
-def _read(read: Read) -> dict[str, Any]:
-    entry: dict[str, Any] = {"fact": read.fact, "joins": list(read.joins)}
-    if read.through:
-        entry["through"] = dict(read.through)
+    entry["events"] = counted if isinstance(counted, str) else read_described(counted)
     return entry

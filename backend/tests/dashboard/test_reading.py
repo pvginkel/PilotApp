@@ -774,8 +774,13 @@ class TestDrawer:
             Selected(uuid.UUID(PROJECT))
         )
 
-    def test_an_item_of_a_facts_own_grain_is_its_text(self, reads: Reads) -> None:
-        assert _state(reads, "it=event,a%2Cb").item == Item("event", "a,b")
+    def test_an_event_is_an_item_by_its_kind_and_the_id_of_its_row(
+        self, reads: Reads
+    ) -> None:
+        state = _state(reads, "it=event,cache_miss%3A42")
+
+        assert state.item == Item("event", "cache_miss:42")
+        assert write(state).endswith("&it=event,cache_miss%3A42")
 
     @pytest.mark.parametrize(
         ("written", "fault"),
@@ -788,6 +793,21 @@ class TestDrawer:
                 "project, psession, pturn, sitting, conversation, call or event.",
             ),
             ("it=conversation", "- it=conversation: an item reads <grain>,<its key>."),
+            (
+                "it=event,a%2Cb",
+                "- it=event,a%2Cb: \"a,b\" is no event's key. An event's key reads "
+                "<kind>:<id>, the id of the row that records it.",
+            ),
+            (
+                "it=event,cache_miss%3A0",
+                '- it=event,cache_miss%3A0: "cache_miss:0" is no event\'s key. An '
+                "event's key reads <kind>:<id>, the id of the row that records it.",
+            ),
+            (
+                "it=event,cache_mis%3A42",
+                '- it=event,cache_mis%3A42: "cache_mis" is no kind of event. Did you '
+                'mean "cache_miss"? The catalogue\'s event_kind lists the kinds.',
+            ),
             (
                 "it=pturn,3&call=7",
                 "- call=7: a call is selected in the reader, which a conversation's "

@@ -4,6 +4,8 @@
     "An entry that reads has its normal form, the state after #dash/ in the address the server answers, its look-only parts as that form writes them, and its notes where it has any, one per part dropped.",
     "It has the query it means too, the planner's: its time, a range by its key as written, else its spans as instants in UTC, each end exclusive; its By, color and focus; its scope, each drill level, each chip on a dimension's values and each condition on each item as a chip writes it, a quick filter that is on as its chip; each measure with its fact and the part its items are, or why it is refused and what stands in for it, a ratio with its two; its statements, a grouped scan per fact, a statement per fact and grain over a part's items and, where a chip marks, a statement of the marked rows per fact, each with its groupings, the joins it reads and each dimension or item condition it reads through another fact's conversations; its marks, the marked chips with no mark; each threshold on the By's rows with what it keeps or marks and its measure; and whether the outlier rows' chip keeps or marks.",
     "A state in order or over time has its series in its query too: the dimension it asks, the band's length, each panel's drawing and what its band rolls over, the statements of its rows by that dimension, those of its dots, its markers' kinds, each with the fact it reads, none on a time whose values come round again, and its events strip's statement, or why the events lack that dimension.",
+    "A state in lanes has its lanes in its query too: the fact a lane's rows are, the gap from which one is a wait, and the read of each lane's span, of its waits and of its events, each with the fact it reads.",
+    "A state that names the row selected, the items' grain or an opened item has its items in its query too: their grain, the row selected and the item opened as written, and the read of their rows, an opened event's Call aside, which the record gives; and where the opened item is a conversation, the read of its calls.",
     "An entry with a fault has the refusal's exact text, a line an item.",
     "The backend's suite reads every entry through GET /api/dashboard/address's service (tests/dashboard/test_states.py), on the suite's database, whose quota weeks start on 2 January 2025."
   ],
@@ -665,7 +667,23 @@
             ],
             "joins": []
           }
-        ]
+        ],
+        "lanes": {
+          "fact": "call",
+          "wait_seconds": 60.0,
+          "spans": {
+            "fact": "call",
+            "joins": []
+          },
+          "waits": {
+            "fact": "call",
+            "joins": []
+          },
+          "events": {
+            "fact": "event",
+            "joins": []
+          }
+        }
       }
     },
     {
@@ -1297,7 +1315,23 @@
               "project"
             ]
           }
-        ]
+        ],
+        "items": {
+          "grain": "call",
+          "selected": "5b0e6a4c-2f4a-4d7e-9b1e-0c3f0c7c1a2b",
+          "opened": "conversation,5b0e6a4c-2f4a-4d7e-9b1e-0c3f0c7c1a2b",
+          "fact": "call",
+          "joins": [
+            "session",
+            "thread",
+            "main",
+            "project"
+          ],
+          "calls": {
+            "fact": "call",
+            "joins": []
+          }
+        }
       }
     },
     {
@@ -2113,6 +2147,182 @@
         "- c=effort:%zz: \"%zz\" holds a \"%\" that encodes no character. A value's reserved characters are percent-encoded, as in %2C for a comma.",
         "A chip reads c=[~][!]<dimension>:<value>,…, c=[~]@rows,<op>,<number>,<measure>, c=[~][!]@items,<op>,<number>,<measure> or c=[~]@outliers, as in c=miss:1 or c=@items,gt,1,cost.sum."
       ]
+    },
+    {
+      "about": "An event opened in the drawer, by its kind and the id of the row that records it",
+      "state": "d=items&it=event,cache_miss%3A42",
+      "normal": "t=qw&by=project&m=cost.sum&col=none&d=items&it=event,cache_miss%3A42",
+      "look": [
+        "d=items"
+      ],
+      "query": {
+        "time": "qw",
+        "by": "project",
+        "color": null,
+        "scope": [],
+        "measures": [
+          {
+            "measure": "cost.sum",
+            "fact": "call"
+          }
+        ],
+        "statements": [
+          {
+            "fact": "call",
+            "grouping": [
+              [
+                "project"
+              ],
+              []
+            ],
+            "joins": [
+              "session",
+              "thread",
+              "main",
+              "project"
+            ]
+          }
+        ],
+        "items": {
+          "grain": "call",
+          "selected": null,
+          "opened": "event,cache_miss%3A42",
+          "fact": "call",
+          "joins": []
+        }
+      }
+    },
+    {
+      "about": "An event's key of another form",
+      "state": "it=event,a%2Cb",
+      "refusal": [
+        "Cannot read the view because its state has 1 fault.",
+        "- it=event,a%2Cb: \"a,b\" is no event's key. An event's key reads <kind>:<id>, the id of the row that records it.",
+        "An item reads it=<grain>,<its key>, as in it=conversation,<id>."
+      ]
+    },
+    {
+      "about": "The items of the row with none, at a grain whose items carry another fact's figures",
+      "state": "sel=~&ig=pturn",
+      "normal": "t=qw&by=project&m=cost.sum&col=none&sel=~&ig=pturn",
+      "look": [],
+      "query": {
+        "time": "qw",
+        "by": "project",
+        "color": null,
+        "scope": [],
+        "measures": [
+          {
+            "measure": "cost.sum",
+            "fact": "call"
+          }
+        ],
+        "statements": [
+          {
+            "fact": "call",
+            "grouping": [
+              [
+                "project"
+              ],
+              []
+            ],
+            "joins": [
+              "session",
+              "thread",
+              "main",
+              "project"
+            ]
+          }
+        ],
+        "items": {
+          "grain": "pturn",
+          "selected": "~",
+          "opened": null,
+          "fact": "call",
+          "joins": [
+            "turn",
+            "session",
+            "thread",
+            "main",
+            "project"
+          ]
+        }
+      }
+    },
+    {
+      "about": "Lanes under a threshold on the By's rows",
+      "state": "by=project&p=lanes&c=@rows,gt,1,cost.sum",
+      "normal": "t=qw&by=project&p=lanes&m=cost.sum&c=@rows,gt,1,cost.sum&col=none",
+      "look": [],
+      "query": {
+        "time": "qw",
+        "by": "project",
+        "color": null,
+        "scope": [],
+        "measures": [
+          {
+            "measure": "cost.sum",
+            "fact": "call"
+          }
+        ],
+        "statements": [
+          {
+            "fact": "call",
+            "grouping": [
+              [
+                "project"
+              ],
+              []
+            ],
+            "joins": [
+              "session",
+              "thread",
+              "main",
+              "project"
+            ]
+          }
+        ],
+        "thresholds": [
+          {
+            "keeps": "gt,1",
+            "measure": {
+              "measure": "cost.sum",
+              "fact": "call"
+            }
+          }
+        ],
+        "lanes": {
+          "fact": "call",
+          "wait_seconds": 60.0,
+          "spans": {
+            "fact": "call",
+            "joins": [
+              "session",
+              "thread",
+              "main",
+              "project"
+            ]
+          },
+          "waits": {
+            "fact": "call",
+            "joins": [
+              "session",
+              "thread",
+              "main",
+              "project"
+            ]
+          },
+          "events": {
+            "fact": "event",
+            "joins": [
+              "session",
+              "thread",
+              "main",
+              "project"
+            ]
+          }
+        }
+      }
     }
   ]
 }

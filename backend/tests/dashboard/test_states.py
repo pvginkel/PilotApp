@@ -1,8 +1,9 @@
 """The file of states (F154.2): every state it holds as written, read
 through the address's service, gives its normal form, its look-only parts,
 its notes and the query it means, the planner's with its series' where it is
-in order or over time, or the refusal's exact text. The file is read
-whole."""
+in order or over time, its lanes' where it is in lanes and its items' where
+it names the row selected, the items' grain or an opened item, or the
+refusal's exact text. The file is read whole."""
 
 import json
 from datetime import UTC, datetime
@@ -11,7 +12,7 @@ from typing import Any
 
 import pytest
 
-from app.dashboard import planner, series, statements
+from app.dashboard import items, lanes, planner, series, statements
 from app.dashboard.address import AddressService, View
 from app.exceptions import StateRefusedException
 from app.services.container import ServiceContainer
@@ -71,12 +72,18 @@ def test_an_entry(service: AddressService, entry: dict[str, Any]) -> None:
 
 def _query(view: View) -> dict[str, Any]:
     """The query a state means: the planner's, with its series' where it is
-    in order or over time."""
+    in order or over time, its lanes' where it is in lanes, and its items'
+    where it names them."""
     planned = planner.plan(view.address.state, view.catalogue, view.weeks, NOW)
     query = planner.described(planned, statements.described(planned, view.catalogue))
-    shown = series.described(view, NOW)
-    if shown is not None:
-        query["series"] = shown
+    for key, described in (
+        ("series", series.described),
+        ("lanes", lanes.described),
+        ("items", items.described),
+    ):
+        shown = described(view, NOW)
+        if shown is not None:
+            query[key] = shown
     return query
 
 

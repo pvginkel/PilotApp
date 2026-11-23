@@ -1,9 +1,11 @@
 """/api/dashboard/catalogue, what a view of the dashboard may name, a part
 at a call (F154.4), with what the dashboard stores (F155);
 /api/dashboard/address, a view's state checked and written back in its
-normal form (F159); /api/dashboard/rows, a view's rows (F154.1); and
+normal form (F159); /api/dashboard/rows, a view's rows (F154.1);
 /api/dashboard/series and /api/dashboard/series/events, a view's series and
-its events strip (F163.3, F164.6)."""
+its events strip (F163.3, F164.6); /api/dashboard/lanes, a view's lanes
+(F164.6); and /api/dashboard/items and a conversation's calls, a view's
+items (F165)."""
 
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -898,4 +900,361 @@ class TestGetSeriesEvents:
     ) -> None:
         assert (
             oidc_client.get(EVENTS, query_string={"state": "p=time"}).status_code == 401
+        )
+
+
+LANES = "/api/dashboard/lanes"
+ITEMS = "/api/dashboard/items"
+
+
+def _calls_path(thread: object) -> str:
+    return f"/api/dashboard/conversations/{thread}/calls"
+
+
+def _busy(
+    client: FlaskClient,
+    container: ServiceContainer,
+    session: DbSession,
+    path: str,
+    state: str,
+) -> Any:
+    """The answer to a read while the engine's one slot is held."""
+    bounds = Bounds(timeout_seconds=0.2, at_once=1, pool=5)
+    bind = session.get_bind()
+    assert not isinstance(bind, Engine)
+    other = DbSession(bind=bind.engine)
+    try:
+        with (
+            container.dashboard_bounds.override(providers.Object(bounds)),
+            bounds.read(other),
+        ):
+            return client.get(path, query_string={"state": state})
+    finally:
+        other.close()
+
+
+class TestGetLanes:
+    def test_it_answers_each_lane_its_waits_and_its_events(
+        self, client: FlaskClient, worked: Record
+    ) -> None:
+        response = client.get(LANES, query_string={"state": "t=all&p=lanes&z=1,2"})
+
+        assert response.status_code == 200
+        body = response.get_json()
+        assert body["address"] == (
+            "#dash/t=all&by=project&p=lanes&m=cost.sum&col=none&z=1,2"
+        )
+        assert (body["look"], body["notes"]) == (["z=1,2"], [])
+        assert body["by"] == {"key": "project", "label": "Project", "group": "part"}
+        assert (body["total_lanes"], body["wait_seconds"], body["resolution"]) == (
+            2,
+            60.0,
+            None,
+        )
+        assert (body["starts_at"], body["ends_at"]) == (
+            "2026-11-12T09:31:00Z",
+            "2026-11-13T09:30:00Z",
+        )
+        assert body["weeks"] == ["2026-11-12T10:00:00Z"]
+        assert body["kinds"][0] == {
+            "key": "api_error",
+            "label": "api_error",
+            "is_error": True,
+            "total": 1,
+        }
+        lane = body["lanes"][0]
+        assert (lane["key"], lane["label"], lane["values"]) == (
+            str(worked.project.id),
+            "Recipe box",
+            [2.6],
+        )
+        assert (lane["starts_at"], lane["ends_at"]) == (
+            "2026-11-12T09:31:00Z",
+            "2026-11-12T11:33:00Z",
+        )
+        assert lane["waits"][0] == {
+            "starts_at": "2026-11-12T09:31:00Z",
+            "ends_at": "2026-11-12T09:32:00Z",
+            "conversation": str(worked.thread.id),
+            "call": worked.calls[1].id,
+            "past_ttl": False,
+            "n": 1,
+        }
+        error = lane["events"][0]
+        assert error == {
+            "at": "2026-11-12T09:31:30Z",
+            "kind": "api_error",
+            "is_error": True,
+            "key": error["key"],
+            "conversation": str(worked.thread.id),
+            "call": worked.calls[0].id,
+            "cost": 0.5,
+            "detail": {
+                "qualifier": "529",
+                "tool": None,
+                "characters": None,
+                "denial": None,
+                "command": None,
+                "trigger": None,
+                "model": None,
+            },
+            "n": 1,
+        }
+        assert error["key"].startswith("api_error:")
+
+    def test_a_view_not_in_lanes_is_refused_with_its_text(
+        self, client: FlaskClient
+    ) -> None:
+        response = client.get(LANES, query_string={"state": "p=table"})
+
+        assert response.status_code == 400
+        body = response.get_json()
+        assert body["code"] == "STATE_REFUSED"
+        assert body["error"].splitlines()[1] == (
+            "- p=table: the view draws a table, and only a view in lanes has lanes. "
+            "Lanes take p=lanes, with a By that is a part."
+        )
+
+    def test_lanes_past_the_engines_bounds_are_refused_with_why(
+        self,
+        client: FlaskClient,
+        container: ServiceContainer,
+        session: DbSession,
+        worked: Record,
+    ) -> None:
+        response = _busy(client, container, session, LANES, "p=lanes")
+
+        assert response.status_code == 409
+        assert response.get_json()["code"] == "QUERY_BUSY"
+
+    def test_no_state_is_refused(self, client: FlaskClient) -> None:
+        assert client.get(LANES).status_code == 400
+
+    def test_without_editor_it_is_refused(self, client: FlaskClient) -> None:
+        client.post(
+            "/api/testing/auth/session", json={"subject": "someone", "roles": []}
+        )
+
+        assert client.get(LANES, query_string={"state": "p=lanes"}).status_code == 403
+
+    def test_without_a_token_it_is_unauthenticated(
+        self, oidc_client: FlaskClient
+    ) -> None:
+        assert (
+            oidc_client.get(LANES, query_string={"state": "p=lanes"}).status_code == 401
+        )
+
+
+class TestGetItems:
+    def test_it_answers_the_items_of_the_row_selected_with_their_columns(
+        self, client: FlaskClient, worked: Record
+    ) -> None:
+        response = client.get(
+            ITEMS,
+            query_string={
+                "state": f"t=all&d=items&sel={worked.project.id}&ig=conversation"
+            },
+        )
+
+        assert response.status_code == 200
+        body = response.get_json()
+        assert body["address"] == (
+            "#dash/t=all&by=project&m=cost.sum&col=none&d=items"
+            f"&sel={worked.project.id}&ig=conversation"
+        )
+        assert body["look"] == ["d=items"]
+        assert body["grain"]["key"] == "conversation"
+        assert body["by"] == {"key": "project", "label": "Project", "group": "part"}
+        assert body["selected"] == {"key": str(worked.project.id)}
+        assert body["opened"] is None
+        assert body["figures"][2] == {
+            "key": "tokens",
+            "label": "Tokens",
+            "format": "tokens",
+            "kinds": ["input", "cache_write", "cache_read", "output"],
+        }
+        assert body["shows"] == []
+        assert body["total"] == 3
+        assert body["items"][0] == {
+            "key": str(worked.thread.id),
+            "label": None,
+            "first": "2026-11-12T09:31:00Z",
+            "last": "2026-11-12T09:33:00Z",
+            "values": [3.0, 1.75, 166_488.0, 1.0, 1.0, 52_626.0],
+            "kinds": [
+                None,
+                None,
+                [3_612.0, 9_930.0, 144_336.0, 8_610.0],
+                None,
+                None,
+                None,
+            ],
+            "shown": [],
+            "focus": False,
+            "conversation": None,
+            "session": None,
+            "turn_seq": None,
+            "call": None,
+            "detail": None,
+        }
+
+    def test_a_call_carries_what_it_shows_and_an_event_its_detail(
+        self, client: FlaskClient, worked: Record
+    ) -> None:
+        calls = client.get(ITEMS, query_string={"state": "t=all&ig=call"}).get_json()
+        events = client.get(ITEMS, query_string={"state": "t=all&ig=event"}).get_json()
+
+        assert [dimension["key"] for dimension in calls["shows"]][:2] == [
+            "model",
+            "effort",
+        ]
+        first = calls["items"][0]
+        assert (first["key"], first["call"], first["session"], first["turn_seq"]) == (
+            worked.calls[0].id,
+            worked.calls[0].id,
+            str(worked.work.id),
+            1,
+        )
+        assert first["shown"][:2] == [
+            {"key": OPUS, "label": OPUS},
+            {"key": "high", "label": None},
+        ]
+        assert events["items"][0]["detail"]["qualifier"] == "529"
+        assert events["items"][0]["shown"] == [
+            {"key": "api_error", "label": "api_error"},
+            {"key": 1, "label": "Error"},
+        ]
+
+    def test_a_state_with_faults_is_refused_with_its_text(
+        self, client: FlaskClient
+    ) -> None:
+        response = client.get(ITEMS, query_string={"state": "it=event,a%2Cb"})
+
+        assert response.status_code == 400
+        assert response.get_json()["code"] == "STATE_REFUSED"
+
+    def test_items_past_the_engines_bounds_are_refused_with_why(
+        self,
+        client: FlaskClient,
+        container: ServiceContainer,
+        session: DbSession,
+        worked: Record,
+    ) -> None:
+        response = _busy(client, container, session, ITEMS, "ig=call")
+
+        assert response.status_code == 409
+        assert response.get_json()["code"] == "QUERY_BUSY"
+
+    def test_no_state_is_refused(self, client: FlaskClient) -> None:
+        assert client.get(ITEMS).status_code == 400
+
+    def test_without_editor_it_is_refused(self, client: FlaskClient) -> None:
+        client.post(
+            "/api/testing/auth/session", json={"subject": "someone", "roles": []}
+        )
+
+        assert client.get(ITEMS, query_string={"state": "t=qw"}).status_code == 403
+
+    def test_without_a_token_it_is_unauthenticated(
+        self, oidc_client: FlaskClient
+    ) -> None:
+        assert oidc_client.get(ITEMS, query_string={"state": "t=qw"}).status_code == 401
+
+
+class TestGetConversationCalls:
+    def test_it_answers_every_call_with_its_events_and_whether_the_view_holds_it(
+        self, client: FlaskClient, worked: Record
+    ) -> None:
+        response = client.get(
+            _calls_path(worked.thread.id), query_string={"state": "t=all&c=miss:1"}
+        )
+
+        assert response.status_code == 200
+        body = response.get_json()
+        assert body["address"] == "#dash/t=all&by=project&m=cost.sum&c=miss:1&col=none"
+        assert body["conversation"] == str(worked.thread.id)
+        assert body["total"] == 3
+        assert [call["position"] for call in body["calls"]] == [1, 2, 3]
+        assert [call["in_scope"] for call in body["calls"]] == [False, False, True]
+        second = body["calls"][1]
+        # waited, took
+        assert second["values"][3:] == [30.0, 30.0]
+        assert second["kinds"][1] == [1_204.0, 3_310.0, 48_112.0, 2_870.0]
+        assert [event["kind"] for event in second["events"]] == [
+            "denied",
+            "max_tokens",
+            "model_fallback",
+            "past_ttl",
+            "rewind",
+        ]
+        fallback = second["events"][2]
+        assert (fallback["label"], fallback["is_error"], fallback["at"]) == (
+            "Model fallback",
+            True,
+            "2026-11-12T09:32:00Z",
+        )
+        assert fallback["detail"]["model"] == OPUS
+        assert fallback["key"] == f"model_fallback:{worked.calls[1].id}"
+
+    @pytest.mark.usefixtures("worked")
+    def test_a_thread_the_record_does_not_hold_is_not_found(
+        self, client: FlaskClient
+    ) -> None:
+        response = client.get(
+            _calls_path("0b5e3c1a-7d42-4f6e-9a18-2c4d6e8f0a1b"),
+            query_string={"state": "t=all"},
+        )
+
+        assert response.status_code == 404
+        assert response.get_json()["code"] == "RECORD_NOT_FOUND"
+
+    def test_a_state_with_faults_is_refused_with_its_text(
+        self, client: FlaskClient, worked: Record
+    ) -> None:
+        response = client.get(
+            _calls_path(worked.thread.id), query_string={"state": "t=never"}
+        )
+
+        assert response.status_code == 400
+        assert response.get_json()["code"] == "STATE_REFUSED"
+
+    def test_calls_past_the_engines_bounds_are_refused_with_why(
+        self,
+        client: FlaskClient,
+        container: ServiceContainer,
+        session: DbSession,
+        worked: Record,
+    ) -> None:
+        response = _busy(
+            client, container, session, _calls_path(worked.thread.id), "t=all"
+        )
+
+        assert response.status_code == 409
+        assert response.get_json()["code"] == "QUERY_BUSY"
+
+    def test_no_state_is_refused(self, client: FlaskClient, worked: Record) -> None:
+        assert client.get(_calls_path(worked.thread.id)).status_code == 400
+
+    def test_without_editor_it_is_refused(
+        self, client: FlaskClient, worked: Record
+    ) -> None:
+        client.post(
+            "/api/testing/auth/session", json={"subject": "someone", "roles": []}
+        )
+
+        assert (
+            client.get(
+                _calls_path(worked.thread.id), query_string={"state": "t=all"}
+            ).status_code
+            == 403
+        )
+
+    def test_without_a_token_it_is_unauthenticated(
+        self, oidc_client: FlaskClient, worked: Record
+    ) -> None:
+        assert (
+            oidc_client.get(
+                _calls_path(worked.thread.id), query_string={"state": "t=all"}
+            ).status_code
+            == 401
         )

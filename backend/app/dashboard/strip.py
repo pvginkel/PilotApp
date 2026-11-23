@@ -122,12 +122,7 @@ class StripService:
             if row.error:
                 errors.add(row.kind)
             held.setdefault(row.b, {})[row.kind] = row.n
-        kinds = tuple(
-            SeenKind(kind, names.get(kind, kind), kind in errors, totals[kind])
-            for kind in sorted(
-                totals, key=lambda kind: (kind not in errors, -totals[kind], kind)
-            )
-        )
+        kinds = seen_kinds(totals, errors, names)
         return Strip(
             address=view.address,
             zone=catalogue.zone,
@@ -143,6 +138,19 @@ class StripService:
                 for key in sorted(held, key=_order)
             ),
         )
+
+
+def seen_kinds(
+    totals: dict[str, int], errors: set[str], names: dict[str, str]
+) -> tuple[SeenKind, ...]:
+    """The kinds held, each with its count: the errors first, then the
+    rest, each group by its count, the largest first."""
+    return tuple(
+        SeenKind(kind, names.get(kind, kind), kind in errors, totals[kind])
+        for kind in sorted(
+            totals, key=lambda kind: (kind not in errors, -totals[kind], kind)
+        )
+    )
 
 
 def _order(value: Value) -> tuple[bool, str]:

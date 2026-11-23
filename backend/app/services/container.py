@@ -11,6 +11,8 @@ from app.config import Settings
 from app.dashboard.address import AddressService
 from app.dashboard.assembly import CatalogueService
 from app.dashboard.bounds import Bounds
+from app.dashboard.items import ItemsService
+from app.dashboard.lanes import LanesService
 from app.dashboard.rows import RowsService
 from app.dashboard.series import SeriesService
 from app.dashboard.strip import StripService
@@ -645,6 +647,19 @@ class ServiceContainer(containers.DeclarativeContainer):
     )
     strip_service = providers.Factory(
         StripService,
+        db=db_session,
+        address_service=address_service,
+        bounds=dashboard_bounds,
+    )
+    # A view's lanes, its items and a conversation's calls (F164.6, F165)
+    lanes_service = providers.Factory(
+        LanesService,
+        db=db_session,
+        address_service=address_service,
+        bounds=dashboard_bounds,
+    )
+    items_service = providers.Factory(
+        ItemsService,
         db=db_session,
         address_service=address_service,
         bounds=dashboard_bounds,

@@ -329,7 +329,7 @@ class Shaper:
                     split=line.split,
                     marks=line.marks,
                     key=key,
-                    label=_label(by, key, taken.name),
+                    label=value_label(by, key, taken.name),
                     focus=taken.focus,
                     marked=marked,
                 )
@@ -469,7 +469,9 @@ class Shaper:
             kept, rest = ordered, []
         values = [
             ColorValue(
-                value, _label(dimension, value, self.names.get(value)), amounts[value]
+                value,
+                value_label(dimension, value, self.names.get(value)),
+                amounts[value],
             )
             for value in kept
         ]
@@ -632,7 +634,7 @@ class Shaper:
         )
 
 
-def _label(dimension: Dimension, key: Value, name: str | None) -> str | None:
+def value_label(dimension: Dimension, key: Value, name: str | None) -> str | None:
     """A value's label: its closed list's name, its name in the record, or
     the dimension's label of none; none where the key is its own."""
     if key is None:
