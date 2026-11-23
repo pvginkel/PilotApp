@@ -146,8 +146,9 @@ its newline is written. The facts are read off the lines in the file's order:
     for a `PreToolUse` hook's block of that tool, whatever its line names;
     else by the `toolDenialKind` its result's line names, from 2.1.201: a
     permission rule, `rule`, for `permission-rule`, the person, `person`,
-    for `user-rejected`. A `toolDenialKind` of `interrupted` is no denial:
-    the person interrupted the call.
+    for `user-rejected`, and any other in Claude Code's own word. A
+    `toolDenialKind` of `interrupted` is no denial: the person interrupted
+    the call.
 - **A Hook Run** is a hook command a Stop hook's summary names, a main
   thread's `system` line of subtype `stop_hook_summary` (2.1.250 on), on
   the latest Prompt before it, with the command's duration. It failed where
@@ -350,7 +351,7 @@ _STOP = "Stop"
 
 _DENIALS = {"permission-rule": "rule", "user-rejected": "person"}
 """The Denial Kind of a tool call by the `toolDenialKind` its result's line
-names."""
+names, where the collector has a word of its own for it."""
 
 _HOOK = "hook"
 """The Denial Kind of a tool call a hook blocked."""
@@ -631,10 +632,14 @@ def _denial(tool: str, said: str, denied: str | None) -> str | None:
     """The Denial Kind of a call of `tool` whose result is an error saying
     `said`, its line naming `denied` as its `toolDenialKind`: a hook's where
     the result opens in Claude Code's words for a hook's block of the tool,
-    whatever its line names; none where the line names no kind of denial."""
+    whatever its line names; else the kind its line names, in Claude Code's
+    own word where the collector has none; none where the line names no kind
+    of denial, or the person's interruption."""
     if said.startswith(f"PreToolUse:{tool} hook error:"):
         return _HOOK
-    return None if denied is None else _DENIALS.get(denied)
+    if denied is None or denied == _STOPPED:
+        return None
+    return _DENIALS.get(denied, denied)
 
 
 def _prompt(prompt: Prompted) -> dict[str, Any]:

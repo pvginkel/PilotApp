@@ -3715,6 +3715,13 @@ class TestDenials:
             for kind in ("permission-rule", "user-rejected")
         ] == ["rule", "person"]
 
+    def test_a_kind_the_collector_has_no_word_for_is_published_in_claude_codes(
+        self, tmp_path: Path
+    ) -> None:
+        said = "Permission to use Bash has been denied."
+
+        assert _denied(tmp_path, said, "classifier").denial_kind == "classifier"
+
     def test_an_older_denial_names_no_kind(self, tmp_path: Path) -> None:
         """Before 2.1.201 the words do not say who denied the call."""
         said = "The user doesn't want to proceed with this tool use."

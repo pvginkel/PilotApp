@@ -293,8 +293,8 @@ each rule in full. The facts are read off the lines in the file's order:
   - `denial_kind` is read where the result is an error and Claude Code says by what: `hook` where
     it opens `PreToolUse:<the call's tool> hook error:`, whatever its line names; else by the
     `toolDenialKind` its line names, `rule` for `permission-rule` and `person` for
-    `user-rejected`. An `interrupted` is no denial, and a result that only quotes the hook's words
-    is none.
+    `user-rejected`, and any other in Claude Code's own word, Pilot adding a code it has not met.
+    An `interrupted` is no denial, and a result that only quotes the hook's words is none.
   - `saved_characters` is read where the result opens in one of Claude Code's two wordings for an
     output saved to disk, never where it only quotes them. The first is `<persisted-output>` followed
     by "Output too large (<size>). Full output saved to: <path>". The second is "Error: result (N
