@@ -449,16 +449,19 @@ def _main_id(row: Row) -> ColumnElement[Any]:
 
 def version_joins(component: Component) -> tuple[Join, Join]:
     """The joins from a row's Launch to the version of `component` it ran
-    with, one at most (DB 541): its Launch Component, then the version."""
-    used = LaunchComponent.__table__.alias(f"used_{component.code}")
-    version = ComponentVersion.__table__.alias(version_join(component.code))
+    with, one at most (DB 541): its Launch Component, then the version. The
+    joins hold the Component's code, never the row, which the session that
+    read it lets go while the process keeps the catalogue."""
+    code = component.code
+    used = LaunchComponent.__table__.alias(f"used_{code}")
+    version = ComponentVersion.__table__.alias(version_join(code))
     return (
         Join(
             used.name,
             used,
             lambda row: and_(
                 used.c.launch_id == row["launch_id"],
-                used.c.component_code == component.code,
+                used.c.component_code == code,
             ),
         ),
         Join(

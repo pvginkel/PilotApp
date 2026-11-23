@@ -430,6 +430,23 @@ class TestVersions:
             (None, None),
         ]
 
+    def test_a_version_reads_once_the_session_lets_its_components_go(
+        self, session: DbSession, held: Record
+    ) -> None:
+        index = catalogue(session)
+        # As the app's session leaves the Components its assembly read once
+        # it commits and closes, while the process keeps the catalogue.
+        session.expire_all()
+        session.expunge_all()
+
+        assert read(
+            session,
+            index,
+            "call",
+            *named(index, "claude_code_version"),
+            by=lambda row: row["at"],
+        )[0] == ("2.1.317",)
+
     def test_a_components_key_is_its_code_in_a_states_letters(self) -> None:
         components = [
             Component(code=code, name=code)

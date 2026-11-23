@@ -494,13 +494,16 @@ def version_keys(components: Sequence[Component]) -> dict[str, str]:
 
 
 def version_dimension(component: Component, key: str) -> Dimension:
-    """The version of `component` a row's Launch ran with (DB 541)."""
+    """The version of `component` a row's Launch ran with (DB 541). Its path
+    holds the Component's code, never the row, which the session that read
+    it lets go while the process keeps the catalogue."""
+    join = version_join(component.code)
     return Dimension(
         key=key,
         label=f"{component.name} version",
         group="attribute",
         line=f"The version of {component.name} the Call's Launch ran with",
-        path=lambda row: row.to(version_join(component.code)).c.version,
+        path=lambda row: row.to(join).c.version,
         null="(No version)",
     )
 
