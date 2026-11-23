@@ -146,6 +146,28 @@ class TestBatch:
         assert [_texts(call.after) for call in found.calls] == [[], [], ["Thanks"]]
         assert head.address.address == "#dash/t=all&by=project&m=cost.sum&col=none"
 
+    def test_the_calls_come_in_the_order_of_their_positions_not_their_ids(
+        self,
+        service: ReaderService,
+        session: DbSession,
+        worked: Record,
+        fake_collector: ServedFakeCollector,
+    ) -> None:
+        """A publication keeps a held Call's id while it writes positions
+        from its boundary on, so ids and positions can run against each
+        other: the chart's list is by position, and so is the reader."""
+        first, second, third = worked.calls[:3]
+        one, two = first.position, second.position
+        first.position = 1_000
+        session.flush()
+        second.position, first.position = one, two
+        session.flush()
+        fake_collector.serve(_thread_reading(after=[]))
+
+        found = service.batch("t=all", worked.thread.id)
+
+        assert [call.call for call in found.calls] == [second.id, first.id, third.id]
+
     def test_a_reading_in_another_order_joins_by_the_id(
         self,
         service: ReaderService,
@@ -239,6 +261,39 @@ class TestBatch:
             (edge, None),
         ]
         assert (first.sent[0].block.text, first.sent[0].length) == ("a" * CUT, CUT + 1)
+
+    def test_a_tool_calls_input_at_its_bound_is_whole(
+        self,
+        service: ReaderService,
+        worked: Record,
+        fake_collector: ServedFakeCollector,
+    ) -> None:
+        given = {"command": "c" * 1_000, "description": "d" * (CUT - 1_000)}
+        fake_collector.serve(
+            _reading(
+                [
+                    {
+                        "message_id": "msg_0001",
+                        "received": [],
+                        "sent": [
+                            {
+                                "kind": "tool_call",
+                                "at": AT,
+                                "tool_use_id": "toolu_01",
+                                "tool": "Bash",
+                                "input": given,
+                                "started": None,
+                                "result": None,
+                            }
+                        ],
+                    }
+                ]
+            )
+        )
+
+        (shown,) = service.batch("t=all", worked.thread.id).calls[0].sent
+
+        assert (shown.block.input, shown.length) == (given, None)
 
     def test_a_tool_calls_input_is_cut_together_and_its_result_on_its_own(
         self,
@@ -487,6 +542,7 @@ class TestTheSizeRule:
             )
         )
 
+        monkeypatch.setattr(reader_module, "WHOLE", characters)
         whole = service.batch("t=all", worked.thread.id).head
         monkeypatch.setattr(reader_module, "WHOLE", characters - 1)
         cut = service.batch("t=all", worked.thread.id).head

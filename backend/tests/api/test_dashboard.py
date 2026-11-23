@@ -1262,6 +1262,16 @@ class TestGetConversationCalls:
             == 403
         )
 
+    def test_without_a_token_it_is_unauthenticated(
+        self, oidc_client: FlaskClient, worked: Record
+    ) -> None:
+        assert (
+            oidc_client.get(
+                _calls_path(worked.thread.id), query_string={"state": "t=all"}
+            ).status_code
+            == 401
+        )
+
 
 def _reading_path(thread: object, route: str = "") -> str:
     return f"/api/dashboard/conversations/{thread}/reading{route}"
@@ -1552,16 +1562,6 @@ class TestGetConversationReading:
 
         assert response.status_code == 409
         assert response.get_json()["code"] == "QUERY_BUSY"
-
-    def test_without_a_token_it_is_unauthenticated(
-        self, oidc_client: FlaskClient, worked: Record
-    ) -> None:
-        assert (
-            oidc_client.get(
-                _calls_path(worked.thread.id), query_string={"state": "t=all"}
-            ).status_code
-            == 401
-        )
 
 
 ATTRIBUTE_COUNTS = "/api/dashboard/counts/attributes"
