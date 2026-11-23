@@ -92,7 +92,8 @@ class StepFigures:
     """The longest of them, past which the badge turns red (F156.7)."""
     timings: int
     """How many timings it is read against: the setting's number, fewer
-    while its kind's history holds fewer."""
+    while those it is drawn from hold fewer: its kind's, its repo's own or
+    those that began as it did."""
 
     @property
     def so_far_minutes(self) -> int:

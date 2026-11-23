@@ -764,7 +764,8 @@ class StepFiguresSchema(BaseModel):
     timings: int = Field(
         description=(
             "How many timings it is read against: the setting's 60, fewer "
-            "while its kind's history holds fewer"
+            "while those it is drawn from hold fewer: its kind's, its repo's "
+            "own or those that began as it did"
         ),
         examples=[60],
     )
