@@ -406,7 +406,6 @@ class _Drawn:
                     Occurrence(
                         at=self.moments.at(at + rng.randint(1, 9)),
                         kind="api_error",
-                        is_error=True,
                         detail=rng.choice(("529", "500", "429")),
                     ),
                 )
