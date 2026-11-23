@@ -5,14 +5,16 @@ run's figures (F156.13, F156.14) and the project's pick."""
 
 import itertools
 import uuid
-from collections.abc import Sequence
+from collections.abc import Generator, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
 import pytest
+from flask import Flask
 from sqlalchemy.orm import Session as DbSession
 
 from app import models
+from app.extensions import db
 from app.models import (
     Environment,
     Item,
@@ -1754,6 +1756,23 @@ class TestWorkEstimatesRead:
             if each.run_figures is not None
         ] == [(80, 10 + 5 + 2), (80, 20 + 6 + 2), (80, 7 + 2)]
         assert len(statements.texts) == 4
+
+
+class TestWorkEstimatesPlans:
+    """The plans of the estimates' reads, on a database of their own: at this
+    size the planner weighs a repo's read of a kind's last timings on the
+    repo's index and on the kind's alike, and breaks the tie on their files'
+    sizes and the table's, which the rows a test before rolled back on the
+    worker's database leave grown."""
+
+    @pytest.fixture
+    def session(self, committed_app: Flask) -> Generator[DbSession]:
+        """The test's session, on a clone of the run's template, rolled back
+        at teardown."""
+        with committed_app.app_context():
+            engine = db.engine
+        with DbSession(engine, expire_on_commit=False) as fresh:
+            yield fresh
 
     def test_each_read_of_a_kinds_last_timings_ends_on_an_index(
         self,
