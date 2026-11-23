@@ -2,8 +2,9 @@
 one route, a part at a call, with what the dashboard stores (F155); a view's
 address (F159), its state checked and written back in its normal form; a
 view's rows (F154.1), answered from the record at the query; a view's series
-and its events strip (F163.3, F164.6), its lanes (F164.6), and its items and
-a conversation's calls (F165), each a route of its own."""
+and its events strip (F163.3, F164.6), its lanes (F164.6), its items and a
+conversation's calls (F165), and a conversation's reading in the reader
+under the size rule (F154.7), each a route of its own."""
 
 import uuid
 from datetime import UTC, datetime
@@ -26,6 +27,16 @@ from app.dashboard.counts import CountsService
 from app.dashboard.items import Calls, Column, Detail, Items, ItemsService, Listed
 from app.dashboard.lanes import Lanes, LanesService
 from app.dashboard.planner import Window
+from app.dashboard.reader import (
+    Batch,
+    BlockShown,
+    CallBlocks,
+    Head,
+    Opened,
+    Placed,
+    ReaderService,
+    Texts,
+)
 from app.dashboard.rows import (
     ByRow,
     Color,
@@ -71,8 +82,16 @@ from app.schemas.dashboard import (
     MarkerSchema,
     OpenedSchema,
     PanelSchema,
+    PlacedBlockSchema,
     PointSchema,
     RatioSchema,
+    ReaderBlockSchema,
+    ReaderCallSchema,
+    ReadingBlockQuerySchema,
+    ReadingBlockResponseSchema,
+    ReadingQuerySchema,
+    ReadingResponseSchema,
+    ReadingTextsResponseSchema,
     RollSchema,
     RowsDimensionSchema,
     RowsMeasureSchema,
@@ -398,6 +417,135 @@ def get_conversation_calls(
     return _calls(items_service.calls(query.state, transcript_id)).model_dump(
         mode="json"
     )
+
+
+@dashboard_bp.route("/conversations/<uuid:transcript_id>/reading", methods=["GET"])
+@api.validate(
+    query=ReadingQuerySchema,
+    resp=SpectreeResponse(
+        HTTP_200=ReadingResponseSchema,
+        HTTP_400=ApiErrorResponseSchema,
+        HTTP_401=ApiErrorResponseSchema,
+        HTTP_403=ApiErrorResponseSchema,
+        HTTP_404=ApiErrorResponseSchema,
+        HTTP_409=ApiErrorResponseSchema,
+    ),
+)
+@inject
+def get_conversation_reading(
+    transcript_id: uuid.UUID,
+    query: ReadingQuerySchema,
+    reader_service: ReaderService = Provide[ServiceContainer.reader_service],
+) -> Any:
+    """Answer a batch of a conversation's calls with their blocks, from its
+    reading as the collector serves it now: 200 calls of those a
+    conversation's calls answer, in their order, the batch holding the call
+    the state selects where none is asked; each of a block's texts cut to its
+    first 1,500 characters, a cut block with its full length. The head says
+    whether the reading was served, the transcript is gone or the read was
+    refused, with why; the batches in the order to take them; whether the
+    reader stopped at 2,000 calls; and whether the full texts come in one
+    answer.
+
+    Returns:
+        200: The batch, with the view's address, its look-only parts and a
+            note for each part dropped
+        400: The state has faults: the error names every one, and ends on a
+            correct example of each kind of part refused
+        401: No one is signed in
+        403: The caller lacks the editor role
+        404: The record holds no such thread
+        409: The read passed the engine's bounds: a statement past its
+            timeout (`QUERY_TIMEOUT`), one past the database's limit on
+            temporary files (`QUERY_TEMP_FILE_LIMIT`), or no slot among its
+            statements at once freed in time (`QUERY_BUSY`)
+    """
+    found = reader_service.batch(query.state, transcript_id, query.batch)
+    return _reading(found).model_dump(mode="json")
+
+
+@dashboard_bp.route(
+    "/conversations/<uuid:transcript_id>/reading/texts", methods=["GET"]
+)
+@api.validate(
+    query=StateQuerySchema,
+    resp=SpectreeResponse(
+        HTTP_200=ReadingTextsResponseSchema,
+        HTTP_400=ApiErrorResponseSchema,
+        HTTP_401=ApiErrorResponseSchema,
+        HTTP_403=ApiErrorResponseSchema,
+        HTTP_404=ApiErrorResponseSchema,
+        HTTP_409=ApiErrorResponseSchema,
+    ),
+)
+@inject
+def get_conversation_texts(
+    transcript_id: uuid.UUID,
+    query: StateQuerySchema,
+    reader_service: ReaderService = Provide[ServiceContainer.reader_service],
+) -> Any:
+    """Answer every block of a conversation that a batch cuts, whole, in one
+    answer, where its full texts add up to 2,000,000 characters or less;
+    none where they add up to more, a block's whole coming as it opens.
+
+    Returns:
+        200: The blocks whole, with the view's address, its look-only parts
+            and a note for each part dropped
+        400: The state has faults: the error names every one, and ends on a
+            correct example of each kind of part refused
+        401: No one is signed in
+        403: The caller lacks the editor role
+        404: The record holds no such thread
+        409: The read passed the engine's bounds: a statement past its
+            timeout (`QUERY_TIMEOUT`), one past the database's limit on
+            temporary files (`QUERY_TEMP_FILE_LIMIT`), or no slot among its
+            statements at once freed in time (`QUERY_BUSY`)
+    """
+    found = reader_service.texts(query.state, transcript_id)
+    return _texts(found).model_dump(mode="json")
+
+
+@dashboard_bp.route(
+    "/conversations/<uuid:transcript_id>/reading/block", methods=["GET"]
+)
+@api.validate(
+    query=ReadingBlockQuerySchema,
+    resp=SpectreeResponse(
+        HTTP_200=ReadingBlockResponseSchema,
+        HTTP_400=ApiErrorResponseSchema,
+        HTTP_401=ApiErrorResponseSchema,
+        HTTP_403=ApiErrorResponseSchema,
+        HTTP_404=ApiErrorResponseSchema,
+        HTTP_409=ApiErrorResponseSchema,
+    ),
+)
+@inject
+def get_conversation_block(
+    transcript_id: uuid.UUID,
+    query: ReadingBlockQuerySchema,
+    reader_service: ReaderService = Provide[ServiceContainer.reader_service],
+) -> Any:
+    """Answer one block of a conversation whole, as it opens, by its call,
+    its part and its place in it.
+
+    Returns:
+        200: The block whole, with the view's address, its look-only parts
+            and a note for each part dropped
+        400: The state has faults: the error names every one, and ends on a
+            correct example of each kind of part refused
+        401: No one is signed in
+        403: The caller lacks the editor role
+        404: The record holds no such thread, or its reading no such block
+            on a call the reader holds
+        409: The read passed the engine's bounds: a statement past its
+            timeout (`QUERY_TIMEOUT`), one past the database's limit on
+            temporary files (`QUERY_TEMP_FILE_LIMIT`), or no slot among its
+            statements at once freed in time (`QUERY_BUSY`)
+    """
+    found = reader_service.block(
+        query.state, transcript_id, query.call, query.part, query.index
+    )
+    return _opened(found).model_dump(mode="json")
 
 
 @dashboard_bp.route("/counts/attributes", methods=["POST"])
@@ -776,6 +924,64 @@ def _calls(found: Calls) -> CallsResponseSchema:
             for call in found.calls
         ],
         total=found.total,
+    )
+
+
+def _head(head: Head) -> dict[str, Any]:
+    return {
+        "address": head.address.address,
+        "look": list(head.address.look),
+        "notes": list(head.address.notes),
+        "conversation": head.conversation,
+        "status": head.status,
+        "why": head.why,
+        "total": head.total,
+        "held": head.held,
+        "stopped": head.stopped,
+        "batches": list(head.batches),
+        "characters": head.characters,
+        "whole": head.whole,
+    }
+
+
+def _reading(found: Batch) -> ReadingResponseSchema:
+    return ReadingResponseSchema(
+        **_head(found.head),
+        batch=found.batch,
+        calls=[_reader_call(call) for call in found.calls],
+    )
+
+
+def _reader_call(call: CallBlocks) -> ReaderCallSchema:
+    return ReaderCallSchema(
+        call=call.call,
+        held=call.held,
+        received=[_shown(block) for block in call.received],
+        sent=[_shown(block) for block in call.sent],
+        after=[_shown(block) for block in call.after],
+    )
+
+
+def _shown(shown: BlockShown) -> ReaderBlockSchema:
+    return ReaderBlockSchema(block=shown.block, length=shown.length)
+
+
+def _placed(placed: Placed) -> PlacedBlockSchema:
+    return PlacedBlockSchema(
+        call=placed.call, part=placed.part, index=placed.index, block=placed.block
+    )
+
+
+def _texts(found: Texts) -> ReadingTextsResponseSchema:
+    return ReadingTextsResponseSchema(
+        **_head(found.head), texts=[_placed(placed) for placed in found.texts]
+    )
+
+
+def _opened(found: Opened) -> ReadingBlockResponseSchema:
+    return ReadingBlockResponseSchema(
+        **_head(found.head),
+        block=None if found.block is None else _placed(found.block),
     )
 
 

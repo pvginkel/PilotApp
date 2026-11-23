@@ -20,6 +20,7 @@ import pytest
 from dependency_injector import providers
 from flask import Flask
 from flask.testing import FlaskClient
+from pilot_collection.reading import ReadingSchema
 from sqlalchemy import Engine, text
 from sqlalchemy.orm import Session as DbSession
 
@@ -42,6 +43,7 @@ from app.services.container import ServiceContainer
 from app.services.sse_connection_manager import SSEConnection
 from tests.support import transcripts
 from tests.support.dashboard import Record, record
+from tests.support.fake_collector import ServedFakeCollector
 from tests.support.fake_sidecar import STORE_ENVIRONMENT_ID
 from tests.support.transcripts import OPUS, STARTED, reference
 
@@ -1259,6 +1261,297 @@ class TestGetConversationCalls:
             ).status_code
             == 403
         )
+
+
+def _reading_path(thread: object, route: str = "") -> str:
+    return f"/api/dashboard/conversations/{thread}/reading{route}"
+
+
+def _thread_reading(after: list[dict[str, Any]]) -> ReadingSchema:
+    """A reading of the record's thread, each of its three Calls answered."""
+    at = STARTED + timedelta(minutes=1)
+    return ReadingSchema.model_validate(
+        {
+            "session_id": transcripts.CAMP,
+            "agent_id": None,
+            "file_size": 48_112,
+            "file_modified_at": STARTED + timedelta(minutes=12),
+            "calls": [
+                {
+                    "message_id": f"msg_{position:04}",
+                    "received": [
+                        {"kind": "user", "at": at, "writer": "person", "text": asked}
+                    ],
+                    "sent": [
+                        {
+                            "kind": "tool_call",
+                            "at": at,
+                            "tool_use_id": f"toolu_{position:02}",
+                            "tool": "Bash",
+                            "input": {"command": "make soup"},
+                            "started": None,
+                            "result": None,
+                        }
+                    ],
+                }
+                for position, asked in enumerate(
+                    ("Halve the soup", "Now for two", "And the bread?"), start=1
+                )
+            ],
+            "after": after,
+        }
+    )
+
+
+@pytest.mark.usefixtures("readings_service")
+class TestGetConversationReading:
+    def test_it_answers_a_batch_of_calls_with_their_blocks_cut(
+        self,
+        client: FlaskClient,
+        worked: Record,
+        fake_collector: ServedFakeCollector,
+    ) -> None:
+        long = "a" * 1_501
+        fake_collector.serve(
+            _thread_reading(
+                after=[
+                    {
+                        "kind": "user",
+                        "at": STARTED + timedelta(minutes=4),
+                        "writer": "person",
+                        "text": long,
+                    }
+                ]
+            )
+        )
+        third = worked.calls[2].id
+
+        response = client.get(
+            _reading_path(worked.thread.id),
+            query_string={
+                "state": f"t=all&it=conversation,{worked.thread.id}&call={third}"
+            },
+        )
+
+        assert response.status_code == 200
+        body = response.get_json()
+        assert body["address"] == (
+            "#dash/t=all&by=project&m=cost.sum&col=none"
+            f"&it=conversation,{worked.thread.id}&call={third}"
+        )
+        assert (body["status"], body["why"], body["conversation"]) == (
+            "served",
+            None,
+            str(worked.thread.id),
+        )
+        assert (body["total"], body["held"], body["stopped"]) == (3, 3, False)
+        assert (body["batches"], body["batch"]) == ([0], 0)
+        assert body["characters"] == 1_501 + 3 * len("make soup") + len(
+            "Halve the soupNow for twoAnd the bread?"
+        )
+        assert body["whole"] is True
+        assert [call["call"] for call in body["calls"]] == [
+            call.id for call in worked.calls[:3]
+        ]
+        first = body["calls"][0]
+        assert first["held"] is True
+        assert first["received"] == [
+            {
+                "block": {
+                    "kind": "user",
+                    "at": "2026-11-12T09:31:00Z",
+                    "writer": "person",
+                    "text": "Halve the soup",
+                },
+                "length": None,
+            }
+        ]
+        assert first["sent"][0]["block"]["input"] == {"command": "make soup"}
+        (line,) = body["calls"][2]["after"]
+        assert (len(line["block"]["text"]), line["length"]) == (1_500, 1_501)
+
+    def test_it_answers_the_batch_asked(
+        self,
+        client: FlaskClient,
+        worked: Record,
+        fake_collector: ServedFakeCollector,
+    ) -> None:
+        fake_collector.serve(_thread_reading(after=[]))
+
+        response = client.get(
+            _reading_path(worked.thread.id),
+            query_string={"state": "t=all", "batch": 1},
+        )
+
+        assert response.status_code == 200
+        assert (response.get_json()["batch"], response.get_json()["calls"]) == (1, [])
+
+    def test_a_transcript_gone_from_the_home_is_an_answer_of_its_own(
+        self,
+        client: FlaskClient,
+        worked: Record,
+        fake_collector: ServedFakeCollector,
+    ) -> None:
+        response = client.get(
+            _reading_path(worked.thread.id), query_string={"state": "t=all"}
+        )
+
+        assert response.status_code == 200
+        body = response.get_json()
+        assert (body["status"], body["batches"], body["batch"], body["calls"]) == (
+            "gone",
+            [],
+            None,
+            [],
+        )
+        assert (body["characters"], body["whole"]) == (None, None)
+
+    def test_a_refused_read_says_why(
+        self,
+        client: FlaskClient,
+        worked: Record,
+        fake_collector: ServedFakeCollector,
+    ) -> None:
+        fake_collector.refuse("unreadable")
+
+        response = client.get(
+            _reading_path(worked.thread.id), query_string={"state": "t=all"}
+        )
+
+        assert response.status_code == 200
+        body = response.get_json()
+        assert body["status"] == "refused"
+        assert body["why"].startswith("the collector answered 500")
+
+    def test_it_answers_the_full_texts_in_one_answer(
+        self,
+        client: FlaskClient,
+        worked: Record,
+        fake_collector: ServedFakeCollector,
+    ) -> None:
+        long = "a" * 1_501
+        fake_collector.serve(
+            _thread_reading(
+                after=[
+                    {"kind": "user", "at": STARTED, "writer": "person", "text": long}
+                ]
+            )
+        )
+
+        response = client.get(
+            _reading_path(worked.thread.id, "/texts"), query_string={"state": "t=all"}
+        )
+
+        assert response.status_code == 200
+        body = response.get_json()
+        assert body["whole"] is True
+        assert [
+            (text["call"], text["part"], text["index"], text["block"]["text"])
+            for text in body["texts"]
+        ] == [(worked.calls[2].id, "after", 0, long)]
+
+    def test_it_answers_one_block_whole(
+        self,
+        client: FlaskClient,
+        worked: Record,
+        fake_collector: ServedFakeCollector,
+    ) -> None:
+        fake_collector.serve(_thread_reading(after=[]))
+        fake_collector.too_large(transcripts.CAMP)
+
+        response = client.get(
+            _reading_path(worked.thread.id, "/block"),
+            query_string={
+                "state": "t=all",
+                "call": worked.calls[2].id,
+                "part": "after",
+                "index": 0,
+            },
+        )
+
+        assert response.status_code == 200
+        body = response.get_json()
+        assert body["whole"] is False
+        assert (body["block"]["call"], body["block"]["part"]) == (
+            worked.calls[2].id,
+            "after",
+        )
+        assert len(body["block"]["block"]["text"]) == 3_000_000
+
+    def test_a_block_the_reading_lacks_is_not_found(
+        self,
+        client: FlaskClient,
+        worked: Record,
+        fake_collector: ServedFakeCollector,
+    ) -> None:
+        fake_collector.serve(_thread_reading(after=[]))
+
+        response = client.get(
+            _reading_path(worked.thread.id, "/block"),
+            query_string={
+                "state": "t=all",
+                "call": worked.calls[0].id,
+                "part": "after",
+                "index": 0,
+            },
+        )
+
+        assert response.status_code == 404
+        assert response.get_json()["code"] == "RECORD_NOT_FOUND"
+
+    @pytest.mark.usefixtures("worked")
+    @pytest.mark.parametrize("route", ["", "/texts", "/block"])
+    def test_a_thread_the_record_does_not_hold_is_not_found(
+        self, client: FlaskClient, route: str
+    ) -> None:
+        response = client.get(
+            _reading_path("0b5e3c1a-7d42-4f6e-9a18-2c4d6e8f0a1b", route),
+            query_string={"state": "t=all", "call": 1, "part": "sent", "index": 0},
+        )
+
+        assert response.status_code == 404
+        assert response.get_json()["code"] == "RECORD_NOT_FOUND"
+
+    @pytest.mark.parametrize("route", ["", "/texts", "/block"])
+    def test_a_state_with_faults_is_refused_with_its_text(
+        self, client: FlaskClient, worked: Record, route: str
+    ) -> None:
+        response = client.get(
+            _reading_path(worked.thread.id, route),
+            query_string={
+                "state": "t=never",
+                "call": worked.calls[0].id,
+                "part": "sent",
+                "index": 0,
+            },
+        )
+
+        assert response.status_code == 400
+        assert response.get_json()["code"] == "STATE_REFUSED"
+
+    def test_a_block_with_no_place_is_refused(
+        self, client: FlaskClient, worked: Record
+    ) -> None:
+        response = client.get(
+            _reading_path(worked.thread.id, "/block"),
+            query_string={"state": "t=all", "part": "elsewhere", "index": -1},
+        )
+
+        assert response.status_code == 400
+
+    def test_a_read_past_the_engines_bounds_is_refused_with_why(
+        self,
+        client: FlaskClient,
+        container: ServiceContainer,
+        session: DbSession,
+        worked: Record,
+    ) -> None:
+        response = _busy(
+            client, container, session, _reading_path(worked.thread.id), "t=all"
+        )
+
+        assert response.status_code == 409
+        assert response.get_json()["code"] == "QUERY_BUSY"
 
     def test_without_a_token_it_is_unauthenticated(
         self, oidc_client: FlaskClient, worked: Record

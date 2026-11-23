@@ -14900,6 +14900,2107 @@
         "title": "OverruleKind",
         "type": "string"
       },
+      "ReadingBlockQuerySchema.b67cf98": {
+        "description": "A view's state, and the place of one block of a conversation.",
+        "properties": {
+          "call": {
+            "description": "The call it stands on, by its id",
+            "title": "Call",
+            "type": "integer"
+          },
+          "index": {
+            "description": "Its place in the part, from 0",
+            "minimum": 0,
+            "title": "Index",
+            "type": "integer"
+          },
+          "part": {
+            "description": "What came in before the call, what it put out, or what follows the conversation's last call",
+            "enum": [
+              "received",
+              "sent",
+              "after"
+            ],
+            "title": "Part",
+            "type": "string"
+          },
+          "state": {
+            "description": "The view's state as the URL writes it after `#dash/`, `#dash/` before it or not; an entry, its focus alone, is filled in from the record",
+            "examples": [
+              "t=qw&by=project&m=cost.sum&col=none"
+            ],
+            "title": "State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "state",
+          "call",
+          "part",
+          "index"
+        ],
+        "title": "ReadingBlockQuerySchema",
+        "type": "object"
+      },
+      "ReadingBlockResponseSchema.b67cf98": {
+        "description": "One block of a conversation, whole.",
+        "properties": {
+          "address": {
+            "description": "The view's address, its state in its normal form after `#dash/`",
+            "title": "Address",
+            "type": "string"
+          },
+          "batches": {
+            "description": "The batches of 200 calls, in the order to take them: the one holding the selected call first; empty where the reading is not served",
+            "items": {
+              "type": "integer"
+            },
+            "title": "Batches",
+            "type": "array"
+          },
+          "block": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ReadingBlockResponseSchema.b67cf98.PlacedBlockSchema"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Null where the reading is not served"
+          },
+          "characters": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "What the full texts add up to; null where it is not served",
+            "title": "Characters"
+          },
+          "conversation": {
+            "format": "uuid",
+            "title": "Conversation",
+            "type": "string"
+          },
+          "held": {
+            "description": "The calls the reader holds, the first of them",
+            "title": "Held",
+            "type": "integer"
+          },
+          "look": {
+            "description": "Its look-only parts as the address writes them",
+            "items": {
+              "type": "string"
+            },
+            "title": "Look",
+            "type": "array"
+          },
+          "notes": {
+            "description": "A note for each part it dropped",
+            "items": {
+              "type": "string"
+            },
+            "title": "Notes",
+            "type": "array"
+          },
+          "status": {
+            "description": "The reading served; the transcript gone from the collector's home; or the collector refused the read, could not be reached, or is not configured",
+            "enum": [
+              "served",
+              "gone",
+              "refused"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "stopped": {
+            "description": "Whether the reader stopped at 2,000 calls, short of `total`",
+            "title": "Stopped",
+            "type": "boolean"
+          },
+          "total": {
+            "description": "The conversation's calls in the record",
+            "title": "Total",
+            "type": "integer"
+          },
+          "whole": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Whether the full texts come in one answer, at 2,000,000 characters or less; else a block's whole as it opens; null where it is not served",
+            "title": "Whole"
+          },
+          "why": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Why the read was refused; null otherwise",
+            "title": "Why"
+          }
+        },
+        "required": [
+          "address",
+          "look",
+          "notes",
+          "conversation",
+          "status",
+          "why",
+          "total",
+          "held",
+          "stopped",
+          "batches",
+          "characters",
+          "whole",
+          "block"
+        ],
+        "title": "ReadingBlockResponseSchema",
+        "type": "object"
+      },
+      "ReadingBlockResponseSchema.b67cf98.AttachmentBlockSchema": {
+        "additionalProperties": false,
+        "description": "What Claude Code added to the request beside the conversation's own\nlines: a reminder, the instruction files it loaded, a listing.",
+        "properties": {
+          "at": {
+            "description": "The time of the line it stood in",
+            "format": "date-time",
+            "title": "At",
+            "type": "string"
+          },
+          "kind": {
+            "const": "attachment",
+            "title": "Kind",
+            "type": "string"
+          },
+          "text": {
+            "description": "Its words where it is words, else what it holds, as JSON",
+            "title": "Text",
+            "type": "string"
+          },
+          "type": {
+            "description": "Claude Code's word for what it is",
+            "examples": [
+              "instructions",
+              "total_tokens_reminder"
+            ],
+            "minLength": 1,
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "at",
+          "kind",
+          "type",
+          "text"
+        ],
+        "title": "AttachmentBlockSchema",
+        "type": "object"
+      },
+      "ReadingBlockResponseSchema.b67cf98.ImageBlockSchema": {
+        "additionalProperties": false,
+        "description": "An image that stood in the line of the `user` block before it.",
+        "properties": {
+          "at": {
+            "description": "The time of the line it stood in",
+            "format": "date-time",
+            "title": "At",
+            "type": "string"
+          },
+          "kind": {
+            "const": "image",
+            "title": "Kind",
+            "type": "string"
+          },
+          "media_type": {
+            "description": "Its media type",
+            "examples": [
+              "image/png"
+            ],
+            "title": "Media Type",
+            "type": "string"
+          },
+          "size": {
+            "description": "Its size in bytes",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "title": "Size",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "media_type",
+          "size",
+          "at",
+          "kind"
+        ],
+        "title": "ImageBlockSchema",
+        "type": "object"
+      },
+      "ReadingBlockResponseSchema.b67cf98.PlacedBlockSchema": {
+        "description": "A block whole, at its place.",
+        "properties": {
+          "block": {
+            "discriminator": {
+              "mapping": {
+                "attachment": "#/components/schemas/ReadingBlockResponseSchema.b67cf98.AttachmentBlockSchema",
+                "image": "#/components/schemas/ReadingBlockResponseSchema.b67cf98.ImageBlockSchema",
+                "synthetic": "#/components/schemas/ReadingBlockResponseSchema.b67cf98.SyntheticBlockSchema",
+                "system": "#/components/schemas/ReadingBlockResponseSchema.b67cf98.SystemBlockSchema",
+                "text": "#/components/schemas/ReadingBlockResponseSchema.b67cf98.TextBlockSchema",
+                "thinking": "#/components/schemas/ReadingBlockResponseSchema.b67cf98.ThinkingBlockSchema",
+                "tool_call": "#/components/schemas/ReadingBlockResponseSchema.b67cf98.ToolCallBlockSchema",
+                "tool_result": "#/components/schemas/ReadingBlockResponseSchema.b67cf98.ToolResultBlockSchema",
+                "user": "#/components/schemas/ReadingBlockResponseSchema.b67cf98.UserBlockSchema"
+              },
+              "propertyName": "kind"
+            },
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ReadingBlockResponseSchema.b67cf98.UserBlockSchema"
+              },
+              {
+                "$ref": "#/components/schemas/ReadingBlockResponseSchema.b67cf98.ImageBlockSchema"
+              },
+              {
+                "$ref": "#/components/schemas/ReadingBlockResponseSchema.b67cf98.SyntheticBlockSchema"
+              },
+              {
+                "$ref": "#/components/schemas/ReadingBlockResponseSchema.b67cf98.AttachmentBlockSchema"
+              },
+              {
+                "$ref": "#/components/schemas/ReadingBlockResponseSchema.b67cf98.SystemBlockSchema"
+              },
+              {
+                "$ref": "#/components/schemas/ReadingBlockResponseSchema.b67cf98.ToolResultBlockSchema"
+              },
+              {
+                "$ref": "#/components/schemas/ReadingBlockResponseSchema.b67cf98.TextBlockSchema"
+              },
+              {
+                "$ref": "#/components/schemas/ReadingBlockResponseSchema.b67cf98.ThinkingBlockSchema"
+              },
+              {
+                "$ref": "#/components/schemas/ReadingBlockResponseSchema.b67cf98.ToolCallBlockSchema"
+              }
+            ],
+            "title": "Block"
+          },
+          "call": {
+            "description": "The call it stands on, by its id",
+            "title": "Call",
+            "type": "integer"
+          },
+          "index": {
+            "description": "Its place in the part, from 0",
+            "title": "Index",
+            "type": "integer"
+          },
+          "part": {
+            "enum": [
+              "received",
+              "sent",
+              "after"
+            ],
+            "title": "Part",
+            "type": "string"
+          }
+        },
+        "required": [
+          "call",
+          "part",
+          "index",
+          "block"
+        ],
+        "title": "PlacedBlockSchema",
+        "type": "object"
+      },
+      "ReadingBlockResponseSchema.b67cf98.ReadImageSchema": {
+        "additionalProperties": false,
+        "description": "An image that stood in a result: what it was, never its bytes.",
+        "properties": {
+          "media_type": {
+            "description": "Its media type",
+            "examples": [
+              "image/png"
+            ],
+            "title": "Media Type",
+            "type": "string"
+          },
+          "size": {
+            "description": "Its size in bytes",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "title": "Size",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "media_type",
+          "size"
+        ],
+        "title": "ReadImageSchema",
+        "type": "object"
+      },
+      "ReadingBlockResponseSchema.b67cf98.ReadResultSchema": {
+        "additionalProperties": false,
+        "description": "A tool's result.",
+        "properties": {
+          "at": {
+            "description": "When it returned",
+            "format": "date-time",
+            "title": "At",
+            "type": "string"
+          },
+          "error": {
+            "description": "Whether the tool said it failed",
+            "title": "Error",
+            "type": "boolean"
+          },
+          "images": {
+            "description": "The images it held, in its order",
+            "items": {
+              "$ref": "#/components/schemas/ReadingBlockResponseSchema.b67cf98.ReadImageSchema"
+            },
+            "title": "Images",
+            "type": "array"
+          },
+          "text": {
+            "description": "Its text, whole",
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "at",
+          "error",
+          "text",
+          "images"
+        ],
+        "title": "ReadResultSchema",
+        "type": "object"
+      },
+      "ReadingBlockResponseSchema.b67cf98.SyntheticBlockSchema": {
+        "additionalProperties": false,
+        "description": "Words Claude Code wrote itself where a response would stand: no\nCall.",
+        "properties": {
+          "at": {
+            "description": "The time of the line it stood in",
+            "format": "date-time",
+            "title": "At",
+            "type": "string"
+          },
+          "kind": {
+            "const": "synthetic",
+            "title": "Kind",
+            "type": "string"
+          },
+          "text": {
+            "description": "Its text, whole",
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "at",
+          "kind",
+          "text"
+        ],
+        "title": "SyntheticBlockSchema",
+        "type": "object"
+      },
+      "ReadingBlockResponseSchema.b67cf98.SystemBlockSchema": {
+        "additionalProperties": false,
+        "description": "A line Claude Code wrote into the conversation as itself: a local\ncommand's output, a compaction's boundary, a turn's end.",
+        "properties": {
+          "at": {
+            "description": "The time of the line it stood in",
+            "format": "date-time",
+            "title": "At",
+            "type": "string"
+          },
+          "kind": {
+            "const": "system",
+            "title": "Kind",
+            "type": "string"
+          },
+          "subtype": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Claude Code's word for what it is, none where it names none",
+            "examples": [
+              "local_command",
+              "turn_duration"
+            ],
+            "title": "Subtype"
+          },
+          "text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Its words, none where it has none",
+            "title": "Text"
+          }
+        },
+        "required": [
+          "at",
+          "kind",
+          "subtype",
+          "text"
+        ],
+        "title": "SystemBlockSchema",
+        "type": "object"
+      },
+      "ReadingBlockResponseSchema.b67cf98.TextBlockSchema": {
+        "additionalProperties": false,
+        "description": "Words the model put out.",
+        "properties": {
+          "at": {
+            "description": "The time of the line it stood in",
+            "format": "date-time",
+            "title": "At",
+            "type": "string"
+          },
+          "kind": {
+            "const": "text",
+            "title": "Kind",
+            "type": "string"
+          },
+          "text": {
+            "description": "Its text, whole",
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "at",
+          "kind",
+          "text"
+        ],
+        "title": "TextBlockSchema",
+        "type": "object"
+      },
+      "ReadingBlockResponseSchema.b67cf98.ThinkingBlockSchema": {
+        "additionalProperties": false,
+        "description": "The model's thinking.",
+        "properties": {
+          "at": {
+            "description": "The time of the line it stood in",
+            "format": "date-time",
+            "title": "At",
+            "type": "string"
+          },
+          "kind": {
+            "const": "thinking",
+            "title": "Kind",
+            "type": "string"
+          },
+          "text": {
+            "description": "Its text where the file has it, else empty",
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "at",
+          "kind",
+          "text"
+        ],
+        "title": "ThinkingBlockSchema",
+        "type": "object"
+      },
+      "ReadingBlockResponseSchema.b67cf98.ToolCallBlockSchema": {
+        "additionalProperties": false,
+        "description": "A tool the Call requested, with the result that answered it.",
+        "properties": {
+          "at": {
+            "description": "The time of the line it stood in",
+            "format": "date-time",
+            "title": "At",
+            "type": "string"
+          },
+          "input": {
+            "additionalProperties": true,
+            "description": "What the tool was given, whole",
+            "title": "Input",
+            "type": "object"
+          },
+          "kind": {
+            "const": "tool_call",
+            "title": "Kind",
+            "type": "string"
+          },
+          "result": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ReadingBlockResponseSchema.b67cf98.ReadResultSchema"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Its result; none where the file holds none"
+          },
+          "started": {
+            "anyOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The `agent_id` of the sub-agent's Transcript the call started, in this conversation; none where it started none",
+            "title": "Started"
+          },
+          "tool": {
+            "description": "The tool's name",
+            "minLength": 1,
+            "title": "Tool",
+            "type": "string"
+          },
+          "tool_use_id": {
+            "description": "Claude's id of the request, which its Tool Call's fact carries",
+            "minLength": 1,
+            "title": "Tool Use Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "at",
+          "kind",
+          "tool_use_id",
+          "tool",
+          "input",
+          "started",
+          "result"
+        ],
+        "title": "ToolCallBlockSchema",
+        "type": "object"
+      },
+      "ReadingBlockResponseSchema.b67cf98.ToolResultBlockSchema": {
+        "additionalProperties": false,
+        "description": "A tool's result that sits on no tool call: the file holds no request\nof its id, or an earlier result answered it.",
+        "properties": {
+          "at": {
+            "description": "The time of the line it stood in",
+            "format": "date-time",
+            "title": "At",
+            "type": "string"
+          },
+          "error": {
+            "description": "Whether the tool said it failed",
+            "title": "Error",
+            "type": "boolean"
+          },
+          "images": {
+            "description": "The images it held, in its order",
+            "items": {
+              "$ref": "#/components/schemas/ReadingBlockResponseSchema.b67cf98.ReadImageSchema"
+            },
+            "title": "Images",
+            "type": "array"
+          },
+          "kind": {
+            "const": "tool_result",
+            "title": "Kind",
+            "type": "string"
+          },
+          "text": {
+            "description": "Its text, whole",
+            "title": "Text",
+            "type": "string"
+          },
+          "tool_use_id": {
+            "description": "Claude's id of the request it names",
+            "minLength": 1,
+            "title": "Tool Use Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "at",
+          "error",
+          "text",
+          "images",
+          "kind",
+          "tool_use_id"
+        ],
+        "title": "ToolResultBlockSchema",
+        "type": "object"
+      },
+      "ReadingBlockResponseSchema.b67cf98.UserBlockSchema": {
+        "additionalProperties": false,
+        "description": "A line that arrived as the person's and is no tool's result.",
+        "properties": {
+          "at": {
+            "description": "The time of the line it stood in",
+            "format": "date-time",
+            "title": "At",
+            "type": "string"
+          },
+          "kind": {
+            "const": "user",
+            "title": "Kind",
+            "type": "string"
+          },
+          "text": {
+            "description": "Its text, whole",
+            "title": "Text",
+            "type": "string"
+          },
+          "writer": {
+            "anyOf": [
+              {
+                "enum": [
+                  "person",
+                  "brief",
+                  "parent",
+                  "notice"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Who wrote it; none where the file does not say, as a main thread's of a Claude Code that named no source",
+            "title": "Writer"
+          }
+        },
+        "required": [
+          "at",
+          "kind",
+          "writer",
+          "text"
+        ],
+        "title": "UserBlockSchema",
+        "type": "object"
+      },
+      "ReadingQuerySchema.b67cf98": {
+        "description": "A view's state, and the batch of a conversation's calls asked.",
+        "properties": {
+          "batch": {
+            "anyOf": [
+              {
+                "minimum": 0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "The batch of the calls, from 0; none, the first of `batches`, the one holding the call the state selects",
+            "title": "Batch"
+          },
+          "state": {
+            "description": "The view's state as the URL writes it after `#dash/`, `#dash/` before it or not; an entry, its focus alone, is filled in from the record",
+            "examples": [
+              "t=qw&by=project&m=cost.sum&col=none"
+            ],
+            "title": "State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "state"
+        ],
+        "title": "ReadingQuerySchema",
+        "type": "object"
+      },
+      "ReadingResponseSchema.b67cf98": {
+        "description": "A batch of a conversation's calls, each with its blocks cut.",
+        "properties": {
+          "address": {
+            "description": "The view's address, its state in its normal form after `#dash/`",
+            "title": "Address",
+            "type": "string"
+          },
+          "batch": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The batch answered; null where none is, nor any call",
+            "title": "Batch"
+          },
+          "batches": {
+            "description": "The batches of 200 calls, in the order to take them: the one holding the selected call first; empty where the reading is not served",
+            "items": {
+              "type": "integer"
+            },
+            "title": "Batches",
+            "type": "array"
+          },
+          "calls": {
+            "description": "The batch's calls, in order",
+            "items": {
+              "$ref": "#/components/schemas/ReadingResponseSchema.b67cf98.ReaderCallSchema"
+            },
+            "title": "Calls",
+            "type": "array"
+          },
+          "characters": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "What the full texts add up to; null where it is not served",
+            "title": "Characters"
+          },
+          "conversation": {
+            "format": "uuid",
+            "title": "Conversation",
+            "type": "string"
+          },
+          "held": {
+            "description": "The calls the reader holds, the first of them",
+            "title": "Held",
+            "type": "integer"
+          },
+          "look": {
+            "description": "Its look-only parts as the address writes them",
+            "items": {
+              "type": "string"
+            },
+            "title": "Look",
+            "type": "array"
+          },
+          "notes": {
+            "description": "A note for each part it dropped",
+            "items": {
+              "type": "string"
+            },
+            "title": "Notes",
+            "type": "array"
+          },
+          "status": {
+            "description": "The reading served; the transcript gone from the collector's home; or the collector refused the read, could not be reached, or is not configured",
+            "enum": [
+              "served",
+              "gone",
+              "refused"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "stopped": {
+            "description": "Whether the reader stopped at 2,000 calls, short of `total`",
+            "title": "Stopped",
+            "type": "boolean"
+          },
+          "total": {
+            "description": "The conversation's calls in the record",
+            "title": "Total",
+            "type": "integer"
+          },
+          "whole": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Whether the full texts come in one answer, at 2,000,000 characters or less; else a block's whole as it opens; null where it is not served",
+            "title": "Whole"
+          },
+          "why": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Why the read was refused; null otherwise",
+            "title": "Why"
+          }
+        },
+        "required": [
+          "address",
+          "look",
+          "notes",
+          "conversation",
+          "status",
+          "why",
+          "total",
+          "held",
+          "stopped",
+          "batches",
+          "characters",
+          "whole",
+          "batch",
+          "calls"
+        ],
+        "title": "ReadingResponseSchema",
+        "type": "object"
+      },
+      "ReadingResponseSchema.b67cf98.AttachmentBlockSchema": {
+        "additionalProperties": false,
+        "description": "What Claude Code added to the request beside the conversation's own\nlines: a reminder, the instruction files it loaded, a listing.",
+        "properties": {
+          "at": {
+            "description": "The time of the line it stood in",
+            "format": "date-time",
+            "title": "At",
+            "type": "string"
+          },
+          "kind": {
+            "const": "attachment",
+            "title": "Kind",
+            "type": "string"
+          },
+          "text": {
+            "description": "Its words where it is words, else what it holds, as JSON",
+            "title": "Text",
+            "type": "string"
+          },
+          "type": {
+            "description": "Claude Code's word for what it is",
+            "examples": [
+              "instructions",
+              "total_tokens_reminder"
+            ],
+            "minLength": 1,
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "at",
+          "kind",
+          "type",
+          "text"
+        ],
+        "title": "AttachmentBlockSchema",
+        "type": "object"
+      },
+      "ReadingResponseSchema.b67cf98.ImageBlockSchema": {
+        "additionalProperties": false,
+        "description": "An image that stood in the line of the `user` block before it.",
+        "properties": {
+          "at": {
+            "description": "The time of the line it stood in",
+            "format": "date-time",
+            "title": "At",
+            "type": "string"
+          },
+          "kind": {
+            "const": "image",
+            "title": "Kind",
+            "type": "string"
+          },
+          "media_type": {
+            "description": "Its media type",
+            "examples": [
+              "image/png"
+            ],
+            "title": "Media Type",
+            "type": "string"
+          },
+          "size": {
+            "description": "Its size in bytes",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "title": "Size",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "media_type",
+          "size",
+          "at",
+          "kind"
+        ],
+        "title": "ImageBlockSchema",
+        "type": "object"
+      },
+      "ReadingResponseSchema.b67cf98.ReadImageSchema": {
+        "additionalProperties": false,
+        "description": "An image that stood in a result: what it was, never its bytes.",
+        "properties": {
+          "media_type": {
+            "description": "Its media type",
+            "examples": [
+              "image/png"
+            ],
+            "title": "Media Type",
+            "type": "string"
+          },
+          "size": {
+            "description": "Its size in bytes",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "title": "Size",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "media_type",
+          "size"
+        ],
+        "title": "ReadImageSchema",
+        "type": "object"
+      },
+      "ReadingResponseSchema.b67cf98.ReadResultSchema": {
+        "additionalProperties": false,
+        "description": "A tool's result.",
+        "properties": {
+          "at": {
+            "description": "When it returned",
+            "format": "date-time",
+            "title": "At",
+            "type": "string"
+          },
+          "error": {
+            "description": "Whether the tool said it failed",
+            "title": "Error",
+            "type": "boolean"
+          },
+          "images": {
+            "description": "The images it held, in its order",
+            "items": {
+              "$ref": "#/components/schemas/ReadingResponseSchema.b67cf98.ReadImageSchema"
+            },
+            "title": "Images",
+            "type": "array"
+          },
+          "text": {
+            "description": "Its text, whole",
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "at",
+          "error",
+          "text",
+          "images"
+        ],
+        "title": "ReadResultSchema",
+        "type": "object"
+      },
+      "ReadingResponseSchema.b67cf98.ReaderBlockSchema": {
+        "description": "A block of a conversation, cut where it is long.",
+        "properties": {
+          "block": {
+            "description": "The block, each of its texts cut to its first 1,500 characters, the strings its tool call was given together",
+            "discriminator": {
+              "mapping": {
+                "attachment": "#/components/schemas/ReadingResponseSchema.b67cf98.AttachmentBlockSchema",
+                "image": "#/components/schemas/ReadingResponseSchema.b67cf98.ImageBlockSchema",
+                "synthetic": "#/components/schemas/ReadingResponseSchema.b67cf98.SyntheticBlockSchema",
+                "system": "#/components/schemas/ReadingResponseSchema.b67cf98.SystemBlockSchema",
+                "text": "#/components/schemas/ReadingResponseSchema.b67cf98.TextBlockSchema",
+                "thinking": "#/components/schemas/ReadingResponseSchema.b67cf98.ThinkingBlockSchema",
+                "tool_call": "#/components/schemas/ReadingResponseSchema.b67cf98.ToolCallBlockSchema",
+                "tool_result": "#/components/schemas/ReadingResponseSchema.b67cf98.ToolResultBlockSchema",
+                "user": "#/components/schemas/ReadingResponseSchema.b67cf98.UserBlockSchema"
+              },
+              "propertyName": "kind"
+            },
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ReadingResponseSchema.b67cf98.UserBlockSchema"
+              },
+              {
+                "$ref": "#/components/schemas/ReadingResponseSchema.b67cf98.ImageBlockSchema"
+              },
+              {
+                "$ref": "#/components/schemas/ReadingResponseSchema.b67cf98.SyntheticBlockSchema"
+              },
+              {
+                "$ref": "#/components/schemas/ReadingResponseSchema.b67cf98.AttachmentBlockSchema"
+              },
+              {
+                "$ref": "#/components/schemas/ReadingResponseSchema.b67cf98.SystemBlockSchema"
+              },
+              {
+                "$ref": "#/components/schemas/ReadingResponseSchema.b67cf98.ToolResultBlockSchema"
+              },
+              {
+                "$ref": "#/components/schemas/ReadingResponseSchema.b67cf98.TextBlockSchema"
+              },
+              {
+                "$ref": "#/components/schemas/ReadingResponseSchema.b67cf98.ThinkingBlockSchema"
+              },
+              {
+                "$ref": "#/components/schemas/ReadingResponseSchema.b67cf98.ToolCallBlockSchema"
+              }
+            ],
+            "title": "Block"
+          },
+          "length": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Its texts' full characters where it is cut; null, whole",
+            "title": "Length"
+          }
+        },
+        "required": [
+          "block",
+          "length"
+        ],
+        "title": "ReaderBlockSchema",
+        "type": "object"
+      },
+      "ReadingResponseSchema.b67cf98.ReaderCallSchema": {
+        "description": "A call of a conversation with its blocks.",
+        "properties": {
+          "after": {
+            "description": "What follows the conversation's last call, on that call alone",
+            "items": {
+              "$ref": "#/components/schemas/ReadingResponseSchema.b67cf98.ReaderBlockSchema"
+            },
+            "title": "After",
+            "type": "array"
+          },
+          "call": {
+            "description": "The Call, by its id, as its calls name it",
+            "title": "Call",
+            "type": "integer"
+          },
+          "held": {
+            "description": "Whether the reading holds the call; one it does not has no block",
+            "title": "Held",
+            "type": "boolean"
+          },
+          "received": {
+            "description": "What came in before it, since the call before, in order",
+            "items": {
+              "$ref": "#/components/schemas/ReadingResponseSchema.b67cf98.ReaderBlockSchema"
+            },
+            "title": "Received",
+            "type": "array"
+          },
+          "sent": {
+            "description": "What it put out, in order",
+            "items": {
+              "$ref": "#/components/schemas/ReadingResponseSchema.b67cf98.ReaderBlockSchema"
+            },
+            "title": "Sent",
+            "type": "array"
+          }
+        },
+        "required": [
+          "call",
+          "held",
+          "received",
+          "sent",
+          "after"
+        ],
+        "title": "ReaderCallSchema",
+        "type": "object"
+      },
+      "ReadingResponseSchema.b67cf98.SyntheticBlockSchema": {
+        "additionalProperties": false,
+        "description": "Words Claude Code wrote itself where a response would stand: no\nCall.",
+        "properties": {
+          "at": {
+            "description": "The time of the line it stood in",
+            "format": "date-time",
+            "title": "At",
+            "type": "string"
+          },
+          "kind": {
+            "const": "synthetic",
+            "title": "Kind",
+            "type": "string"
+          },
+          "text": {
+            "description": "Its text, whole",
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "at",
+          "kind",
+          "text"
+        ],
+        "title": "SyntheticBlockSchema",
+        "type": "object"
+      },
+      "ReadingResponseSchema.b67cf98.SystemBlockSchema": {
+        "additionalProperties": false,
+        "description": "A line Claude Code wrote into the conversation as itself: a local\ncommand's output, a compaction's boundary, a turn's end.",
+        "properties": {
+          "at": {
+            "description": "The time of the line it stood in",
+            "format": "date-time",
+            "title": "At",
+            "type": "string"
+          },
+          "kind": {
+            "const": "system",
+            "title": "Kind",
+            "type": "string"
+          },
+          "subtype": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Claude Code's word for what it is, none where it names none",
+            "examples": [
+              "local_command",
+              "turn_duration"
+            ],
+            "title": "Subtype"
+          },
+          "text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Its words, none where it has none",
+            "title": "Text"
+          }
+        },
+        "required": [
+          "at",
+          "kind",
+          "subtype",
+          "text"
+        ],
+        "title": "SystemBlockSchema",
+        "type": "object"
+      },
+      "ReadingResponseSchema.b67cf98.TextBlockSchema": {
+        "additionalProperties": false,
+        "description": "Words the model put out.",
+        "properties": {
+          "at": {
+            "description": "The time of the line it stood in",
+            "format": "date-time",
+            "title": "At",
+            "type": "string"
+          },
+          "kind": {
+            "const": "text",
+            "title": "Kind",
+            "type": "string"
+          },
+          "text": {
+            "description": "Its text, whole",
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "at",
+          "kind",
+          "text"
+        ],
+        "title": "TextBlockSchema",
+        "type": "object"
+      },
+      "ReadingResponseSchema.b67cf98.ThinkingBlockSchema": {
+        "additionalProperties": false,
+        "description": "The model's thinking.",
+        "properties": {
+          "at": {
+            "description": "The time of the line it stood in",
+            "format": "date-time",
+            "title": "At",
+            "type": "string"
+          },
+          "kind": {
+            "const": "thinking",
+            "title": "Kind",
+            "type": "string"
+          },
+          "text": {
+            "description": "Its text where the file has it, else empty",
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "at",
+          "kind",
+          "text"
+        ],
+        "title": "ThinkingBlockSchema",
+        "type": "object"
+      },
+      "ReadingResponseSchema.b67cf98.ToolCallBlockSchema": {
+        "additionalProperties": false,
+        "description": "A tool the Call requested, with the result that answered it.",
+        "properties": {
+          "at": {
+            "description": "The time of the line it stood in",
+            "format": "date-time",
+            "title": "At",
+            "type": "string"
+          },
+          "input": {
+            "additionalProperties": true,
+            "description": "What the tool was given, whole",
+            "title": "Input",
+            "type": "object"
+          },
+          "kind": {
+            "const": "tool_call",
+            "title": "Kind",
+            "type": "string"
+          },
+          "result": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ReadingResponseSchema.b67cf98.ReadResultSchema"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Its result; none where the file holds none"
+          },
+          "started": {
+            "anyOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The `agent_id` of the sub-agent's Transcript the call started, in this conversation; none where it started none",
+            "title": "Started"
+          },
+          "tool": {
+            "description": "The tool's name",
+            "minLength": 1,
+            "title": "Tool",
+            "type": "string"
+          },
+          "tool_use_id": {
+            "description": "Claude's id of the request, which its Tool Call's fact carries",
+            "minLength": 1,
+            "title": "Tool Use Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "at",
+          "kind",
+          "tool_use_id",
+          "tool",
+          "input",
+          "started",
+          "result"
+        ],
+        "title": "ToolCallBlockSchema",
+        "type": "object"
+      },
+      "ReadingResponseSchema.b67cf98.ToolResultBlockSchema": {
+        "additionalProperties": false,
+        "description": "A tool's result that sits on no tool call: the file holds no request\nof its id, or an earlier result answered it.",
+        "properties": {
+          "at": {
+            "description": "The time of the line it stood in",
+            "format": "date-time",
+            "title": "At",
+            "type": "string"
+          },
+          "error": {
+            "description": "Whether the tool said it failed",
+            "title": "Error",
+            "type": "boolean"
+          },
+          "images": {
+            "description": "The images it held, in its order",
+            "items": {
+              "$ref": "#/components/schemas/ReadingResponseSchema.b67cf98.ReadImageSchema"
+            },
+            "title": "Images",
+            "type": "array"
+          },
+          "kind": {
+            "const": "tool_result",
+            "title": "Kind",
+            "type": "string"
+          },
+          "text": {
+            "description": "Its text, whole",
+            "title": "Text",
+            "type": "string"
+          },
+          "tool_use_id": {
+            "description": "Claude's id of the request it names",
+            "minLength": 1,
+            "title": "Tool Use Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "at",
+          "error",
+          "text",
+          "images",
+          "kind",
+          "tool_use_id"
+        ],
+        "title": "ToolResultBlockSchema",
+        "type": "object"
+      },
+      "ReadingResponseSchema.b67cf98.UserBlockSchema": {
+        "additionalProperties": false,
+        "description": "A line that arrived as the person's and is no tool's result.",
+        "properties": {
+          "at": {
+            "description": "The time of the line it stood in",
+            "format": "date-time",
+            "title": "At",
+            "type": "string"
+          },
+          "kind": {
+            "const": "user",
+            "title": "Kind",
+            "type": "string"
+          },
+          "text": {
+            "description": "Its text, whole",
+            "title": "Text",
+            "type": "string"
+          },
+          "writer": {
+            "anyOf": [
+              {
+                "enum": [
+                  "person",
+                  "brief",
+                  "parent",
+                  "notice"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Who wrote it; none where the file does not say, as a main thread's of a Claude Code that named no source",
+            "title": "Writer"
+          }
+        },
+        "required": [
+          "at",
+          "kind",
+          "writer",
+          "text"
+        ],
+        "title": "UserBlockSchema",
+        "type": "object"
+      },
+      "ReadingTextsResponseSchema.b67cf98": {
+        "description": "Every block a batch cuts, whole, where the full texts come in one\nanswer.",
+        "properties": {
+          "address": {
+            "description": "The view's address, its state in its normal form after `#dash/`",
+            "title": "Address",
+            "type": "string"
+          },
+          "batches": {
+            "description": "The batches of 200 calls, in the order to take them: the one holding the selected call first; empty where the reading is not served",
+            "items": {
+              "type": "integer"
+            },
+            "title": "Batches",
+            "type": "array"
+          },
+          "characters": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "What the full texts add up to; null where it is not served",
+            "title": "Characters"
+          },
+          "conversation": {
+            "format": "uuid",
+            "title": "Conversation",
+            "type": "string"
+          },
+          "held": {
+            "description": "The calls the reader holds, the first of them",
+            "title": "Held",
+            "type": "integer"
+          },
+          "look": {
+            "description": "Its look-only parts as the address writes them",
+            "items": {
+              "type": "string"
+            },
+            "title": "Look",
+            "type": "array"
+          },
+          "notes": {
+            "description": "A note for each part it dropped",
+            "items": {
+              "type": "string"
+            },
+            "title": "Notes",
+            "type": "array"
+          },
+          "status": {
+            "description": "The reading served; the transcript gone from the collector's home; or the collector refused the read, could not be reached, or is not configured",
+            "enum": [
+              "served",
+              "gone",
+              "refused"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "stopped": {
+            "description": "Whether the reader stopped at 2,000 calls, short of `total`",
+            "title": "Stopped",
+            "type": "boolean"
+          },
+          "texts": {
+            "description": "Empty where they do not come in one answer",
+            "items": {
+              "$ref": "#/components/schemas/ReadingTextsResponseSchema.b67cf98.PlacedBlockSchema"
+            },
+            "title": "Texts",
+            "type": "array"
+          },
+          "total": {
+            "description": "The conversation's calls in the record",
+            "title": "Total",
+            "type": "integer"
+          },
+          "whole": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Whether the full texts come in one answer, at 2,000,000 characters or less; else a block's whole as it opens; null where it is not served",
+            "title": "Whole"
+          },
+          "why": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Why the read was refused; null otherwise",
+            "title": "Why"
+          }
+        },
+        "required": [
+          "address",
+          "look",
+          "notes",
+          "conversation",
+          "status",
+          "why",
+          "total",
+          "held",
+          "stopped",
+          "batches",
+          "characters",
+          "whole",
+          "texts"
+        ],
+        "title": "ReadingTextsResponseSchema",
+        "type": "object"
+      },
+      "ReadingTextsResponseSchema.b67cf98.AttachmentBlockSchema": {
+        "additionalProperties": false,
+        "description": "What Claude Code added to the request beside the conversation's own\nlines: a reminder, the instruction files it loaded, a listing.",
+        "properties": {
+          "at": {
+            "description": "The time of the line it stood in",
+            "format": "date-time",
+            "title": "At",
+            "type": "string"
+          },
+          "kind": {
+            "const": "attachment",
+            "title": "Kind",
+            "type": "string"
+          },
+          "text": {
+            "description": "Its words where it is words, else what it holds, as JSON",
+            "title": "Text",
+            "type": "string"
+          },
+          "type": {
+            "description": "Claude Code's word for what it is",
+            "examples": [
+              "instructions",
+              "total_tokens_reminder"
+            ],
+            "minLength": 1,
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "at",
+          "kind",
+          "type",
+          "text"
+        ],
+        "title": "AttachmentBlockSchema",
+        "type": "object"
+      },
+      "ReadingTextsResponseSchema.b67cf98.ImageBlockSchema": {
+        "additionalProperties": false,
+        "description": "An image that stood in the line of the `user` block before it.",
+        "properties": {
+          "at": {
+            "description": "The time of the line it stood in",
+            "format": "date-time",
+            "title": "At",
+            "type": "string"
+          },
+          "kind": {
+            "const": "image",
+            "title": "Kind",
+            "type": "string"
+          },
+          "media_type": {
+            "description": "Its media type",
+            "examples": [
+              "image/png"
+            ],
+            "title": "Media Type",
+            "type": "string"
+          },
+          "size": {
+            "description": "Its size in bytes",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "title": "Size",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "media_type",
+          "size",
+          "at",
+          "kind"
+        ],
+        "title": "ImageBlockSchema",
+        "type": "object"
+      },
+      "ReadingTextsResponseSchema.b67cf98.PlacedBlockSchema": {
+        "description": "A block whole, at its place.",
+        "properties": {
+          "block": {
+            "discriminator": {
+              "mapping": {
+                "attachment": "#/components/schemas/ReadingTextsResponseSchema.b67cf98.AttachmentBlockSchema",
+                "image": "#/components/schemas/ReadingTextsResponseSchema.b67cf98.ImageBlockSchema",
+                "synthetic": "#/components/schemas/ReadingTextsResponseSchema.b67cf98.SyntheticBlockSchema",
+                "system": "#/components/schemas/ReadingTextsResponseSchema.b67cf98.SystemBlockSchema",
+                "text": "#/components/schemas/ReadingTextsResponseSchema.b67cf98.TextBlockSchema",
+                "thinking": "#/components/schemas/ReadingTextsResponseSchema.b67cf98.ThinkingBlockSchema",
+                "tool_call": "#/components/schemas/ReadingTextsResponseSchema.b67cf98.ToolCallBlockSchema",
+                "tool_result": "#/components/schemas/ReadingTextsResponseSchema.b67cf98.ToolResultBlockSchema",
+                "user": "#/components/schemas/ReadingTextsResponseSchema.b67cf98.UserBlockSchema"
+              },
+              "propertyName": "kind"
+            },
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ReadingTextsResponseSchema.b67cf98.UserBlockSchema"
+              },
+              {
+                "$ref": "#/components/schemas/ReadingTextsResponseSchema.b67cf98.ImageBlockSchema"
+              },
+              {
+                "$ref": "#/components/schemas/ReadingTextsResponseSchema.b67cf98.SyntheticBlockSchema"
+              },
+              {
+                "$ref": "#/components/schemas/ReadingTextsResponseSchema.b67cf98.AttachmentBlockSchema"
+              },
+              {
+                "$ref": "#/components/schemas/ReadingTextsResponseSchema.b67cf98.SystemBlockSchema"
+              },
+              {
+                "$ref": "#/components/schemas/ReadingTextsResponseSchema.b67cf98.ToolResultBlockSchema"
+              },
+              {
+                "$ref": "#/components/schemas/ReadingTextsResponseSchema.b67cf98.TextBlockSchema"
+              },
+              {
+                "$ref": "#/components/schemas/ReadingTextsResponseSchema.b67cf98.ThinkingBlockSchema"
+              },
+              {
+                "$ref": "#/components/schemas/ReadingTextsResponseSchema.b67cf98.ToolCallBlockSchema"
+              }
+            ],
+            "title": "Block"
+          },
+          "call": {
+            "description": "The call it stands on, by its id",
+            "title": "Call",
+            "type": "integer"
+          },
+          "index": {
+            "description": "Its place in the part, from 0",
+            "title": "Index",
+            "type": "integer"
+          },
+          "part": {
+            "enum": [
+              "received",
+              "sent",
+              "after"
+            ],
+            "title": "Part",
+            "type": "string"
+          }
+        },
+        "required": [
+          "call",
+          "part",
+          "index",
+          "block"
+        ],
+        "title": "PlacedBlockSchema",
+        "type": "object"
+      },
+      "ReadingTextsResponseSchema.b67cf98.ReadImageSchema": {
+        "additionalProperties": false,
+        "description": "An image that stood in a result: what it was, never its bytes.",
+        "properties": {
+          "media_type": {
+            "description": "Its media type",
+            "examples": [
+              "image/png"
+            ],
+            "title": "Media Type",
+            "type": "string"
+          },
+          "size": {
+            "description": "Its size in bytes",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "title": "Size",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "media_type",
+          "size"
+        ],
+        "title": "ReadImageSchema",
+        "type": "object"
+      },
+      "ReadingTextsResponseSchema.b67cf98.ReadResultSchema": {
+        "additionalProperties": false,
+        "description": "A tool's result.",
+        "properties": {
+          "at": {
+            "description": "When it returned",
+            "format": "date-time",
+            "title": "At",
+            "type": "string"
+          },
+          "error": {
+            "description": "Whether the tool said it failed",
+            "title": "Error",
+            "type": "boolean"
+          },
+          "images": {
+            "description": "The images it held, in its order",
+            "items": {
+              "$ref": "#/components/schemas/ReadingTextsResponseSchema.b67cf98.ReadImageSchema"
+            },
+            "title": "Images",
+            "type": "array"
+          },
+          "text": {
+            "description": "Its text, whole",
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "at",
+          "error",
+          "text",
+          "images"
+        ],
+        "title": "ReadResultSchema",
+        "type": "object"
+      },
+      "ReadingTextsResponseSchema.b67cf98.SyntheticBlockSchema": {
+        "additionalProperties": false,
+        "description": "Words Claude Code wrote itself where a response would stand: no\nCall.",
+        "properties": {
+          "at": {
+            "description": "The time of the line it stood in",
+            "format": "date-time",
+            "title": "At",
+            "type": "string"
+          },
+          "kind": {
+            "const": "synthetic",
+            "title": "Kind",
+            "type": "string"
+          },
+          "text": {
+            "description": "Its text, whole",
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "at",
+          "kind",
+          "text"
+        ],
+        "title": "SyntheticBlockSchema",
+        "type": "object"
+      },
+      "ReadingTextsResponseSchema.b67cf98.SystemBlockSchema": {
+        "additionalProperties": false,
+        "description": "A line Claude Code wrote into the conversation as itself: a local\ncommand's output, a compaction's boundary, a turn's end.",
+        "properties": {
+          "at": {
+            "description": "The time of the line it stood in",
+            "format": "date-time",
+            "title": "At",
+            "type": "string"
+          },
+          "kind": {
+            "const": "system",
+            "title": "Kind",
+            "type": "string"
+          },
+          "subtype": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Claude Code's word for what it is, none where it names none",
+            "examples": [
+              "local_command",
+              "turn_duration"
+            ],
+            "title": "Subtype"
+          },
+          "text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Its words, none where it has none",
+            "title": "Text"
+          }
+        },
+        "required": [
+          "at",
+          "kind",
+          "subtype",
+          "text"
+        ],
+        "title": "SystemBlockSchema",
+        "type": "object"
+      },
+      "ReadingTextsResponseSchema.b67cf98.TextBlockSchema": {
+        "additionalProperties": false,
+        "description": "Words the model put out.",
+        "properties": {
+          "at": {
+            "description": "The time of the line it stood in",
+            "format": "date-time",
+            "title": "At",
+            "type": "string"
+          },
+          "kind": {
+            "const": "text",
+            "title": "Kind",
+            "type": "string"
+          },
+          "text": {
+            "description": "Its text, whole",
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "at",
+          "kind",
+          "text"
+        ],
+        "title": "TextBlockSchema",
+        "type": "object"
+      },
+      "ReadingTextsResponseSchema.b67cf98.ThinkingBlockSchema": {
+        "additionalProperties": false,
+        "description": "The model's thinking.",
+        "properties": {
+          "at": {
+            "description": "The time of the line it stood in",
+            "format": "date-time",
+            "title": "At",
+            "type": "string"
+          },
+          "kind": {
+            "const": "thinking",
+            "title": "Kind",
+            "type": "string"
+          },
+          "text": {
+            "description": "Its text where the file has it, else empty",
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "at",
+          "kind",
+          "text"
+        ],
+        "title": "ThinkingBlockSchema",
+        "type": "object"
+      },
+      "ReadingTextsResponseSchema.b67cf98.ToolCallBlockSchema": {
+        "additionalProperties": false,
+        "description": "A tool the Call requested, with the result that answered it.",
+        "properties": {
+          "at": {
+            "description": "The time of the line it stood in",
+            "format": "date-time",
+            "title": "At",
+            "type": "string"
+          },
+          "input": {
+            "additionalProperties": true,
+            "description": "What the tool was given, whole",
+            "title": "Input",
+            "type": "object"
+          },
+          "kind": {
+            "const": "tool_call",
+            "title": "Kind",
+            "type": "string"
+          },
+          "result": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ReadingTextsResponseSchema.b67cf98.ReadResultSchema"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Its result; none where the file holds none"
+          },
+          "started": {
+            "anyOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The `agent_id` of the sub-agent's Transcript the call started, in this conversation; none where it started none",
+            "title": "Started"
+          },
+          "tool": {
+            "description": "The tool's name",
+            "minLength": 1,
+            "title": "Tool",
+            "type": "string"
+          },
+          "tool_use_id": {
+            "description": "Claude's id of the request, which its Tool Call's fact carries",
+            "minLength": 1,
+            "title": "Tool Use Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "at",
+          "kind",
+          "tool_use_id",
+          "tool",
+          "input",
+          "started",
+          "result"
+        ],
+        "title": "ToolCallBlockSchema",
+        "type": "object"
+      },
+      "ReadingTextsResponseSchema.b67cf98.ToolResultBlockSchema": {
+        "additionalProperties": false,
+        "description": "A tool's result that sits on no tool call: the file holds no request\nof its id, or an earlier result answered it.",
+        "properties": {
+          "at": {
+            "description": "The time of the line it stood in",
+            "format": "date-time",
+            "title": "At",
+            "type": "string"
+          },
+          "error": {
+            "description": "Whether the tool said it failed",
+            "title": "Error",
+            "type": "boolean"
+          },
+          "images": {
+            "description": "The images it held, in its order",
+            "items": {
+              "$ref": "#/components/schemas/ReadingTextsResponseSchema.b67cf98.ReadImageSchema"
+            },
+            "title": "Images",
+            "type": "array"
+          },
+          "kind": {
+            "const": "tool_result",
+            "title": "Kind",
+            "type": "string"
+          },
+          "text": {
+            "description": "Its text, whole",
+            "title": "Text",
+            "type": "string"
+          },
+          "tool_use_id": {
+            "description": "Claude's id of the request it names",
+            "minLength": 1,
+            "title": "Tool Use Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "at",
+          "error",
+          "text",
+          "images",
+          "kind",
+          "tool_use_id"
+        ],
+        "title": "ToolResultBlockSchema",
+        "type": "object"
+      },
+      "ReadingTextsResponseSchema.b67cf98.UserBlockSchema": {
+        "additionalProperties": false,
+        "description": "A line that arrived as the person's and is no tool's result.",
+        "properties": {
+          "at": {
+            "description": "The time of the line it stood in",
+            "format": "date-time",
+            "title": "At",
+            "type": "string"
+          },
+          "kind": {
+            "const": "user",
+            "title": "Kind",
+            "type": "string"
+          },
+          "text": {
+            "description": "Its text, whole",
+            "title": "Text",
+            "type": "string"
+          },
+          "writer": {
+            "anyOf": [
+              {
+                "enum": [
+                  "person",
+                  "brief",
+                  "parent",
+                  "notice"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Who wrote it; none where the file does not say, as a main thread's of a Claude Code that named no source",
+            "title": "Writer"
+          }
+        },
+        "required": [
+          "at",
+          "kind",
+          "writer",
+          "text"
+        ],
+        "title": "UserBlockSchema",
+        "type": "object"
+      },
       "ReadyzResponse.d817ae2": {
         "description": "Readiness response: the overall verdict and every check.",
         "properties": {
@@ -24969,6 +27070,371 @@
           }
         ],
         "summary": "Answer a conversation's calls from the record at the query: every Call of the thread over all time with no chips, in its file's order, each with the call's columns, its events with their details and whether the view's window and scope hold it.",
+        "tags": [],
+        "x-required-role": "editor"
+      }
+    },
+    "/api/dashboard/conversations/{transcript_id}/reading": {
+      "get": {
+        "description": "Returns:     200: The batch, with the view's address, its look-only parts and a         note for each part dropped     400: The state has faults: the error names every one, and ends on a         correct example of each kind of part refused     401: No one is signed in     403: The caller lacks the editor role     404: The record holds no such thread     409: The read passed the engine's bounds: a statement past its         timeout (`QUERY_TIMEOUT`), one past the database's limit on         temporary files (`QUERY_TEMP_FILE_LIMIT`), or no slot among its         statements at once freed in time (`QUERY_BUSY`)",
+        "operationId": "get__api_dashboard_conversations_{transcript_id}_reading",
+        "parameters": [
+          {
+            "description": "",
+            "in": "path",
+            "name": "transcript_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "description": "The view's state as the URL writes it after `#dash/`, `#dash/` before it or not; an entry, its focus alone, is filled in from the record",
+            "in": "query",
+            "name": "state",
+            "required": true,
+            "schema": {
+              "description": "The view's state as the URL writes it after `#dash/`, `#dash/` before it or not; an entry, its focus alone, is filled in from the record",
+              "examples": [
+                "t=qw&by=project&m=cost.sum&col=none"
+              ],
+              "title": "State",
+              "type": "string"
+            }
+          },
+          {
+            "description": "The batch of the calls, from 0; none, the first of `batches`, the one holding the call the state selects",
+            "in": "query",
+            "name": "batch",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "The batch of the calls, from 0; none, the first of `batches`, the one holding the call the state selects",
+              "title": "Batch"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReadingResponseSchema.b67cf98"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Conflict"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Answer a batch of a conversation's calls with their blocks, from its reading as the collector serves it now: 200 calls of those a conversation's calls answer, in their order, the batch holding the call the state selects where none is asked; each of a block's texts cut to its first 1,500 characters, a cut block with its full length. The head says whether the reading was served, the transcript is gone or the read was refused, with why; the batches in the order to take them; whether the reader stopped at 2,000 calls; and whether the full texts come in one answer.",
+        "tags": [],
+        "x-required-role": "editor"
+      }
+    },
+    "/api/dashboard/conversations/{transcript_id}/reading/block": {
+      "get": {
+        "description": "Returns:     200: The block whole, with the view's address, its look-only parts         and a note for each part dropped     400: The state has faults: the error names every one, and ends on a         correct example of each kind of part refused     401: No one is signed in     403: The caller lacks the editor role     404: The record holds no such thread, or its reading no such block         on a call the reader holds     409: The read passed the engine's bounds: a statement past its         timeout (`QUERY_TIMEOUT`), one past the database's limit on         temporary files (`QUERY_TEMP_FILE_LIMIT`), or no slot among its         statements at once freed in time (`QUERY_BUSY`)",
+        "operationId": "get__api_dashboard_conversations_{transcript_id}_reading_block",
+        "parameters": [
+          {
+            "description": "",
+            "in": "path",
+            "name": "transcript_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "description": "The view's state as the URL writes it after `#dash/`, `#dash/` before it or not; an entry, its focus alone, is filled in from the record",
+            "in": "query",
+            "name": "state",
+            "required": true,
+            "schema": {
+              "description": "The view's state as the URL writes it after `#dash/`, `#dash/` before it or not; an entry, its focus alone, is filled in from the record",
+              "examples": [
+                "t=qw&by=project&m=cost.sum&col=none"
+              ],
+              "title": "State",
+              "type": "string"
+            }
+          },
+          {
+            "description": "The call it stands on, by its id",
+            "in": "query",
+            "name": "call",
+            "required": true,
+            "schema": {
+              "description": "The call it stands on, by its id",
+              "title": "Call",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "What came in before the call, what it put out, or what follows the conversation's last call",
+            "in": "query",
+            "name": "part",
+            "required": true,
+            "schema": {
+              "description": "What came in before the call, what it put out, or what follows the conversation's last call",
+              "enum": [
+                "received",
+                "sent",
+                "after"
+              ],
+              "title": "Part",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Its place in the part, from 0",
+            "in": "query",
+            "name": "index",
+            "required": true,
+            "schema": {
+              "description": "Its place in the part, from 0",
+              "minimum": 0,
+              "title": "Index",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReadingBlockResponseSchema.b67cf98"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Conflict"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Answer one block of a conversation whole, as it opens, by its call, its part and its place in it.",
+        "tags": [],
+        "x-required-role": "editor"
+      }
+    },
+    "/api/dashboard/conversations/{transcript_id}/reading/texts": {
+      "get": {
+        "description": "Returns:     200: The blocks whole, with the view's address, its look-only parts         and a note for each part dropped     400: The state has faults: the error names every one, and ends on a         correct example of each kind of part refused     401: No one is signed in     403: The caller lacks the editor role     404: The record holds no such thread     409: The read passed the engine's bounds: a statement past its         timeout (`QUERY_TIMEOUT`), one past the database's limit on         temporary files (`QUERY_TEMP_FILE_LIMIT`), or no slot among its         statements at once freed in time (`QUERY_BUSY`)",
+        "operationId": "get__api_dashboard_conversations_{transcript_id}_reading_texts",
+        "parameters": [
+          {
+            "description": "",
+            "in": "path",
+            "name": "transcript_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "description": "The view's state as the URL writes it after `#dash/`, `#dash/` before it or not; an entry, its focus alone, is filled in from the record",
+            "in": "query",
+            "name": "state",
+            "required": true,
+            "schema": {
+              "description": "The view's state as the URL writes it after `#dash/`, `#dash/` before it or not; an entry, its focus alone, is filled in from the record",
+              "examples": [
+                "t=qw&by=project&m=cost.sum&col=none"
+              ],
+              "title": "State",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReadingTextsResponseSchema.b67cf98"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Conflict"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Answer every block of a conversation that a batch cuts, whole, in one answer, where its full texts add up to 2,000,000 characters or less; none where they add up to more, a block's whole coming as it opens.",
         "tags": [],
         "x-required-role": "editor"
       }

@@ -14,6 +14,7 @@ from app.dashboard.bounds import Bounds
 from app.dashboard.counts import CountsService
 from app.dashboard.items import ItemsService
 from app.dashboard.lanes import LanesService
+from app.dashboard.reader import ReaderService
 from app.dashboard.readings import ReadingsService
 from app.dashboard.rows import RowsService
 from app.dashboard.series import SeriesService
@@ -681,6 +682,14 @@ class ServiceContainer(containers.DeclarativeContainer):
         token=app_config.provided.collector_token,
         directory=app_config.provided.dashboard_readings_dir,
         max_bytes=app_config.provided.dashboard_readings_max_bytes,
+    )
+    # A conversation in the reader, its blocks under the size rule (F154.7)
+    reader_service = providers.Factory(
+        ReaderService,
+        db=db_session,
+        address_service=address_service,
+        bounds=dashboard_bounds,
+        readings_service=readings_service,
     )
     # A view's two counts, each answered as a task, and an attribute's values
     # (F154.6)

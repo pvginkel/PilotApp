@@ -3,14 +3,27 @@ name, a part at a call (F154.4), with what the dashboard stores (F155); for
 GET /api/dashboard/address, a view's state checked and written back in its
 normal form (F159); for GET /api/dashboard/rows, a view's rows (F154.1); for
 GET /api/dashboard/series and its events strip, a view's series (F163.3,
-F164.6); for GET /api/dashboard/lanes, a view's lanes (F164.6); and for GET
-/api/dashboard/items and a conversation's calls, a view's items (F165).
+F164.6); for GET /api/dashboard/lanes, a view's lanes (F164.6); for GET
+/api/dashboard/items and a conversation's calls, a view's items (F165); and
+for a conversation's reading in the reader, its blocks under the size rule
+(F154.7, F165.7).
 """
 
 import uuid
 from datetime import date, datetime
-from typing import Literal
+from typing import Annotated, Literal
 
+from pilot_collection.reading import (
+    AttachmentBlockSchema,
+    ImageBlockSchema,
+    SyntheticBlockSchema,
+    SystemBlockSchema,
+    TextBlockSchema,
+    ThinkingBlockSchema,
+    ToolCallBlockSchema,
+    ToolResultBlockSchema,
+    UserBlockSchema,
+)
 from pydantic import BaseModel, Field
 
 from app.schemas.task_schema import TaskStatus
@@ -973,6 +986,155 @@ class CallsResponseSchema(BaseModel):
     )
     calls: list[CallSchema] = Field(description="In their file's order")
     total: int = Field(description="The calls, those answered and the rest")
+
+
+ReaderPart = Literal["received", "sent", "after"]
+
+ReaderBlock = Annotated[
+    UserBlockSchema
+    | ImageBlockSchema
+    | SyntheticBlockSchema
+    | AttachmentBlockSchema
+    | SystemBlockSchema
+    | ToolResultBlockSchema
+    | TextBlockSchema
+    | ThinkingBlockSchema
+    | ToolCallBlockSchema,
+    Field(discriminator="kind"),
+]
+"""A block of a conversation's reading, as its collector serves it."""
+
+
+class ReadingQuerySchema(StateQuerySchema):
+    """A view's state, and the batch of a conversation's calls asked."""
+
+    batch: int | None = Field(
+        default=None,
+        ge=0,
+        description=(
+            "The batch of the calls, from 0; none, the first of `batches`, the "
+            "one holding the call the state selects"
+        ),
+    )
+
+
+class ReadingBlockQuerySchema(StateQuerySchema):
+    """A view's state, and the place of one block of a conversation."""
+
+    call: int = Field(description="The call it stands on, by its id")
+    part: ReaderPart = Field(
+        description=(
+            "What came in before the call, what it put out, or what follows the "
+            "conversation's last call"
+        )
+    )
+    index: int = Field(ge=0, description="Its place in the part, from 0")
+
+
+class ReaderBlockSchema(BaseModel):
+    """A block of a conversation, cut where it is long."""
+
+    block: ReaderBlock = Field(
+        description=(
+            "The block, each of its texts cut to its first 1,500 characters, "
+            "the strings its tool call was given together"
+        )
+    )
+    length: int | None = Field(
+        description="Its texts' full characters where it is cut; null, whole"
+    )
+
+
+class ReaderCallSchema(BaseModel):
+    """A call of a conversation with its blocks."""
+
+    call: int = Field(description="The Call, by its id, as its calls name it")
+    held: bool = Field(
+        description="Whether the reading holds the call; one it does not has no block"
+    )
+    received: list[ReaderBlockSchema] = Field(
+        description="What came in before it, since the call before, in order"
+    )
+    sent: list[ReaderBlockSchema] = Field(description="What it put out, in order")
+    after: list[ReaderBlockSchema] = Field(
+        description="What follows the conversation's last call, on that call alone"
+    )
+
+
+class PlacedBlockSchema(BaseModel):
+    """A block whole, at its place."""
+
+    call: int = Field(description="The call it stands on, by its id")
+    part: ReaderPart
+    index: int = Field(description="Its place in the part, from 0")
+    block: ReaderBlock
+
+
+class _ReaderHeadSchema(BaseModel):
+    address: str = Field(
+        description="The view's address, its state in its normal form after `#dash/`"
+    )
+    look: list[str] = Field(
+        description="Its look-only parts as the address writes them"
+    )
+    notes: list[str] = Field(description="A note for each part it dropped")
+    conversation: uuid.UUID
+    status: Literal["served", "gone", "refused"] = Field(
+        description=(
+            "The reading served; the transcript gone from the collector's home; "
+            "or the collector refused the read, could not be reached, or is not "
+            "configured"
+        )
+    )
+    why: str | None = Field(description="Why the read was refused; null otherwise")
+    total: int = Field(description="The conversation's calls in the record")
+    held: int = Field(description="The calls the reader holds, the first of them")
+    stopped: bool = Field(
+        description="Whether the reader stopped at 2,000 calls, short of `total`"
+    )
+    batches: list[int] = Field(
+        description=(
+            "The batches of 200 calls, in the order to take them: the one "
+            "holding the selected call first; empty where the reading is not "
+            "served"
+        )
+    )
+    characters: int | None = Field(
+        description="What the full texts add up to; null where it is not served"
+    )
+    whole: bool | None = Field(
+        description=(
+            "Whether the full texts come in one answer, at 2,000,000 characters "
+            "or less; else a block's whole as it opens; null where it is not "
+            "served"
+        )
+    )
+
+
+class ReadingResponseSchema(_ReaderHeadSchema):
+    """A batch of a conversation's calls, each with its blocks cut."""
+
+    batch: int | None = Field(
+        description="The batch answered; null where none is, nor any call"
+    )
+    calls: list[ReaderCallSchema] = Field(description="The batch's calls, in order")
+
+
+class ReadingTextsResponseSchema(_ReaderHeadSchema):
+    """Every block a batch cuts, whole, where the full texts come in one
+    answer."""
+
+    texts: list[PlacedBlockSchema] = Field(
+        description="Empty where they do not come in one answer"
+    )
+
+
+class ReadingBlockResponseSchema(_ReaderHeadSchema):
+    """One block of a conversation, whole."""
+
+    block: PlacedBlockSchema | None = Field(
+        description="Null where the reading is not served"
+    )
 
 
 class CountsStartedSchema(BaseModel):
