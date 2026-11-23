@@ -133,7 +133,7 @@ def _resumed() -> Scenario:
             Call(
                 at=9,
                 tokens=Tokens(cache_read=30, output=2),
-                occurred=(Occurrence(10, "interrupt", is_error=False),),
+                occurred=(Occurrence(10, "interrupt"),),
             ),
         ),
     )
@@ -146,7 +146,7 @@ def _resumed() -> Scenario:
                 at=52,
                 back_to="the first",
                 tokens=Tokens(output=4),
-                occurred=(Occurrence(53, "api_error", is_error=True, detail="500"),),
+                occurred=(Occurrence(53, "api_error", detail="500"),),
             ),
         ),
     )

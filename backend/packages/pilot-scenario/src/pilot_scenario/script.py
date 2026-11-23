@@ -33,11 +33,11 @@ class Occurrence:
     """What occurred at one moment after a Call that no other part of the
     script says, of an Event Kind Claude Code writes a line of: an API error
     a request failed with for good, `api_error`, its status the `detail`, or
-    the person's interruption of the response, `interrupt`."""
+    the person's interruption of the response, `interrupt`. Whether it is an
+    error is its kind's, as the line says no more."""
 
     at: int
     kind: str
-    is_error: bool
     detail: str | None = None
 
 

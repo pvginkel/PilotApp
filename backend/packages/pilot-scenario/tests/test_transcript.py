@@ -577,9 +577,7 @@ def _resumed() -> Scenario:
                                         at=8,
                                         tokens=Tokens(input=4, output=2),
                                         tools=(ToolUse("Bash", "sleep 600"),),
-                                        occurred=(
-                                            Occurrence(9, "interrupt", is_error=False),
-                                        ),
+                                        occurred=(Occurrence(9, "interrupt"),),
                                     ),
                                 ),
                             ),
@@ -598,12 +596,7 @@ def _resumed() -> Scenario:
                                         back_to="the first",
                                         tokens=Tokens(output=3),
                                         occurred=(
-                                            Occurrence(
-                                                51,
-                                                "api_error",
-                                                is_error=True,
-                                                detail="500",
-                                            ),
+                                            Occurrence(51, "api_error", detail="500"),
                                         ),
                                     ),
                                     Compaction(at=52, trigger="manual", before=900),
@@ -1317,7 +1310,7 @@ class TestTheLines:
         (prompt,) = first.prompts
         step = prompt.steps[0]
         assert isinstance(step, Call)
-        call = replace(step, occurred=(Occurrence(6, "gate_red", is_error=True),))
+        call = replace(step, occurred=(Occurrence(6, "gate_red"),))
         steps = (call, *prompt.steps[1:])
         launches = (replace(first, prompts=(replace(prompt, steps=steps),)), *rest)
         other = replace(resumed, sessions=(replace(session, launches=launches),))

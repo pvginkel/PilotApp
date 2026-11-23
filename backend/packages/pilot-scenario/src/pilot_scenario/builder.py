@@ -65,6 +65,10 @@ _EPOCH = datetime.fromtimestamp(0, UTC)
 _TASK = text(220)
 """The task an Agent call gives the sub-agent it starts."""
 
+_ERROR = "api_error"
+"""The Event Kind of an occurrence that is an error: an interruption is
+none."""
+
 type Step = Call | Compaction
 
 
@@ -350,7 +354,7 @@ class _Thread:
                 + [
                     _given(
                         kind=occurrence.kind,
-                        is_error=occurrence.is_error,
+                        is_error=occurrence.kind == _ERROR,
                         at=at(occurrence.at),
                         detail=occurrence.detail,
                     )

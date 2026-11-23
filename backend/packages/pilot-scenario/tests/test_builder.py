@@ -337,14 +337,14 @@ class TestAMainThread:
                 sent=5,
                 retried=(Retry(sent=2, failed=3, status=529), Retry(sent=4, failed=4)),
                 tokens=Tokens(input=10, output=2),
-                occurred=(Occurrence(7, "interrupt", is_error=False),),
+                occurred=(Occurrence(7, "interrupt"),),
             ),
             Call(
                 at=12,
                 sent=10,
                 retried=(Retry(sent=8, failed=9, status=500),),
                 tokens=Tokens(input=10, output=2),
-                occurred=(Occurrence(13, "api_error", is_error=True, detail="429"),),
+                occurred=(Occurrence(13, "api_error", detail="429"),),
             ),
         )
         first, second = Builder(scenario, UNTIL).publications()[0]["calls"]
