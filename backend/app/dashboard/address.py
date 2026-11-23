@@ -55,11 +55,13 @@ class Address:
 @dataclass(frozen=True)
 class View:
     """A state's address, with the catalogue and the quota weeks it was
-    read under."""
+    read under, and the deadline of the answer's reads: the engine's timeout
+    from the state's check, which an entry's read took its time of."""
 
     address: Address
     catalogue: Catalogue
     weeks: tuple[Period, ...]
+    deadline: float
 
 
 class AddressService:
@@ -85,12 +87,14 @@ class AddressService:
         self, written: str, fix_time: bool = False, now: datetime | None = None
     ) -> View:
         """The address of the state `written`, as `address` gives it, with
-        the catalogue and the quota weeks it was read under."""
+        the catalogue and the quota weeks it was read under, and the
+        deadline its answer's reads take."""
+        deadline = self.bounds.deadline()
         catalogue = self.catalogue_service.catalogue(self.db)
         weeks = self.weeks()
         checked = read(written, catalogue, weeks)
         if is_entry(written):
-            checked = self.entry(catalogue, checked)
+            checked = self.entry(catalogue, checked, deadline)
         state = checked.state
         if fix_time:
             state = replace(
@@ -101,18 +105,19 @@ class AddressService:
             Address(state, PREFIX + write(state), look(state), checked.notes),
             catalogue,
             weeks,
+            deadline,
         )
 
     def weeks(self) -> tuple[Period, ...]:
         """The quota weeks the record holds, in the order they start."""
         return quota_weeks(self.db)
 
-    def entry(self, catalogue: Catalogue, checked: Checked) -> Checked:
+    def entry(self, catalogue: Catalogue, checked: Checked, deadline: float) -> Checked:
         """An entry's state: its focus's path as the drill stack, each level
         as if drilled from By its own part; By the focus's parts in rows;
         cost and the cache misses; the quota weeks its Calls fall in, all
         time where it has none (F166.1). Its read runs under the engine's
-        bounds."""
+        bounds, before `deadline`."""
         focus = checked.state.focus
         assert focus is not None
         dimension = catalogue.dimension(focus.dimension)
@@ -123,7 +128,7 @@ class AddressService:
             *(catalogue.dimension(key).path(row) for key in above),
         ]
         named = dimension.path(row) == focus.key
-        with self.bounds.read(self.db) as db:
+        with self.bounds.read(self.db, deadline) as db:
             found = db.execute(
                 select(*columns)
                 .select_from(row.source())

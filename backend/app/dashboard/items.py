@@ -196,7 +196,7 @@ class ItemsService:
         catalogue = view.catalogue
         found = viewed(state, catalogue, view, now or datetime.now(UTC))
         grain = _grain(catalogue, items_grain(state, found))
-        with self.bounds.read(self.db) as db:
+        with self.bounds.read(self.db, view.deadline) as db:
             if found.judges:
                 shaper, read = answered(db, found, catalogue, view.address)
                 if len(shaper.rows) < len(read):
@@ -243,7 +243,7 @@ class ItemsService:
             outliers=None,
         )
         grain = _grain(catalogue, CALL)
-        with self.bounds.read(self.db) as db:
+        with self.bounds.read(self.db, view.deadline) as db:
             if db.get(Transcript, conversation) is None:
                 raise RecordNotFoundException("Conversation", str(conversation))
             calls, total = _Lister(db, catalogue, state).calls(

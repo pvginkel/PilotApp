@@ -1,6 +1,7 @@
 """The bounds every statement of the dashboard's engine runs under (F154.5):
 a read-only transaction of its own under the timeout, which bounds the read
-whole, its wait for a slot and its statements together, `work_mem` never
+whole, its wait for a slot and its statements together, the reads of one
+answer sharing one deadline, `work_mem` never
 raised, a statement past the timeout or the limit on temporary files refused
 with a reason told apart by PostgreSQL's code, and the statements at once
 bounded below the app's pool."""
@@ -57,6 +58,20 @@ class TestBounds:
             bounds.read(session) as db,
         ):
             db.execute(text("SELECT pg_sleep(0.6)"))
+            db.execute(text("SELECT pg_sleep(0.6)"))
+
+        assert refused.value.reason == "timeout"
+
+    def test_reads_given_one_deadline_share_it(self, session: DbSession) -> None:
+        bounds = Bounds(timeout_seconds=1, at_once=1, pool=5)
+        deadline = bounds.deadline()
+
+        with bounds.read(session, deadline) as db:
+            db.execute(text("SELECT pg_sleep(0.6)"))
+        with (
+            pytest.raises(QueryRefusedException) as refused,
+            bounds.read(session, deadline) as db,
+        ):
             db.execute(text("SELECT pg_sleep(0.6)"))
 
         assert refused.value.reason == "timeout"

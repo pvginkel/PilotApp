@@ -204,7 +204,7 @@ class RowsService:
         found = plan(
             view.address.state, view.catalogue, view.weeks, now or datetime.now(UTC)
         )
-        with self.bounds.read(self.db) as db:
+        with self.bounds.read(self.db, view.deadline) as db:
             shaper, _ = answered(db, found, view.catalogue, view.address)
         return shaper.shaped()
 

@@ -2,18 +2,24 @@
 form, an entry's focus filled in from the record (F166.1), and its time
 range fixed on request."""
 
+import time
 import uuid
+from collections.abc import Callable
 from datetime import UTC, date, datetime, timedelta
+from typing import Any
 
 import pytest
+from dependency_injector import providers
 from sqlalchemy import delete
 from sqlalchemy.orm import Session as DbSession
 
 from app import models
 from app.dashboard.address import AddressService, fixed, parents
+from app.dashboard.bounds import Bounds
 from app.dashboard.catalogue import Catalogue
+from app.dashboard.reading import Checked
 from app.dashboard.state import Between, Preset, Weeks
-from app.exceptions import StateRefusedException
+from app.exceptions import QueryRefusedException, StateRefusedException
 from app.models import Project, QuotaWeek, User
 from app.services.container import ServiceContainer
 from app.services.quota_week_service import Period
@@ -210,6 +216,53 @@ class TestEntry:
     def test_one_that_is_no_focus_is_refused(self, service: AddressService) -> None:
         with pytest.raises(StateRefusedException):
             service.address("f=slice:x")
+
+
+ANSWERS: dict[str, Callable[[ServiceContainer, Record, str], object]] = {
+    "rows": lambda held, worked, entry: held.rows_service().rows(entry, now=NOW),
+    "items": lambda held, worked, entry: held.items_service().items(entry, now=NOW),
+    "calls": lambda held, worked, entry: held.items_service().calls(
+        entry, worked.thread.id, now=NOW
+    ),
+    "values": lambda held, worked, entry: held.counts_service().values(
+        entry, "psession", now=NOW
+    ),
+    "reading": lambda held, worked, entry: held.reader_service().batch(
+        entry, worked.thread.id
+    ),
+}
+
+
+class TestOneDeadline:
+    """An answer whose state is an entry runs its read in what the entry's
+    read left of the engine's timeout, so that the two together stay within
+    it, and within what the proxies in front of `/api/` wait."""
+
+    @pytest.fixture
+    def entry_taking_the_timeout(
+        self, container: ServiceContainer, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        container.dashboard_bounds.override(
+            providers.Object(Bounds(timeout_seconds=0.5, at_once=1, pool=5))
+        )
+        entry = AddressService.entry
+
+        def slow(*args: Any, **kwargs: Any) -> Checked:
+            filled = entry(*args, **kwargs)
+            time.sleep(0.6)
+            return filled
+
+        monkeypatch.setattr(AddressService, "entry", slow)
+
+    @pytest.mark.usefixtures("entry_taking_the_timeout", "readings_service")
+    @pytest.mark.parametrize("answer", ANSWERS)
+    def test_its_read_is_refused_once_the_entrys_took_the_timeout(
+        self, container: ServiceContainer, worked: Record, answer: str
+    ) -> None:
+        with pytest.raises(QueryRefusedException) as refused:
+            ANSWERS[answer](container, worked, f"f=project:{worked.project.id}")
+
+        assert refused.value.reason == "timeout"
 
 
 class TestParents:

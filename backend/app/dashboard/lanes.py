@@ -177,7 +177,7 @@ class LanesService:
         lanes_of(state)
         catalogue = view.catalogue
         found = plan(state, catalogue, view.weeks, now or datetime.now(UTC))
-        with self.bounds.read(self.db) as db:
+        with self.bounds.read(self.db, view.deadline) as db:
             shaper, read = answered(db, found, catalogue, view.address)
             shaped = shaper.shaped(every=True)
             rows = {row.key: row for row in shaped.rows}

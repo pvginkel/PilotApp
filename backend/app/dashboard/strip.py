@@ -108,7 +108,7 @@ class StripService:
             return Strip(
                 view.address, catalogue.zone, found.window, by, (), (), refused=read
             )
-        with self.bounds.read(self.db) as db:
+        with self.bounds.read(self.db, view.deadline) as db:
             rows = db.execute(read.select).all()
         names = {
             value.code: value.name

@@ -5,9 +5,10 @@
   holding no connection of the database's, then opens one, read only, and
   rolls it back at its end. The timeout bounds the read whole, its wait for
   a slot and every statement it runs: each statement's `statement_timeout`
-  is set, as it is sent, to what is left of it, so that a read behind the
-  proxies in front of `/api/` is answered or refused before they stop
-  waiting (nginx's `proxy_read_timeout`, 60 s). Both are set per
+  is set, as it is sent, to what is left of it. The reads of one answer
+  share one deadline, an entry's and the answer's own, so that an answer
+  behind the proxies in front of `/api/` is given or refused before they
+  stop waiting (nginx's `proxy_read_timeout`, 60 s). Both are set per
   transaction, `SET LOCAL` as `configure_engine()` sets JIT off
   (app/startup.py): the stages reach PostgreSQL through a pooler in
   transaction mode. In the suite the transaction is a savepoint of the
@@ -64,17 +65,27 @@ class Bounds:
         self.at_once = at_once
         self._slots = threading.BoundedSemaphore(at_once)
 
+    def deadline(self) -> float:
+        """The end of the timeout from now, on `time.monotonic()`'s clock,
+        for the reads of one answer to share."""
+        return time.monotonic() + self.timeout_seconds
+
     @contextmanager
-    def read(self, db: Session) -> Iterator[Session]:
+    def read(self, db: Session, deadline: float | None = None) -> Iterator[Session]:
         """`db` in a read-only transaction of its own, once a slot is free,
         for the engine's statements, the wait and the statements together
-        under the timeout; the caller's transaction committed first, so a
-        caller with writes of its own makes them after.
-        `QueryRefusedException` where no slot freed, or a statement ran past
-        what was left of the timeout or the limit on temporary files."""
+        before `deadline`, the timeout from now where none is given; the
+        caller's transaction committed first, so a caller with writes of its
+        own makes them after. `QueryRefusedException` where the deadline had
+        passed, no slot freed, or a statement ran past what was left of the
+        deadline or the limit on temporary files."""
         db.commit()
-        deadline = time.monotonic() + self.timeout_seconds
-        if not self._slots.acquire(timeout=self.timeout_seconds):
+        if deadline is None:
+            deadline = self.deadline()
+        left = deadline - time.monotonic()
+        if left <= 0:
+            raise self._timeout()
+        if not self._slots.acquire(timeout=left):
             raise QueryRefusedException(
                 "busy",
                 f"the engine already runs its {self.at_once} statements at once "
@@ -114,12 +125,7 @@ class Bounds:
     def _refusal(self, error: DBAPIError) -> QueryRefusedException | None:
         code = getattr(error.orig, "sqlstate", None)
         if code == TIMEOUT:
-            return QueryRefusedException(
-                "timeout",
-                "its read ran past the engine's timeout of "
-                f"{_seconds(self.timeout_seconds)}: a shorter time range or a "
-                "narrower scope reads less",
-            )
+            return self._timeout()
         if code == TEMP_FILE_LIMIT:
             return QueryRefusedException(
                 "temp_file_limit",
@@ -127,6 +133,14 @@ class Bounds:
                 "allows one: a shorter time range or a narrower scope reads less",
             )
         return None
+
+    def _timeout(self) -> QueryRefusedException:
+        return QueryRefusedException(
+            "timeout",
+            "its read ran past the engine's timeout of "
+            f"{_seconds(self.timeout_seconds)}: a shorter time range or a "
+            "narrower scope reads less",
+        )
 
 
 def _seconds(seconds: float) -> str:

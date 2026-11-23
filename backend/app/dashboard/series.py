@@ -229,7 +229,7 @@ class SeriesService:
         state = view.address.state
         found = series_plan(state, view.catalogue, view.weeks, now or datetime.now(UTC))
         presented = presentation(state)
-        with self.bounds.read(self.db) as db:
+        with self.bounds.read(self.db, view.deadline) as db:
             return _Drawer(db, view, found).drawn(presented)
 
 

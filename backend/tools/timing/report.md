@@ -124,9 +124,9 @@ CPUs, bounds them.
   whole timeout, so a read of five statements could hold its request for minutes. The proxies in
   front of `/api/` wait 60 s, nginx's default `proxy_read_timeout`, which `snippets/proxy.conf`
   leaves as it is; a read past it answered the proxy's 504, not the engine's refusal with a
-  reason. 45 s leaves 15 s for what runs outside the read: the state's check before it, and the
-  shaping and the answer after it. Every view timed at three million is answered within it, the
-  lanes over all time, 44.7 s with their shaping, at its edge.
+  reason. An answer's reads share one deadline from the state's check on, an entry's read among
+  them, so 45 s leaves 15 s for the shaping and the answer after them. Every view timed at three
+  million is answered within it, the lanes over all time, 44.7 s with their shaping, at its edge.
 - **A count's task is held to it a read at a time.** By's counts read each fact in a read of
   its own, and the quick filters' counts judge the By's rows in one read and tally in another.
   No page waits on a task, so a task is answered when it is done; only each read is bounded.

@@ -197,8 +197,9 @@ class ReaderService:
             RecordNotFoundException: the record holds no such thread
             QueryRefusedException: a statement passed the engine's bounds
         """
-        address = self.address_service.view(written).address
-        thread = self._thread(conversation)
+        view = self.address_service.view(written)
+        address = view.address
+        thread = self._thread(conversation, view.deadline)
         head, blocks = self._head(address, conversation, thread)
         taken = head.batches[0] if batch is None and head.batches else batch
         if blocks is None or taken is None:
@@ -222,8 +223,9 @@ class ReaderService:
             RecordNotFoundException: the record holds no such thread
             QueryRefusedException: a statement passed the engine's bounds
         """
-        address = self.address_service.view(written).address
-        thread = self._thread(conversation)
+        view = self.address_service.view(written)
+        address = view.address
+        thread = self._thread(conversation, view.deadline)
         head, blocks = self._head(address, conversation, thread)
         if blocks is None or not head.whole:
             return Texts(head, ())
@@ -254,8 +256,9 @@ class ReaderService:
                 reading no such block on a call the reader holds
             QueryRefusedException: a statement passed the engine's bounds
         """
-        address = self.address_service.view(written).address
-        thread = self._thread(conversation)
+        view = self.address_service.view(written)
+        address = view.address
+        thread = self._thread(conversation, view.deadline)
         head, blocks = self._head(address, conversation, thread)
         if blocks is None:
             return Opened(head, None)
@@ -266,8 +269,8 @@ class ReaderService:
             )
         return Opened(head, Placed(call, part, index, held[index]))
 
-    def _thread(self, conversation: uuid.UUID) -> _Thread:
-        with self.bounds.read(self.db) as db:
+    def _thread(self, conversation: uuid.UUID, deadline: float) -> _Thread:
+        with self.bounds.read(self.db, deadline) as db:
             found = db.execute(
                 select(Transcript.id, Transcript.session_id, Transcript.agent_id).where(
                     Transcript.id == conversation

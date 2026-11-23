@@ -251,7 +251,7 @@ class CountsService:
             None if closed else words,
             None if closed else VALUES,
         )
-        with self.bounds.read(self.db) as db:
+        with self.bounds.read(self.db, view.deadline) as db:
             found_rows = db.execute(statement.select).all()
         listed_values = [
             AttributeValue(
