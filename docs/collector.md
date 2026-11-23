@@ -45,11 +45,12 @@ character that is no letter or digit a `-`. A sub-agent's is
 `<folder>/<session_id>/subagents/agent-<agent_id>.jsonl`, and one a workflow started lies deeper,
 under `subagents/workflows/<workflow>/`. The ids are the path's. Nothing else under `projects` is a
 transcript: a workflow's `journal.jsonl`, a sub-agent's `.meta.json` and the outputs saved under
-`<session_id>/tool-results/` are not. A walk lists every transcript with a `stat`, a regular file
-alone, never a pipe or a device of a transcript's name, and follows no symlink: a sub-agent's file
-linked into another session's folder is its own session's, and the walk meets it there. A folder
-under `projects` that cannot be listed holds no transcript for the walk, which logs at `WARNING`
-"The folder <folder> cannot be listed, so no transcript in it is: <why>".
+`<session_id>/tool-results/` are not. A sub-agent's `agent-<agent_id>.meta.json`, beside its file,
+is its record, read with it ([below](#a-transcripts-facts)). A walk lists every transcript with a
+`stat`, a regular file alone, never a pipe or a device of a transcript's name, and follows no
+symlink: a sub-agent's file linked into another session's folder is its own session's, and the walk
+meets it there. A folder under `projects` that cannot be listed holds no transcript for the walk,
+which logs at `WARNING` "The folder <folder> cannot be listed, so no transcript in it is: <why>".
 
 ## The walk
 
@@ -100,10 +101,12 @@ The line ends "; Pilot was not told it ended" where the walk's end was not told.
 A transcript's file is JSON Lines, a line an object, and a line is read once its newline is
 written, within the size the open file has. A line with a `uuid` is one of the thread's chain: it
 names the line it follows as `parentUuid` and carries its `timestamp`, its `cwd`, the session's id
-and Claude Code's `version`. The lines Claude Code writes beside the chain carry no `uuid`, and of
-them only the queue's carry a time: the permission mode a process starts under, the queue's
-operations (`queue-operation`, an `enqueue` with a prompt's text, a `dequeue`, a `remove` and a
-`popAll`), the last prompt, and the cost line (`cost-state`) a process writes as it exits.
+and Claude Code's `version`. Claude Code writes some lines before the line they follow. The lines
+Claude Code writes beside the chain carry no `uuid`, and of them only the queue's and the requests'
+carry a time: the permission mode a process starts under, the queue's operations
+(`queue-operation`, an `enqueue` with a prompt's text, a `dequeue`, a `remove` and a `popAll`), a
+request and its shape, the last prompt, and the cost line (`cost-state`) a process writes as it
+exits.
 
 - A prompt is a `user` line whose `message.content` is its text, with Claude Code's word for its
   source. One that waited in the queue follows its `enqueue` and `dequeue` lines.
@@ -111,14 +114,58 @@ operations (`queue-operation`, an `enqueue` with a prompt's text, a `dequeue`, a
   its text its `prompt` and its kind its `commandMode`, `task-notification` or `prompt`. It names
   no source. The queue's `remove` of its text is written before it, after it or not at all.
 - A process's first prompt is followed by an `attachment` line of type `instructions`, whose
-  `files` list the instruction files it loaded, the managed one of `type` `Managed` among them.
+  `files` list the instruction files it loaded, each its `path` and `content`, the managed one of
+  `type` `Managed` among them. From Claude Code 2.1.261 a process's start is also recorded by a
+  `prompt_snapshot` attachment, never shown to the model: `systemPrompt`, the system prompt as a
+  list of strings holding a marker where Claude Code splits it, and `tools`, which a newer version
+  leaves out.
+- A request to the model (2.1.300 on) is an `api-request` line, whose `id` each line of its
+  response names as `requestRef`; a retry writes a request line again. It names the system prompt
+  and the tools it sent, its shape, by `shapeHash`, and the messages it sent: those it kept of the
+  ones the request before it sent, `keep`, and those it adds, `tail`. A shape's own line,
+  `api-request-shape`, is written once in a file, before the first request that names it, with
+  `shape.system` and `shape.tools`.
 - A response is one `assistant` line a block, all under its `message.id`. Each line carries the
   response's `usage`, the 5-minute and the 1-hour cache writes apart under `usage.cache_creation`;
-  a line before the last can carry fewer output tokens than the last and no `stop_reason`.
+  a line before the last can carry fewer output tokens than the last and no `stop_reason`. Where
+  the version writes them, its lines name the model asked for, `requestedModel`; the `effort`; the
+  skill and the plugin the response acted under, `attributionSkill` and `attributionPlugin`; and
+  the API's id of the request, `requestId`. The last line counts the thinking tokens under
+  `usage.output_tokens_details`. A response a fallback answered opens with a `fallback` block,
+  `from` the model asked for, and a `system` line of subtype `model_refusal_fallback` names the
+  request's `requestId` and that `originalModel`.
 - A tool's result is a `user` line holding a `tool_result` block that names its request's id,
-  with `toolUseResult`, the tool's own record of it.
+  with `toolUseResult`, the tool's own record of it. From 2.1.201 a denied call's line names how,
+  `toolDenialKind`: `permission-rule`, `user-rejected`, or `interrupted` for a call the person
+  interrupted. A `PreToolUse` hook's block is an error result opening `PreToolUse:<tool> hook
+  error:`.
+- What Claude Code injects for the model is an `attachment` line or a `user` line marked `isMeta`.
+  An attachment shown to the model carries what it was shown, `rendered`, a list of `{content}`
+  (2.1.261 on): a `nested_memory` is an instruction file loaded once the process was under way,
+  with its `path` and `content`; an `invoked_skills` shows again the bodies of the skills invoked
+  before a compaction, each its `name` and `content`; and the other types shown are reminders,
+  each of its own. A skill's body is an `isMeta` line whose `sourceToolUseID` names the `Skill`
+  call it expanded, its text opening "Base directory for this skill:" where the skill has a
+  folder; one expanded for a command the person typed names no call.
+- A compaction is a `system` line of subtype `compact_boundary` that follows no line: its
+  `logicalParentUuid` names the line it continues, and its `compactMetadata` holds the `trigger`
+  and `preTokens`, a newer version's `postTokens` and `durationMs` too. Its summary is a `user`
+  line marked `isCompactSummary`.
+- An attempt at a request that failed and is sent again is a `system` line of subtype
+  `api_error`, its `error` with a `status`; a request that failed for good is an `assistant` line
+  of the `<synthetic>` model marked `isApiErrorMessage`, with `apiErrorStatus`. A response the
+  person interrupted is followed by a `user` line holding a text block of exactly `[Request
+  interrupted by user]`.
+- The Stop hooks run at the end of a prompt's run are a main thread's `system` line of subtype
+  `stop_hook_summary` (2.1.250 on): `hookInfos`, each hook's `command` and `durationMs`,
+  `hookErrors`, `preventedContinuation`, a newer version's `failedHookErrorIndexes`, and the run's
+  `toolUseID`. A hook that reports an error writes an `attachment` of type
+  `hook_non_blocking_error`, with its `hookEvent`, its `command` and the run's `toolUseID`.
 - A sub-agent's file opens with the task its spawning call gave it, and every line of its chain is
-  an `isSidechain` one that carries its `agentId`.
+  an `isSidechain` one that carries its `agentId`. Its record, beside the file, names its
+  `agentType`, the `description` its spawning call gave it and, from 2.1.144, that call's id,
+  `toolUseId`. A fork, a sub-agent of the type `fork`, opens its file with copies of its parent's
+  lines, the message that holds the call that started it among them.
 
 ## A transcript's facts
 
@@ -135,13 +182,35 @@ each rule in full. The facts are read off the lines in the file's order:
   a session that moves stays its first directory's. The environment is a main thread's alone: the
   id the pattern finds at the start of the managed file's text, in the `instructions` attachment,
   the first where the file names two.
-- **A Launch** (D257), on a main thread, starts at the file's first line with a time and at the
-  first such line after a cost line. A killed process writes no cost line, so the process that
-  follows it joins its Launch. Lines with no time after a cost line start none, that line written a
-  second time among them. Its `started_at` is its first line's time, and its one component is
-  `claude-code` at the version its lines name, the first that names one. A Launch none of whose
-  lines names a version is not published, and a file where such a Launch received a Prompt is
-  refused.
+- **A sub-agent's record.** Its `agent_type`, `description` and `spawned_by` are its record's
+  `agentType`, `description` and `toolUseId`, each none where the record or the key is missing: a
+  workflow's agent names no call, nor does a sub-agent older than Claude Code 2.1.144. The record
+  is read again at every reading of the file, since Claude Code writes it as the sub-agent runs,
+  and a record that is no JSON object makes the file unreadable.
+- **A fork's copies.** On a fork, a sub-agent whose record's type is `fork`, the lines of the
+  message that holds its `toolUseId`, and every line timed at or before the one of them that holds
+  the call, are its parent's: a line that follows one of them follows none, and nothing is read off
+  them but the working directory, which is the parent's. A fork whose file holds no line of that
+  call copies none. A call a fork copied so stands in its parent's thread alone, and Pilot joins
+  the sub-agent that call started ([`collection.md`](collection.md#a-publication)).
+- **A Launch** (D257, D265), on a main thread, starts at the file's first line with a time, at the
+  first such line after a cost line, and at a line that names another version of Claude Code than
+  its Launch's. A killed process writes no cost line: the process that follows it under the same
+  version joins its Launch, and one under another version starts its own, which opens with the
+  lines with a time since the last that named the earlier version, where there are any, as the
+  queue's lines a process writes before its first prompt name none. Lines with no time after a cost
+  line start none, that line written a second time among them. A Launch none of whose lines names
+  a version is not published, and a file where such a Launch received a Prompt is refused.
+  - Its `started_at` is its first line's time, and its `ended_at` the time of its last line that
+    carries one, the open Launch's the last so far, whatever the times of the lines before. The
+    cost line's start and totals are not read.
+  - Its components are `claude-code` at the version its lines name, the first that names one, and
+    each plugin its process loaded, `plugin:<name>`, at the version first named under the home's
+    `plugins/cache/<marketplace>/<name>/<version>/` by a skill's body's base directory, by a body
+    an `invoked_skills` attachment shows again, by a snapshot's system prompt, or by the shape a
+    Launch's first Call's requests name, which a session started as a plugin's agent has. A path a
+    tool's result, the model or a prompt quotes is not read, and no component has a release time,
+    which no line records.
 - **A Prompt** (D259) is a main thread's `user` line whose source Claude Code names, in Claude
   Code's own word: `promptSource`, `typed`, `sdk`, `system`, `queued` or `suggestion_accepted`.
   Older files name it in other fields. On a line with no `promptSource` that is no `isMeta` one, the
@@ -167,6 +236,45 @@ each rule in full. The facts are read off the lines in the file's order:
 - **A Call** is the `assistant` lines under one `message.id` whose model is no `<synthetic>` one,
   placed by the first of them, and follows the Prompt last received before it, where there is one.
   Its model, its `completed_at` and its usage are the last line's, its five token counts read there.
+  - Its `sent_at` is the time of the `api-request` line its first line names by `requestRef`,
+    among the request lines written since the one the Call before it named: a retry writes a
+    request line again, and the Call names the last. It is none in a version that writes no
+    request line, and where no such line stands before the Call's first line.
+  - Its own choices, each where the version writes it. `requested_model` is the model asked for,
+    none where it is the one that answered: the model a fallback left, by a `fallback` block among
+    the Call's lines or a `model_refusal_fallback` line that names its `requestId`, else its
+    lines' `requestedModel`. `effort`, `attributed_skill` and `attributed_plugin` are the last of
+    its lines that names each. `thinking_tokens` is the last line's, a 0 published as 0, and
+    `stop_reason` the last line's where it is none of the ordinary ends, `end_turn` and
+    `tool_use`: any other end is published as the line names it.
+  - Its `predecessor` is the nearest Call up its chain from its first line, and its `compaction`
+    the boundary crossed on the way, by its place among the transcript's Compactions, the nearest
+    where the chain crosses several. A line follows the one its `parentUuid` names, and a
+    compaction's boundary the one its `logicalParentUuid` names. The chain goes on through a line
+    wherever the file holds it, before or after, and passes the lines of its own Call and of one
+    that began later in the file, so a predecessor is an earlier Call; a Call's chain is read at
+    the file's end. A chain that ends at a line that follows none, names a line the file does not
+    hold, or turns back on itself reaches no predecessor, and keeps a compaction it crossed.
+  - Its `miss_cause` is read where it missed the cache its predecessor left: of the lesser of what
+    that one left, the tokens it read from the cache and wrote to it, and the Call's own context,
+    more than half was not read from the cache, and that context is at least nine tenths of what
+    was left. The cause is the first that holds, in Miss Cause's order: `compaction`, its
+    chain crossed one; `model`, the model that answered, or the effort where both name one, is
+    another than its predecessor's; `ttl`, it was sent, or where it names no request completed,
+    longer after its predecessor completed than what that one left lasts, an hour where it wrote to
+    the cache that lasts an hour, else five minutes; `rewind`, its predecessor is not the Call
+    before it; `version`, its first line names another version of Claude Code than its
+    predecessor's; `system`, its request's `shapeHash` is another than its predecessor's
+    request's; `history`, its request kept fewer messages than its predecessor's sent; else
+    `unknown`.
+  - Its `events`, each on the last Call whose first line stands before the Event's line, else on
+    the transcript's first Call: `api_retry`, an `api_error` line, its `error.status` the detail;
+    `api_error`, an `isApiErrorMessage` line, its `apiErrorStatus` the detail; and `interrupt`, a
+    `user` line holding exactly Claude Code's words for a response the person interrupted. The
+    first two are errors. A tool call the person interrupted is its Tool Call's, below.
+- **A Compaction** is a `compact_boundary` line, made when it was written: its `trigger` and
+  `tokens_before` are its `compactMetadata`'s, and `tokens_after` and `duration_ms` too where the
+  version records them.
 - **A Tool Call** is a `tool_use` block of a Call's lines, requested at its line's time. Its result
   is the first `tool_result` block that names its id, in a `user` line of the thread. A result that
   names no request of the file is dropped.
@@ -180,7 +288,13 @@ each rule in full. The facts are read off the lines in the file's order:
     error reads 0, which is not published, Pilot holding an exit code only where it was not zero.
   - `interrupted` is read where Bash's `toolUseResult.interrupted` is true, and where an error opens,
     past an `Exit code N` line, with Claude Code's words for a person's interruption, `[Request
-    interrupted by user for tool use]` or `Interrupted by user`.
+    interrupted by user for tool use]` or `Interrupted by user`, or its line names the
+    `toolDenialKind` `interrupted`.
+  - `denial_kind` is read where the result is an error and Claude Code says by what: `hook` where
+    it opens `PreToolUse:<the call's tool> hook error:`, whatever its line names; else by the
+    `toolDenialKind` its line names, `rule` for `permission-rule` and `person` for
+    `user-rejected`. An `interrupted` is no denial, and a result that only quotes the hook's words
+    is none.
   - `saved_characters` is read where the result opens in one of Claude Code's two wordings for an
     output saved to disk, never where it only quotes them. The first is `<persisted-output>` followed
     by "Output too large (<size>). Full output saved to: <path>". The second is "Error: result (N
@@ -188,14 +302,40 @@ each rule in full. The facts are read off the lines in the file's order:
     lines can follow the characters. The full size is the saved file's characters, the file found
     under `projects` by the path's last four parts. Where that file is gone it is the characters the
     result states, and in the first wording it is then none.
+- **A Hook Run** is each hook a Stop hook's summary names, on a main thread, under the latest
+  Prompt before the summary, with its `command` and `duration_ms`. It `failed` where a
+  `hook_non_blocking_error` for the Stop event names its command and the summary's `toolUseID`,
+  where the summary's `failedHookErrorIndexes` name its place, or where the summary names one hook
+  and an error. Its `prevented_end` is the summary's `preventedContinuation`, the same on each of
+  its runs. A tool's hooks log no summary, so a Hook Run is a Stop hook's alone.
+- **A Call's Context Parts** are what it carried that no earlier Call of its Launch did, each where
+  Claude Code records what the model saw: its kind, its `name` where the kind has several, and its
+  `characters`.
+  - A Launch's first Call, and a sub-agent's first, carries in this order: the `system_prompt` and
+    the `tool_schemas`, from the `api-request-shape` line its request's `shapeHash` names, else
+    from the Launch's `prompt_snapshot`, each where the line records one, of the system prompt's
+    text, a snapshot's split marker aside, and of the tools' schemas as compact JSON; an
+    `instruction_file` per file the `instructions` attachment before it lists, named by its path,
+    of its content; the parts injected before it, below; and a `prompt` per Prompt the Launch
+    received before it, of its characters, on a sub-agent's thread its task, the `user` lines
+    before its first Call that are no `isMeta` one.
+  - Every Call carries the parts injected before it, in the file's order from the last Call's
+    first line, or the Launch's start, to its own. An `instructions` attachment once the Launch's
+    first Call has begun, and a shown `nested_memory`, give an `instruction_file` per file, named
+    by its path, of its content's characters; a shown `invoked_skills` a `skill_body` per skill,
+    named by it, of its content's characters; any other attachment shown a `reminder` named by its
+    type, of its `rendered` text's characters. A message taken in the middle of a run is none on a
+    main thread, where it is a Prompt, and a `reminder` on a sub-agent's; an attachment never
+    shown is none. A skill's body is a `skill_body` of its text's characters, named by the `skill`
+    the `Skill` call its `sourceToolUseID` names asked for, none where it names no call or another
+    tool's; a compaction's summary is a `compact_summary` of its text's characters.
 
-The reader publishes none of the file's other facts: a sub-agent's type, description and spawning
-call, a Launch's end and its other components, hook runs, compactions, a Call's sending time, stop
-reason, predecessor and attribution, events, context parts and the labels.
+The reader publishes no label: a main thread's `group`, the workflow's, is not read off the file.
 
 A file the reader cannot turn into a publication raises `UnreadableError` with the reason: a line
 that is not one it reads, named by its number, no line that names a working directory, a Launch that
-received a Prompt and names no version, or facts the publication's shape refuses.
+received a Prompt and names no version, a sub-agent's record that is no JSON object, or facts the
+publication's shape refuses.
 
 ## Whole or appended
 
@@ -207,32 +347,63 @@ settled once the next Call has begun, so the boundary is the file's last Call, a
 Call the place its first would take. Of the reading there, the carry holds:
 
 - the byte the boundary's first line starts at;
-- how many Calls, published Launches and Prompts lie before it, from which the appended call's four
-  places come ([`collection.md`](collection.md#a-publication));
-- the `uuid` of the last line before it that carries one;
+- how many Calls, published Launches, Prompts and Compactions lie before it, from which the
+  appended call's four places come ([`collection.md`](collection.md#a-publication));
+- the `uuid` of the last line before it that carries one, and where the chain leads from that line
+  as the lines before the boundary stand: the Call it reaches and the compaction it crosses, with
+  what that Call left the next, all that a cache miss and its cause read of it;
+- the ids the lines before it named, as the line they follow or the one a boundary continues,
+  that the file held no line of there;
+- the request lines written since the last one a Call named, each its id, its time, its shape and
+  the messages it kept and sent, and on a request of a Launch's first Call what its shape's line
+  records;
+- the Events before the transcript's first Call;
 - the directory and the environment the file named first;
-- the Launch open there, with its start, its version and its Prompts so far;
+- the Launch open there, with its start, its version, its end so far, where its lines with a time
+  since the last that named a version began, the plugins it named and how many Prompts it
+  received, and the latest of those Prompts, with its Hook Runs;
+- what the lines before it record of the Context Parts of the boundary's Call where that is its
+  Launch's first, or a sub-agent's: a snapshot's lengths, the instruction files and the prompts;
+- the Context Parts injected before the boundary's Call;
 - the prompts waiting in the queue, each as a digest of its text with its `enqueue` time;
 - those a `remove` took out of the queue that no message taken in the middle of a run has claimed,
   held as the queue holds them;
+- on a fork's thread, the call that started it, with the message that holds it and that line's
+  time;
 - a digest of the file's bytes from the boundary's on, as they were read.
 
-No other id of a line before the boundary is held: there is no map of the file's ids.
+No id of any other line before the boundary is held, and of no Call but the one the chain leads
+to: there is no map of the file's ids.
 
 A transcript the inventory holds at exactly what its carry was built on is read from the
 boundary's byte on (`read(transcript, settings, carry)`). It is published appended: the Calls from
 the boundary on, the Launches that wrote a line from there on, the first of them with its Prompts
-from there on, and the four places. Every other transcript is published whole. A transcript that has
-a carry and is published whole instead, in the same walk, logs a line at `INFO`: "The transcript
-<session_id>[/<agent_id>], <file>, is published whole, not from its boundary on: <reason>". The
-reasons are:
+from there on and with the components it named before the boundary too, the Compactions made from
+there on, and the four places. A Stop hook's summary follows its run's last Call, so its Prompt was
+received before the boundary: where one from there on lies on the carry's Prompt, the first
+Launch's Prompts open with that one, published again with its Hook Runs, and the boundary names its
+place. Every other transcript is published whole. A transcript that has a carry and is published
+whole instead, in the same walk, logs a line at `INFO`: "The transcript <session_id>[/<agent_id>],
+<file>, is published whole, not from its boundary on: <reason>". The reasons are:
 
 - "Pilot does not hold it as it was last read";
 - "its file is no larger than the one last read", or "its file has other bytes before its old end":
   the bytes from the boundary's to the old end differ from those read then;
-- "a line follows one before its boundary that is not the last there", its `parentUuid` naming
-  another line before the boundary's byte than the carry's;
-- "a tool's result names a request no line from its boundary on makes";
+- "a line follows one before its boundary that is not the last there", its `parentUuid` naming a
+  line that is neither the carry's nor one from the boundary's byte on, written before the
+  boundary or later; "a compaction continues a line before its boundary that is not the last
+  there", the same of a boundary's `logicalParentUuid`; and "a line before its boundary follows one
+  written from it on", a line the carry awaits, since a chain behind the boundary goes on through
+  it;
+- "a tool's result names a request no line from its boundary on makes", "a skill's body names a
+  request no line from its boundary on makes", and "a fallback names a request no Call from its
+  boundary on answered";
+- "a launch's first request names a shape no line from its boundary on records": a resumed process
+  names the shapes an earlier one's lines record;
+- "a Stop hook's summary lies on a prompt received before its boundary's launch";
+- "its record names another fork's call than the one it was read with", a thread that became a
+  fork's or stopped being one among them, and "a fork's line from its boundary on holds the call
+  that started it", where the carry was read with no line of it;
 - "reading it from its boundary on raised <the error's type>: <its message>";
 - "Pilot refused it appended: <Pilot's reasons>", a `409` `PUBLICATION_NOT_APPENDABLE`, or "Pilot
   refused it appended with <status>: <its answer>", a `400` or a `413`.
@@ -243,9 +414,10 @@ read until the next Call begins, so every walk that sees the file grow until the
 whole. The second turn of a walk publishes whole without trying the carry.
 
 **The bound.** The carries are kept up to `COLLECTOR_CARRY_TRANSCRIPTS` transcripts and
-`COLLECTOR_CARRY_BYTES` of memory, a carry counted at about 1 KB. Past either, the carry of the
-transcript whose file changed longest ago is forgotten first, and that transcript's next growth costs
-one whole publication. A carry stays through a walk Pilot stopped answering, and goes when its
+`COLLECTOR_CARRY_BYTES` of memory, a carry counted at about 1.5 KB and more for each id, request,
+Event, Prompt, Hook Run, file, part and plugin it holds. Past either, the carry of the transcript
+whose file changed longest ago is forgotten first, and that transcript's next growth costs one
+whole publication. A carry stays through a walk Pilot stopped answering, and goes when its
 transcript is set aside. The carries are the walker's, read and written on its thread alone.
 
 ## The reading
@@ -328,7 +500,9 @@ are pinned in `test_reader.py` and `test_appended.py`, the carry and its bound i
 the home in `test_home.py`, the walk's plan in `test_walk.py`, the reading in `test_reading.py`,
 its route in `test_serve.py` and the process in `test_main.py`, which asks the running process for
 a reading. `tests/support.py` builds a file's lines for one rule and `settings()` the settings,
-inventing the three that have no default.
+inventing the three that have no default. `test_reader.py` also reads the invented scenario's
+files, and two of its own, a resumed thread and a nested sub-agent, each as the builder's whole
+publication of it but for the `group`.
 
 The walk against Pilot's routes is the backend suite's, `backend/tests/collector/test_walk.py`.
 The backend's dev group takes the collector by path, so that a walk publishes into a database of

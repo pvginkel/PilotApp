@@ -99,7 +99,10 @@ switch joins them ([`docs/mcp.md`](docs/mcp.md)), and talks to Pilot about a pro
 of the calling environment's own, a brain session in the store beside the project's chat, its reply
 waited on in one long poll, which the project's people read in its Conversations tab
 ([`docs/conversations.md`](docs/conversations.md)); and the record of the fleet's Claude Code
-transcripts, their launches, prompts, calls and tool calls, which the collector, a pod of Pilot's
+transcripts, their launches with the versions each ran, prompts with their Stop hooks' runs,
+compactions, calls with their chain, sending time, cache misses, events, context parts and what
+Claude Code records of its own choices, tool calls with their denials, and each sub-agent's
+spawning call, which the collector, a pod of Pilot's
 own beside each stage's fleet's home, reads off their files every 30 s and publishes through a door
 of its own, whole or appended as a file grows, one live event per walk that wrote a row and
 a conversation's reading served to the backend alone; a launch a Turn of Pilot's started placed under

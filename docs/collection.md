@@ -184,7 +184,10 @@ as it takes the call.
 joined to it then, whichever comes first. Its `spawned_by` is held on its row as the name of its
 spawning call, and the thread is joined to the Tool Call of that `tool_use_id` once exactly one
 other thread of its conversation holds one. A spawning Tool Call that goes empties the join and
-keeps the name, so the thread is joined again when a later publication brings the call back.
+keeps the name, so the thread is joined again when a later publication brings the call back. The
+collector reads the name off the sub-agent's record and publishes no fact of a fork's copies of its
+parent's lines, so a call a fork copied is held in its parent's thread alone
+([`collector.md`](collector.md#a-transcripts-facts)).
 
 **The conversation's turn.** Publications of one conversation, its main thread's and its
 sub-agents', take turns under a transaction's advisory lock, `(247, <a key drawn from the
@@ -247,25 +250,35 @@ depends on it by path, editable, the image installs it, and the backend's pytest
 as it does the DSL's ([`block-dsl.md`](block-dsl.md#the-package)). `SCENARIO`, named `supper`, is
 in the dev seed's world, the people `ada` and `ben` and the projects `recipe-box` and `bike-log`,
 with kinds of work of its own, `errand` and `leg`. Its session `halving` is a Turn of Pilot's on
-`recipe-box`, with a sub-agent, `counting`, an API error and a compaction; `gears` is Ada's, run by
-hand on no project, with a rewind and a miss past the cache's lifetime, and names the group
-`bike-log-first-rides`. The model names are the public ones and everything else is invented.
-`Builder(SCENARIO, until)` lays the scenario's times back from `until`: its `publications()` are
-each thread's whole call as a JSON object, a main thread before its sub-agents, and its `turns()`
-the Turns of Pilot's. A conversation's ids are drawn from the scenario's and the session's names,
-the same in every build.
+`recipe-box`, run with the plugin `pantry`, whose skill it loads, with a sub-agent, `counting`, an
+API error its request is sent again after, a compaction and a Stop hook; `counting` asks for one
+model and another answers, a hook and a permission rule each deny it a call, and its last answer
+runs out of tokens. `gears` is Ada's, run by hand on no project, with an instruction file loaded
+mid-run, a rewind, a miss past the cache's lifetime, an edit she turns down and two Stop hooks, one
+failing, and names the group `bike-log-first-rides`. The model names are the public ones and
+everything else is invented. `Builder(SCENARIO, until)` lays the scenario's times back from
+`until`: its `publications()` are each thread's whole call as a JSON object, a main thread before
+its sub-agents, and its `turns()` the Turns of Pilot's. A conversation's ids are drawn from the
+scenario's and the session's names, the same in every build.
 
 **As files.** `files()` gives the scenario as files of a home, each a `HomeFile` with its path from
 the home's folder, its bytes and its time. They are each thread's transcript in Claude Code's line
 shapes (`pilot_scenario.transcript`, [`collector.md`](collector.md#a-transcripts-lines)), in the
 publications' order, each followed by the outputs its results say were saved to disk, under
-`<session_id>/tool-results/`. `write(home)` puts them under `home`, the folder that holds
-`projects`, each at the time its publication gives. A collector's reading of them is what
-`publications()` says, but for the facts the files do not carry: `_facts` in the package's
-`tests/test_transcript.py` is that cut, and `_read` there an independent reading of the files. The
-builder's times are cut to the millisecond, as a line's `timestamp` is. `halving`'s brief is an
-`sdk` prompt and `gears`' prompts are `typed`; `gears` interrupts a Bash call; and two results, the
-sub-agent's grep and the MCP call, are outputs saved to disk, one in each of Claude Code's wordings.
+`<session_id>/tool-results/`, and a sub-agent's by its record, `agent-<agent_id>.meta.json`, so a
+reader of every file as a transcript takes the `.jsonl` ones alone. `write(home)` puts them under
+`home`, the folder that holds `projects`, each at the time its publication gives. A collector's
+reading of them is what `publications()` says, but for the `group`, the labeller's, which no line
+carries ([`collector.md`](collector.md#testing-it)). `_facts` in the package's
+`tests/test_transcript.py` cuts a publication to what its file's lines and record say, and `_read`
+there is an independent reading of the files. The builder's times are cut to the millisecond, as a
+line's `timestamp` is. `halving`'s brief is an `sdk` prompt and `gears`' prompts are `typed`;
+`gears` interrupts a Bash call; and two results, the sub-agent's grep and the MCP call, are outputs
+saved to disk, one in each of Claude Code's wordings. The lines the facts are read off include a
+Call's request line and the line of the shape it sent; a Launch's instruction files and what was
+injected before a Call; a compaction's boundary and summary; a failed attempt's request and its
+error; a denied call's result in Claude Code's words; a Prompt's Stop hooks' summary and a failing
+hook's error; and a plugin's skill's body under the plugin's cache at its Launch's version.
 The files are generated when a suite runs and never committed.
 
 **Its load.** `POST /api/testing/scenarios` `{projects: {"recipe-box": <a project's id>}}`, one of

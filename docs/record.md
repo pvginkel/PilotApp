@@ -301,9 +301,10 @@ reaches a person or a member from
   `replayed_size`, `bigint` as `file_size` is, the file's size at its last whole one, at most
   `file_size` (`ck_transcripts_replayed_size`).
 - `launches`: a run of Claude Code on a main thread, as its transcript's file shows it, from the
-  file's first line with a time or the first such line after a cost line
+  file's first line with a time, the first such line after a cost line, or where a line names
+  another version of Claude Code than the run's
   ([`collector.md`](collector.md#a-transcripts-facts)): `started_at` its first line's time and
-  `ended_at` its last's that carries one, none while it runs; and Pilot's own two,
+  `ended_at` its last's that carries one, the open run's the last so far; and Pilot's own two,
   `session_id`, the Session that ran it, and `turn_seq`, that Session's Turn that started it, a Turn
   of that Session by its key, never without the Session (`ck_launches_turn`), each set once by the
   placement ([`collection.md`](collection.md#a-launch-of-pilots)). `sessions.conversation_id` is
