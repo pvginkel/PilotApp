@@ -167,6 +167,7 @@ test.describe('An open item’s fold', () => {
   });
 
   test('every open box folds: a decision, a question, an action, a confirmation, a document inline, a review’s card and a wait; a done line and the opening have no fold', async ({
+    page,
     people,
     projects,
     timeline,
@@ -192,6 +193,7 @@ test.describe('An open item’s fold', () => {
       await expect(item.kind).toHaveJSProperty('tagName', 'BUTTON');
       await item.kind.click();
       await expect(item.root).toHaveAttribute('data-folded', 'true');
+      await settled(page, 'timeline.fold');
       await expect(item.fold).toHaveAttribute('inert', '');
       expect(await takesFocus(item.discuss)).toBe(false);
     }
@@ -200,6 +202,7 @@ test.describe('An open item’s fold', () => {
       const item = timeline.item(box);
       await item.root.click();
       await expect(item.root).toHaveAttribute('data-folded', 'false');
+      await settled(page, 'timeline.unfold');
     }
 
     const line = timeline.item(notice);
