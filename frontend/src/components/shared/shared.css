@@ -350,8 +350,8 @@
      style.css, "The ETA, a badge") ----------------------------------------------------------- */
 
   /* A clock and the time left on the muted primary, 22px high, its text and icon in the size of
-     what it stands in; red, with the clock's alert, while the work runs longer than usual. The
-     alert's sentence drops under it on hover off a phone, and on a press. */
+     what it stands in; red, with the clock's alert, while the work runs longer than usual. Its
+     figures drop under it on hover off a phone, and on a press. */
   .eta-wrap { position: relative; flex: none; align-self: center; display: inline-flex; }
   .eta-badge {
     display: inline-flex;
@@ -369,13 +369,14 @@
     white-space: nowrap;
   }
   .eta-badge .icon { vertical-align: 0; }
-  .eta-badge.long { background: hsl(var(--destructive) / 0.12); color: hsl(var(--destructive-text)); cursor: pointer; }
+  button.eta-badge { cursor: pointer; }
+  .eta-badge.long { background: hsl(var(--destructive) / 0.12); color: hsl(var(--destructive-text)); }
   :root[data-theme="dark"] .eta-badge.long { background: hsl(var(--destructive) / 0.24); }
   .eta-pop {
     display: none;
     position: absolute;
     top: calc(100% + 6px);
-    left: 0;
+    left: var(--eta-shift, 0px);
     z-index: 30;
     width: max-content;
     max-width: 300px;
@@ -390,6 +391,23 @@
     line-height: 1.45;
     white-space: normal;
   }
+  /* The figures (PilotAppSpecs tools/cost-dashboard/eta-figures-render.png): the pop widened to
+     its table, kept 8px inside what clips it (eta-badge.tsx), the sentence, the title and the lines
+     under the table wrapping within the table's width; the times right-aligned under muted heads,
+     whole, a row's name wrapping where the page is too narrow for the table. On a phone the head's
+     and a work item's span the page: the widening weighs one class, so that their rules win. */
+  .eta-pop:where(.figures) { max-width: calc(100vw - 16px); }
+  .eta-pop > p { overflow-wrap: anywhere; }
+  .eta-pop.figures > p { contain: inline-size; }
+  .eta-pop .eta-title { font-weight: 600; }
+  .eta-figures { border-collapse: collapse; }
+  .eta-pop > p + .eta-figures { margin-top: 6px; }
+  .eta-figures :is(th, td) { padding: 1px 0 1px 16px; font-weight: 400; text-align: right; white-space: nowrap; }
+  .eta-figures tr > :first-child { padding-left: 0; }
+  .eta-figures thead th { color: hsl(var(--muted-foreground)); }
+  .eta-figures tbody th { text-align: left; white-space: normal; overflow-wrap: anywhere; }
+  .eta-pop .eta-red { margin-top: 6px; color: hsl(var(--muted-foreground)); }
+  .eta-pop .eta-red + .eta-red { margin-top: 2px; }
   .eta-badge[aria-expanded="true"] + .eta-pop { display: block; }
   @media (hover: hover) { .eta-wrap:hover .eta-pop { display: block; } }
 

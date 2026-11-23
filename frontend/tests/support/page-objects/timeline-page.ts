@@ -210,10 +210,9 @@ export class TimelinePage {
         /** The head's pulse while its run is under way, and the running time beside it once the run began. */
         live: root.getByTestId('timeline.work.live'),
         running: root.getByTestId('timeline.work.running'),
-        /** The badge of the time it still takes, after its running time; the running step's kind after it; the alert's sentence (F156.8). */
+        /** The badge of the time it still takes, alone after its running time, and the figures it opens (F156.8, F156.13). */
         eta: root.getByTestId('timeline.work.eta'),
-        etaKind: root.getByTestId('timeline.work.eta.kind'),
-        etaSays: root.getByTestId('timeline.work.eta.says'),
+        etaPop: etaPopParts(root, 'timeline.work.eta'),
         /** Its one line: the working cue, its dancing dots, never drawn here, and a sub-agent's description after it. */
         line: root.getByTestId('timeline.work.line'),
         cue: root.getByTestId('timeline.work.line').getByTestId('chat.cue'),
@@ -401,6 +400,23 @@ function carriedParts(within: Locator, workId: string) {
     text: root.getByTestId('timeline.debrief.text'),
     full: root.getByTestId('timeline.debrief.full'),
     sessionLog: root.getByTestId('timeline.debrief.session-log'),
+  };
+}
+
+/**
+ * The figures an ETA badge opens (F156.13) within `within`, by the badge's test id: the pop, a red
+ * badge's sentence, the work item's title over a project's head's at rest, the table, its row per
+ * running step and the run's, and the line under the table per running step.
+ */
+export function etaPopParts(within: Locator | Page, testId: string) {
+  return {
+    root: within.getByTestId(`${testId}.pop`),
+    says: within.getByTestId(`${testId}.says`),
+    title: within.getByTestId(`${testId}.title`),
+    table: within.getByTestId(`${testId}.figures`),
+    steps: within.getByTestId(`${testId}.figures.step`),
+    run: within.getByTestId(`${testId}.figures.run`),
+    red: within.getByTestId(`${testId}.figures.red`),
   };
 }
 

@@ -178,7 +178,7 @@
   /* The second circle is the count of the rest, where there are more than two. */
   .phone-head .members .rest { font-size: 12.5px; letter-spacing: -0.02em; }
   .phone-head .notes-pop { width: min(340px, calc(100vw - 28px)); }
-  /* The badge's sentence spans the page under the head, 8px in from each side. */
+  /* The badge's figures span the page under the head, 8px in from each side. */
   .phone-head { position: relative; }
   .phone-head .eta-wrap { position: static; }
   .phone-head .eta-pop { right: 8px; left: 8px; width: auto; max-width: 420px; }

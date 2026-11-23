@@ -6,7 +6,8 @@
  * of the app's people stopped it (F71, F135.6), its session log's tail (F69.2), and a job's line withdrawn by an Undo (F14.1). What Pilot
  * does on an item that is Pilot's, on its line (F13.7) and on the strip over it opened (F28.9). How a condition that holds all work reads
  * on the gold bar (F125, F135.7), and the week's halt's overrule (F135.2). How the time a running
- * work item still takes reads on its badge, at rest and as the alert (F156.7, F156.8).
+ * work item still takes reads on its badge, at rest and as the alert (F156.7, F156.8), and in the
+ * figures it opens (F156.13, F156.14).
  */
 
 import { Circle, CircleCheck, CircleDashed, Hourglass, OctagonPause, Pause, RefreshCw, ServerOff, UserRound, type LucideIcon } from 'lucide-react';
@@ -29,6 +30,7 @@ type OverruleKind = components['schemas']['ConditionsSchema.6c014b4.OverruleKind
 type HaltSetting = components['schemas']['ConditionsSchema.6c014b4.HaltSetting'];
 type Doing = components['schemas']['TimelineSchema.1fdd8ae.Doing'];
 type Estimate = components['schemas']['TimelineSchema.1fdd8ae.EstimateSchema'];
+type StepFigures = components['schemas']['TimelineSchema.1fdd8ae.StepFiguresSchema'];
 
 interface StepReading {
   text: string;
@@ -630,8 +632,11 @@ export function sessionLogTail(work: Work, selfHandle: string, endedAt: string |
   }
 }
 
-/** A span of minutes in the badge's units: "25 min", "1 h", "1 h 5 min". */
-function minutesWords(minutes: number): string {
+/**
+ * A span of minutes in the badge's units: "25 min", "1 h", "1 h 5 min"; the figures' times, "18 min"
+ * under an hour and "2 h 10 min" from one, as the server rounds them (F156.13).
+ */
+export function minutesWords(minutes: number): string {
   if (minutes < 60) return `${minutes} min`;
   const hours = Math.floor(minutes / 60);
   return minutes % 60 ? `${hours} h ${minutes % 60} min` : `${hours} h`;
@@ -670,11 +675,18 @@ export function estimateBadge(estimate: Estimate): EstimateBadge {
 export const estimateLeftLabel = (text: string) => `${text} left`;
 
 /**
- * The alert's sentence, on hover or a press (F156.8): the work item by its `title` in a project's
- * head, "It" on the work item itself, and how long its run has taken where the server says.
+ * A red badge's sentence, first in its figures (F156.14): the work item by its `title` in a
+ * project's head, "It" on the work item itself; the time the run has taken so far; on a step its run
+ * marks, that it does, outrun or not, else that it runs longer than such work usually takes.
  */
 export function estimateAlertSentence(estimate: Estimate, title: string | null): string {
-  const who = title ?? 'It';
-  const ran = estimate.ran_seconds === null ? 'runs' : `has run ${minutesWords(Math.round(estimate.ran_seconds / 60))},`;
-  return `${who} ${ran} longer than such work usually takes: it may be stuck.`;
+  const ran = `${title ?? 'It'} has run ${minutesWords(Math.round(estimate.ran_seconds / 60))}`;
+  return estimate.marked
+    ? `${ran}, and its run marks this step as in trouble: it may be stuck.`
+    : `${ran}, longer than such work usually takes: it may be stuck.`;
+}
+
+/** The line under the figures' table for a running step (F156.13): its longest, past which the badge turns red. */
+export function estimateRedLine(step: StepFigures): string {
+  return `Red past ${minutesWords(step.longest_minutes)}: no ${step.kind} step of the last ${step.timings} ran longer.`;
 }

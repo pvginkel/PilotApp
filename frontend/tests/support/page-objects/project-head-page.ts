@@ -2,6 +2,7 @@ import type { Locator, Page } from '@playwright/test';
 import type { FormTestEvent } from '@/lib/test/test-events';
 import { waitForUiState, waitTestEvent } from '../helpers';
 import { projectAddress } from '../projects';
+import { etaPopParts } from './timeline-page';
 
 type Act = 'join' | 'leave' | 'finish' | 'reopen' | 'archive' | 'bring-back';
 type Ask = Exclude<Act, 'join' | 'leave'>;
@@ -15,9 +16,9 @@ type Ask = Exclude<Act, 'join' | 'leave'>;
 export class ProjectHeadPage {
   readonly root: Locator;
   readonly name: Locator;
-  /** The badge of the time the project's running work still takes, after its name, and the alert's sentence (F156.8). */
+  /** The badge of the time the project's running work still takes, after its name, and the figures it opens (F156.8, F156.13). */
   readonly eta: Locator;
-  readonly etaSays: Locator;
+  readonly etaPop: ReturnType<typeof etaPopParts>;
   readonly ticket: Locator;
   readonly repo: Locator;
   readonly draft: Locator;
@@ -49,7 +50,7 @@ export class ProjectHeadPage {
     this.root = page.getByTestId('project.head');
     this.name = page.getByTestId('project.name');
     this.eta = page.getByTestId('project.eta');
-    this.etaSays = page.getByTestId('project.eta.says');
+    this.etaPop = etaPopParts(page, 'project.eta');
     this.ticket = page.getByTestId('project.ticket');
     this.repo = page.getByTestId('project.repo');
     this.draft = page.getByTestId('project.draft');

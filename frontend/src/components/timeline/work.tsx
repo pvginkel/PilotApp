@@ -463,9 +463,9 @@ function Running({ since }: { since: string }) {
 }
 
 /**
- * The badge of the time the work item still takes, then the running step's kind, shown as given. In
- * the head's row they stand after the running time; where that row wraps with them in it, they take
- * a line of their own under it (`eta-below`, timeline.css), the row as it was.
+ * The badge of the time the work item still takes, alone, the running step's kind standing in its
+ * figures. In the head's row it stands after the running time; where that row wraps with it in it,
+ * it takes a line of its own under it (`eta-below`, timeline.css), the row as it was.
  */
 function Eta({ estimate }: { estimate: NonNullable<Work['estimate']> }) {
   const [box, setBox] = useState<HTMLDivElement | null>(null);
@@ -499,11 +499,6 @@ function Eta({ estimate }: { estimate: NonNullable<Work['estimate']> }) {
   return (
     <div ref={setBox} className="work-eta">
       <EtaBadge estimate={estimate} testId="timeline.work.eta" />
-      {estimate.kind !== null && (
-        <span className="eta-more" title={estimate.kind} data-testid="timeline.work.eta.kind">
-          {estimate.kind}
-        </span>
-      )}
     </div>
   );
 }
