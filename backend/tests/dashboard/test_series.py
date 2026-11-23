@@ -323,6 +323,30 @@ class TestInOrder:
         assert panel.before == 3
         assert panel.band == (Band(3.25, 3.5, 3.75), Band(4.25, 4.5, 4.75))
 
+    def test_a_member_in_the_range_is_not_read_before_it(
+        self, service: SeriesService, session: DbSession, project: Project
+    ) -> None:
+        runs = members(session, project, ["1", "2", "3", "4", "5", "6"])
+        _a_later_turn(session, runs[2], datetime(2026, 10, 5, 12, tzinfo=UTC), "7")
+
+        found = _series(
+            service, "t=c,2026-10-05,2026-10-06&by=psession&p=order&roll=2,3"
+        )
+
+        assert [point.key for point in found.points] == [
+            runs[2].id,
+            runs[4].id,
+            runs[5].id,
+        ]
+        assert _values(found) == [7, 5, 6]
+        panel = found.panels[0]
+        assert panel.before == 3
+        assert panel.band == (
+            Band(2.5, 3.0, 3.5),
+            Band(4.75, 5.5, 6.25),
+            Band(5.5, 6.0, 6.5),
+        )
+
     def test_its_outliers_by_the_screens_one_rule(
         self, service: SeriesService, session: DbSession, project: Project
     ) -> None:
@@ -357,6 +381,33 @@ class TestInOrder:
 
         assert [point.focus for point in found.points] == [False, False, True]
         assert found.panels[0].measure.median == 1.5
+
+
+class TestItemsBeforeTheRange:
+    def test_the_dots_band_reads_the_items_that_started_before_the_range_first(
+        self, service: SeriesService, session: DbSession, project: Project
+    ) -> None:
+        runs = members(session, project, ["1", "2", "3", "4", "5", "6"])
+        _a_later_turn(session, runs[2], datetime(2026, 10, 5, 12, tzinfo=UTC), "7")
+
+        found = _series(
+            service, "t=c,2026-10-05,2026-10-06&p=time,day&m=cost.max.psession&roll=2,3"
+        )
+
+        panel = found.panels[0]
+        assert panel.kind == "items"
+        assert panel.dots is not None
+        assert [(dot.point, dot.key, dot.value) for dot in panel.dots] == [
+            (0, runs[4].id, 5),
+            (0, runs[2].id, 7),
+            (1, runs[5].id, 6),
+        ]
+        assert panel.before == 3
+        assert panel.band == (
+            Band(2.5, 3.0, 3.5),
+            Band(4.25, 4.5, 4.75),
+            Band(5.5, 6.0, 6.5),
+        )
 
 
 @pytest.mark.usefixtures("worked")
@@ -450,6 +501,22 @@ def _planned(service: SeriesService, written: str) -> tuple[Measured, ...]:
     view = service.address_service.view(written)
     found = series_plan(view.address.state, view.catalogue, view.weeks, NOW)
     return found.measures
+
+
+def _a_later_turn(db: DbSession, run: models.Session, at: datetime, cost: str) -> None:
+    """A second Turn of `run`'s, started at `at`, of `cost`."""
+    db.add(
+        models.Turn(
+            session_id=run.id,
+            seq=2,
+            message="Halve the recipe.",
+            started_at=at,
+            ended_at=at + timedelta(minutes=5),
+            cost=Decimal(cost),
+            cause_code=TurnCause.BRIEF,
+        )
+    )
+    db.flush()
 
 
 def _a_later_version(
