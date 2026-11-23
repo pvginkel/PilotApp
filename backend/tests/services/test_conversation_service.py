@@ -569,11 +569,18 @@ class TestItsTranscript:
         turn = _open(conversations, opened, service_user)
 
         chat = container.view_service().chat(opened)
+        # A message stands under its `send` record's time, the database's, not
+        # under its Turn's start, the server's clock, a second later at times.
+        (sent,) = [
+            stored.record
+            for stored in _records(conversations.db, turn.session_id)
+            if stored.record.kind_code == RecordKind.SEND
+        ]
         assert chat.text.split("\n\n")[1:] == [
             "## Conversation with a session in RecipeBox-2"
             " (example-recipebox-1a2b3c, session ui-sweep-triage)"
             f" · opened {utc_time(_read(conversations.db, turn.session_id).created_at)}",
-            f"**fleet** · {utc_time(turn.started_at)}",
+            f"**fleet** · {utc_time(sent.at)}",
             WORDS,
             "Open\n",
         ]
