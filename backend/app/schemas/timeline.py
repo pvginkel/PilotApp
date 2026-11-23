@@ -859,9 +859,9 @@ class EstimateSchema(BaseModel):
     )
     run_figures: RunFiguresSchema | None = Field(
         description=(
-            "The run's row of the figures: null on a list of one step, and "
-            "where a step listed ahead has no kind or its kind had no price "
-            "at the run's start (F156.6, F156.13)"
+            "The run's row of the figures: null on a list of one step or one "
+            "with no step listed ahead, and where a step listed ahead has no "
+            "kind or its kind had no price at the run's start (F156.6, F156.13)"
         )
     )
 

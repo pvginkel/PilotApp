@@ -7489,7 +7489,7 @@
                 "type": "null"
               }
             ],
-            "description": "The run's row of the figures: null on a list of one step, and where a step listed ahead has no kind or its kind had no price at the run's start (F156.6, F156.13)"
+            "description": "The run's row of the figures: null on a list of one step or one with no step listed ahead, and where a step listed ahead has no kind or its kind had no price at the run's start (F156.6, F156.13)"
           },
           "step_figures": {
             "description": "The figures' row of each running step, in the list's order: none for a step whose kind had fewer than five timings in all repos when it began, or that has no kind (F156.6, F156.13)",
@@ -12489,7 +12489,7 @@
                 "type": "null"
               }
             ],
-            "description": "The run's row of the figures: null on a list of one step, and where a step listed ahead has no kind or its kind had no price at the run's start (F156.6, F156.13)"
+            "description": "The run's row of the figures: null on a list of one step or one with no step listed ahead, and where a step listed ahead has no kind or its kind had no price at the run's start (F156.6, F156.13)"
           },
           "step_figures": {
             "description": "The figures' row of each running step, in the list's order: none for a step whose kind had fewer than five timings in all repos when it began, or that has no kind (F156.6, F156.13)",
@@ -12593,7 +12593,7 @@
                 "type": "null"
               }
             ],
-            "description": "The run's row of the figures: null on a list of one step, and where a step listed ahead has no kind or its kind had no price at the run's start (F156.6, F156.13)"
+            "description": "The run's row of the figures: null on a list of one step or one with no step listed ahead, and where a step listed ahead has no kind or its kind had no price at the run's start (F156.6, F156.13)"
           },
           "step_figures": {
             "description": "The figures' row of each running step, in the list's order: none for a step whose kind had fewer than five timings in all repos when it began, or that has no kind (F156.6, F156.13)",
@@ -13181,7 +13181,7 @@
                 "type": "null"
               }
             ],
-            "description": "The run's row of the figures: null on a list of one step, and where a step listed ahead has no kind or its kind had no price at the run's start (F156.6, F156.13)"
+            "description": "The run's row of the figures: null on a list of one step or one with no step listed ahead, and where a step listed ahead has no kind or its kind had no price at the run's start (F156.6, F156.13)"
           },
           "step_figures": {
             "description": "The figures' row of each running step, in the list's order: none for a step whose kind had fewer than five timings in all repos when it began, or that has no kind (F156.6, F156.13)",
@@ -22331,7 +22331,7 @@
                 "type": "null"
               }
             ],
-            "description": "The run's row of the figures: null on a list of one step, and where a step listed ahead has no kind or its kind had no price at the run's start (F156.6, F156.13)"
+            "description": "The run's row of the figures: null on a list of one step or one with no step listed ahead, and where a step listed ahead has no kind or its kind had no price at the run's start (F156.6, F156.13)"
           },
           "step_figures": {
             "description": "The figures' row of each running step, in the list's order: none for a step whose kind had fewer than five timings in all repos when it began, or that has no kind (F156.6, F156.13)",
@@ -25102,7 +25102,7 @@
                 "type": "null"
               }
             ],
-            "description": "The run's row of the figures: null on a list of one step, and where a step listed ahead has no kind or its kind had no price at the run's start (F156.6, F156.13)"
+            "description": "The run's row of the figures: null on a list of one step or one with no step listed ahead, and where a step listed ahead has no kind or its kind had no price at the run's start (F156.6, F156.13)"
           },
           "step_figures": {
             "description": "The figures' row of each running step, in the list's order: none for a step whose kind had fewer than five timings in all repos when it began, or that has no kind (F156.6, F156.13)",

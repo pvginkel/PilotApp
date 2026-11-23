@@ -375,8 +375,9 @@ no tool of Pilot's MCP server hands them back.
   on and grows only as the list gains a step; a begun step whose listing the work item does not
   know, one a continuation's first list brings, takes the listing of the earliest of the run's other
   work items that knows it, and counts as listed where none does. Slow is normal times
-  `ESTIMATE_RUN_SLOW_FACTOR`. No run row stands on a list of one step, where a step listed ahead
-  has no kind, or where its kind had no price at the run's start.
+  `ESTIMATE_RUN_SLOW_FACTOR`. No run row stands on a list of one step, on one where no step was
+  listed ahead, which would price nothing, where a step listed ahead has no kind, or where its kind
+  had no price at the run's start.
 
 So far and the longest are to the nearest minute, normal and slow to the nearest minute under an
 hour and to the nearest five minutes from one, not by the badge's rounding; the page words them

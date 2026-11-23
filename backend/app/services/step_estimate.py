@@ -170,8 +170,9 @@ class WorkEstimate:
     """The row of each running step, in the list's order, of those whose
     kind had at least `FEW` timings in all repos when it began."""
     run_figures: RunFigures | None
-    """The run's row; none on a list of one step, and none where a step
-    listed ahead has no kind or its kind had no price at the run's start."""
+    """The run's row; none on a list of one step or one with no step
+    listed ahead, and none where a step listed ahead has no kind or its kind
+    had no price at the run's start."""
 
     @property
     def minutes(self) -> int | None:
@@ -721,10 +722,11 @@ def _run_row(
     window: int,
     slow_factor: float,
 ) -> RunFigures | None:
-    """The run's row of the figures; none where it prices no list, or a kind
-    it prices had no price at the run's start."""
+    """The run's row of the figures; none where it prices no list, or no
+    step on it was listed ahead, or a kind it prices had no price at the
+    run's start."""
     kinds = run.priced
-    if kinds is None:
+    if not kinds:
         return None
     normal = 0.0
     for kind in kinds:

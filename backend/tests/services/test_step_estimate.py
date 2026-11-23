@@ -1333,6 +1333,22 @@ class TestWorkEstimatesRunFigures:
         assert figures is not None
         assert figures.normal_seconds == pytest.approx((20 + 8) * MINUTE)
 
+    def test_a_list_with_no_step_listed_ahead_has_none_and_its_so_far_still_stands(
+        self, session: DbSession, run: uuid.UUID
+    ) -> None:
+        """Every step first seen as it began: its normal would price nothing,
+        a row of zeros beside its time so far."""
+        _timed_at(session, run, "review", [8], ended=20)
+        _list(
+            session,
+            run,
+            [_done("review", 20, listed=False), _active("write", 12, listed=False)],
+        )
+
+        estimate = _estimates(session, [run])[run]
+
+        assert (estimate.run_figures, estimate.ran_seconds) == (None, 20 * MINUTE)
+
     def test_its_prices_are_the_timings_as_they_stood_at_its_start(
         self, session: DbSession, run: uuid.UUID, past: uuid.UUID
     ) -> None:
