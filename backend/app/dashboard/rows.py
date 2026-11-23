@@ -12,10 +12,10 @@ it.
 - The rows are in the sort the state names, else by the first measure, the
   largest first; a row with none in the column last. At most `ROWS` are
   answered, with the count of all.
-- The color's values are those of the first measure that stacks, by its
-  amount on the All row, the largest first, past `COLORS` folded into one;
-  the token kinds in their order. Each row splits each measure that stacks
-  over those values.
+- The color's values are those any measure that stacks holds on the All
+  row, by the first one's amount there, the largest first, then by the
+  next's, past `COLORS` folded into one; the token kinds in their order.
+  Each row splits each measure that stacks over those values.
 - A measure's `median` is the median of its rows' values, the rows that hold
   the focus left out: the peers' median the Rows draw a tick at.
 - Times are instants with the engine's zone beside them, never text, which
@@ -285,33 +285,38 @@ class _Shaper:
         key = self.plan.color
         if key is None:
             return None
-        lead = next(
-            (
-                self.simples.index(planned)
-                for planned, stacks_ in zip(self.plan.measures, stacked, strict=True)
-                if stacks_ and isinstance(planned, Planned)
-            ),
-            None,
-        )
+        stacking = [
+            self.simples.index(planned)
+            for planned, stacks_ in zip(self.plan.measures, stacked, strict=True)
+            if stacks_ and isinstance(planned, Planned)
+        ]
         if key == TOKEN_KIND:
             kinds = self._kinds()
-            totals = self.all.kinds.get(lead, {}) if lead is not None else {}
+            totals = self.all.kinds.get(stacking[0], {}) if stacking else {}
             return Color(
                 TOKEN_KIND,
                 TOKEN_KIND_LABEL,
                 tuple(
                     ColorValue(kind, None, _number(totals.get(kind)))
-                    for kind in (kinds if lead is not None else ())
+                    for kind in (kinds if stacking else ())
                 ),
             )
         dimension = self.catalogue.dimension(key)
-        amounts = {
-            value: _number(amount) or 0.0
-            for value, amount in (
-                self.all.by_color.get(lead, {}) if lead is not None else {}
-            ).items()
-        }
-        ordered = sorted(amounts, key=lambda value: (-amounts[value], _order(value)))
+        held = [
+            {
+                value: _number(amount) or 0.0
+                for value, amount in self.all.by_color.get(index, {}).items()
+            }
+            for index in stacking
+        ]
+        amounts = {value: held[0].get(value, 0.0) for each in held for value in each}
+        ordered = sorted(
+            amounts,
+            key=lambda value: (
+                *(-each.get(value, 0.0) for each in held),
+                _order(value),
+            ),
+        )
         kept, rest = ordered[:COLORS], ordered[COLORS:]
         if len(rest) == 1:
             kept, rest = ordered, []

@@ -222,6 +222,25 @@ class TestColor:
         assert found.all.split is not None
         assert _round(found.all.split[0] or ()) == (1.9, 0.75)
 
+    @pytest.mark.parametrize(
+        "written",
+        [
+            "t=all&by=project&m=turns.count&m=cost.sum&col=project",
+            "t=all&by=conversation&m=events.count&m=cost.sum&col=model",
+        ],
+    )
+    def test_a_later_measure_splits_over_values_the_first_lacks(
+        self, service: RowsService, written: str
+    ) -> None:
+        found = _rows(service, written)
+
+        assert [measure.stacks for measure in found.measures] == [True, True]
+        for line in (found.all, *found.rows):
+            assert line.split is not None
+            for value, split in zip(line.values, line.split, strict=True):
+                assert split is not None
+                assert round(sum(split), 6) == round(value or 0, 6)
+
     def test_a_measure_whose_fact_lacks_the_color_does_not_stack(
         self, service: RowsService
     ) -> None:
