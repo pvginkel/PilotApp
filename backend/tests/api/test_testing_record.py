@@ -1,6 +1,7 @@
 """/api/testing/{people,environments,projects,items}: the record's states the
 UI cannot make (TEST-6), on every stage but prd, behind the API's sign-in
-(D027): among them the handbook an open project is born with, an agent's
+(D027): among them every project the list shows archived at once by its flag
+alone and brought back so, the handbook an open project is born with, an agent's
 saves of the project's draft and handbook, Pilot's Done, a work item placed by
 repository, started in an environment of Pilot's own the stage's own
 controller creates, or by name in an environment of that controller's, its
@@ -43,6 +44,7 @@ from app.models import (
     ProgressStep,
     Project,
     ProjectMember,
+    ProjectTransition,
     ResearchAssignment,
     StepTiming,
     StepTranscript,
@@ -95,6 +97,8 @@ SERVICE_USERS = "/api/testing/service-users"
 FLEET = {"handle": "fleet", "name": "KubeCoder fleet", "subject": "subject-fleet"}
 ENVIRONMENTS = "/api/testing/environments"
 PROJECTS = "/api/testing/projects"
+ARCHIVE = "/api/testing/projects/archive"
+BRING_BACK = "/api/testing/projects/bring-back"
 STORE_UPDATE = "/api/testing/store-update"
 SCENARIOS = "/api/testing/scenarios"
 WALKS = "/api/testing/walks"
@@ -604,6 +608,86 @@ class TestCreateProject:
         )
 
         assert response.status_code == 409
+
+
+def _listed(client: FlaskClient) -> list[dict[str, Any]]:
+    response = client.get("/api/projects?archived=false")
+    assert response.status_code == 200, response.get_json()
+    projects: list[dict[str, Any]] = response.get_json()["projects"]
+    return projects
+
+
+def _transition_count(session: Session) -> int:
+    return len(session.scalars(select(ProjectTransition.id)).all())
+
+
+@pytest.mark.usefixtures("person")
+class TestArchiveListed:
+    def test_every_listed_project_by_its_flag_alone(
+        self, client: FlaskClient, session: Session
+    ) -> None:
+        listed = [_make(client, state=state) for state in ("draft", "open", "finished")]
+        archived = _make(client, archived=True)
+        transitions = _transition_count(session)
+
+        response = client.post(ARCHIVE)
+
+        assert response.status_code == 200
+        assert sorted(response.get_json()["projects"]) == sorted(listed)
+        assert _listed(client) == []
+        assert dict(session.execute(select(Project.id, Project.archived)).all()) == (
+            dict.fromkeys(map(uuid.UUID, [*listed, archived]), True)
+        )
+        assert _transition_count(session) == transitions
+
+    def test_with_nothing_listed_it_answers_none(self, client: FlaskClient) -> None:
+        _make(client)
+        assert client.post(ARCHIVE).status_code == 200
+
+        response = client.post(ARCHIVE)
+
+        assert response.status_code == 200
+        assert response.get_json() == {"projects": []}
+
+
+@pytest.mark.usefixtures("person")
+class TestBringBack:
+    def test_the_projects_archived_are_listed_as_they_were(
+        self, client: FlaskClient, session: Session
+    ) -> None:
+        _make(client, name="Camp", ticket="RB-12", tasks=TASKS)
+        _make(client, state="finished")
+        archived = _make(client, archived=True)
+        before = _listed(client)
+        transitions = _transition_count(session)
+
+        response = client.post(
+            BRING_BACK, json={"projects": client.post(ARCHIVE).get_json()["projects"]}
+        )
+
+        assert response.status_code == 204
+        assert _listed(client) == before
+        assert session.get_one(Project, uuid.UUID(archived)).archived is True
+        assert _transition_count(session) == transitions
+
+    def test_an_id_that_names_no_project_is_not_found_and_brings_back_none(
+        self, client: FlaskClient
+    ) -> None:
+        listed = _make(client)
+        client.post(ARCHIVE)
+
+        response = client.post(BRING_BACK, json={"projects": [listed, str(NO_ROW)]})
+
+        assert response.status_code == 404
+        assert _listed(client) == []
+
+    @pytest.mark.parametrize(
+        "body", [{}, {"projects": "all"}, {"projects": ["not an id"]}]
+    )
+    def test_a_body_that_is_no_list_of_ids_is_refused(
+        self, client: FlaskClient, body: dict[str, Any]
+    ) -> None:
+        assert client.post(BRING_BACK, json=body).status_code == 400
 
 
 DECISION = """```decision id=D1
@@ -2081,6 +2165,8 @@ ENDPOINTS = [
     (SERVICE_USERS, FLEET),
     (ENVIRONMENTS, {"id": "example-env-2", "name": "Example-2"}),
     (PROJECTS, {"members": ["ada"]}),
+    (ARCHIVE, {}),
+    (BRING_BACK, {"projects": [str(NO_ROW)]}),
     (_items_path(NO_ROW), {"kind": "notice", "title": "Camp", "text": "Hi"}),
     (_saves_path(NO_ROW), {"text": "Hi"}),
     (_attachments_path(NO_ROW), {"files": [_file("a.md", b"Hi")]}),

@@ -435,6 +435,22 @@ export class Projects {
     return ((await response.json()) as { projects: ProjectTab[] }).projects;
   }
 
+  /**
+   * Every project the list shows archived at once, by its flag alone: no transition and none of
+   * Archive's effects, so that `bringBack` of the ids answered leaves each as it was.
+   */
+  async archiveListed(): Promise<string[]> {
+    const response = await this.page.request.post(`${this.backendUrl}/api/testing/projects/archive`);
+    expect(response.status(), await response.text()).toBe(200);
+    return ((await response.json()) as { projects: string[] }).projects;
+  }
+
+  /** The projects `archiveListed` archived, listed again by their flag alone. */
+  async bringBack(ids: string[]): Promise<void> {
+    const response = await this.page.request.post(`${this.backendUrl}/api/testing/projects/bring-back`, { data: { projects: ids } });
+    expect(response.status(), await response.text()).toBe(204);
+  }
+
   /** A project of the backend's seed, by its name: its id, its address known as a made project's is. */
   async seeded(name: string): Promise<string> {
     const tab = (await this.list()).find((each) => each.name === name)!;

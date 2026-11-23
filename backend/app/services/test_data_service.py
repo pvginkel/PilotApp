@@ -21,7 +21,7 @@ from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from sqlalchemy import exists, func, select
+from sqlalchemy import exists, func, select, update
 from sqlalchemy.orm import Session
 
 from app.engine.attachments import AttachService, Copy
@@ -809,6 +809,38 @@ class TestDataService:
             else self._session_of(project, f"add an item to project {project.id}")
         )
         return self.document_service.bear_item(project, kind, title, session, text)
+
+    def archive_listed(self) -> list[uuid.UUID]:
+        """Every project the list shows archived at once, its ids answered:
+        the flag alone, no transition written and none of Archive's effects
+        run (F128.1), so that `bring_back` of those ids leaves each project as
+        it was."""
+        return list(
+            self.db.scalars(
+                update(Project)
+                .where(Project.archived.is_(False))
+                .values(archived=True)
+                .returning(Project.id)
+            )
+        )
+
+    def bring_back(self, project_ids: Sequence[uuid.UUID]) -> None:
+        """The projects listed again by their flag alone, as `archive_listed`
+        archived them: no transition written and none of Bring back's
+        effects run.
+
+        Raises:
+            RecordNotFoundException: an id names no project.
+        """
+        found = set(
+            self.db.scalars(select(Project.id).where(Project.id.in_(project_ids)))
+        )
+        for project_id in project_ids:
+            if project_id not in found:
+                raise RecordNotFoundException("Project", str(project_id))
+        self.db.execute(
+            update(Project).where(Project.id.in_(project_ids)).values(archived=False)
+        )
 
     def sightings(self, project_id: uuid.UUID, handle: str) -> list[uuid.UUID]:
         """The items the person's open membership of the project was shown,

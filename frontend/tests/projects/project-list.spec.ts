@@ -404,9 +404,8 @@ test.describe('Refetching', () => {
 test.describe('With no project', () => {
   test('the centre reads “No projects yet”', async ({ page, people, projects, projectList, shell }) => {
     await people.signIn();
-    // The worker's database holds the seed's projects: archived for the test, brought back after.
-    const listed = await projects.list();
-    for (const project of listed) await projects.transition(project.id, 'archived');
+    // The worker's database is never reset: every project it lists archived at once, brought back after.
+    const archived = await projects.archiveListed();
     try {
       await shell.open('/');
       await expect(projectList.empty).toHaveText('No projects yet');
@@ -414,7 +413,7 @@ test.describe('With no project', () => {
       await expect(projectList.tabs).toHaveCount(0);
       await expect(page).toHaveURL('/');
     } finally {
-      for (const project of listed) await projects.transition(project.id, 'brought_back');
+      await projects.bringBack(archived);
     }
   });
 });

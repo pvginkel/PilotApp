@@ -1,5 +1,6 @@
 """Schemas for the testing endpoints that make the record's states the UI
-cannot make: people, a service user, environments, projects, their items,
+cannot make: people, a service user, environments, projects, every project
+the list shows archived at once and brought back, their items,
 their work items,
 an agent's saves of them, the files hung on them, a worker's registrations and
 attachments, the pre-ruling pass's questions to a writer, an answer the brain
@@ -170,6 +171,16 @@ class InventedProjectSchema(BaseModel):
         description="The project's folder in the store's tree: `draft-<number>`"
         " for a draft, else its slug",
         examples=["draft-7"],
+    )
+
+
+class InventedArchivedSchema(BaseModel):
+    """Projects archived by their flag alone, as the testing route archives
+    every project the list shows, and brings them back."""
+
+    projects: list[uuid.UUID] = Field(
+        description="The projects' ids",
+        examples=[["5e7f9a10-1c2d-4e3f-8a4b-6c7d8e9f0a1b"]],
     )
 
 

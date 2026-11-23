@@ -4325,6 +4325,30 @@
         "title": "InventedAlertCreateSchema",
         "type": "object"
       },
+      "InventedArchivedSchema.6d6b324": {
+        "description": "Projects archived by their flag alone, as the testing route archives\nevery project the list shows, and brings them back.",
+        "properties": {
+          "projects": {
+            "description": "The projects' ids",
+            "examples": [
+              [
+                "5e7f9a10-1c2d-4e3f-8a4b-6c7d8e9f0a1b"
+              ]
+            ],
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "title": "Projects",
+            "type": "array"
+          }
+        },
+        "required": [
+          "projects"
+        ],
+        "title": "InventedArchivedSchema",
+        "type": "object"
+      },
       "InventedAttachmentsCreateSchema.6d6b324": {
         "description": "Files the project's session attaches to an item in one call, as a\nfolder is: one batch.",
         "properties": {
@@ -35901,6 +35925,93 @@
           }
         ],
         "summary": "Make a project in the standing given, made now by its first member.",
+        "tags": [],
+        "x-required-role": "editor"
+      }
+    },
+    "/api/testing/projects/archive": {
+      "post": {
+        "description": "Returns:     200: The ids of the projects archived     400: The stage is prd",
+        "operationId": "post__api_testing_projects_archive",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InventedArchivedSchema.6d6b324"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Bad Request"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Archive every project the list shows, in one statement: the flag alone, no transition written and none of Archive's effects run (F128.1), so that `/projects/bring-back` of the ids answered leaves each as it was.",
+        "tags": [],
+        "x-required-role": "editor"
+      }
+    },
+    "/api/testing/projects/bring-back": {
+      "post": {
+        "description": "Returns:     204: The projects are listed     400: The body is not a list of project ids, or the stage is prd     404: An id names no project",
+        "operationId": "post__api_testing_projects_bring-back",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InventedArchivedSchema.6d6b324"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Bring back the projects `/projects/archive` archived, by their flag alone: no transition written and none of Bring back's effects run.",
         "tags": [],
         "x-required-role": "editor"
       }

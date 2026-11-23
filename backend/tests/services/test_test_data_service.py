@@ -987,6 +987,71 @@ class TestProject:
         assert raised.value.message == message
 
 
+def _archived(session: DbSession) -> dict[uuid.UUID, bool]:
+    return dict(session.execute(select(Project.id, Project.archived)).all())
+
+
+def _transition_count(session: DbSession) -> int:
+    return len(session.scalars(select(ProjectTransition.id)).all())
+
+
+@pytest.mark.usefixtures("person")
+class TestArchiveListed:
+    def test_every_listed_project_by_its_flag_alone(
+        self, container: ServiceContainer, session: DbSession
+    ) -> None:
+        service = container.test_data_service()
+        listed = [
+            service.project(_spec(state=state)).id
+            for state in ("draft", "open", "finished")
+        ]
+        archived = service.project(_spec(archived=True)).id
+        transitions = _transition_count(session)
+
+        answered = service.archive_listed()
+
+        assert sorted(answered) == sorted(listed)
+        assert _archived(session) == dict.fromkeys([*listed, archived], True)
+        assert _transition_count(session) == transitions
+
+    def test_with_nothing_listed_it_archives_nothing(
+        self, container: ServiceContainer
+    ) -> None:
+        service = container.test_data_service()
+        service.project(_spec())
+        service.archive_listed()
+
+        assert service.archive_listed() == []
+
+
+@pytest.mark.usefixtures("person")
+class TestBringBack:
+    def test_the_projects_named_by_their_flag_alone(
+        self, container: ServiceContainer, session: DbSession
+    ) -> None:
+        service = container.test_data_service()
+        listed = service.project(_spec()).id
+        archived = service.project(_spec(archived=True)).id
+        transitions = _transition_count(session)
+
+        service.bring_back(service.archive_listed())
+
+        assert _archived(session) == {listed: False, archived: True}
+        assert _transition_count(session) == transitions
+
+    def test_an_id_that_names_no_project_brings_back_none(
+        self, container: ServiceContainer, session: DbSession
+    ) -> None:
+        service = container.test_data_service()
+        listed = service.project(_spec()).id
+        service.archive_listed()
+
+        with pytest.raises(RecordNotFoundException):
+            service.bring_back([listed, uuid.uuid4()])
+
+        assert _archived(session) == {listed: True}
+
+
 @pytest.fixture
 def camp(
     container: ServiceContainer, person: User, environment: Environment

@@ -1,7 +1,8 @@
 """Testing endpoints that make the record's states the UI cannot make
 (TEST-6): people who never signed in, a service user's row as
 `create-service-user` makes it (DB 338), environments, projects in every
-standing, with members, a plan, their opening and open items, the items a
+standing, with members, a plan, their opening and open items, every project
+the list shows archived at once by its flag alone and brought back so, the items a
 project's session adds, an agent's saves of them and of the project's draft,
 handbook and journal, the files it attaches, a draft's on no item, Pilot's Done, and
 the end of its turn; a read of what a member was shown, which the
@@ -60,6 +61,7 @@ from app.schemas.pilot_work import (
 from app.schemas.testing_record import (
     InventedAdoptedProjectSchema,
     InventedAlertCreateSchema,
+    InventedArchivedSchema,
     InventedAttachmentsCreateSchema,
     InventedAttachmentsSchema,
     InventedChatAnswerCreateSchema,
@@ -247,6 +249,54 @@ def create_project(
     project = test_data_service.project(data)
     response = InventedProjectSchema(id=project.id, folder=folder(project))
     return response.model_dump(mode="json"), 201
+
+
+@testing_record_bp.route("/projects/archive", methods=["POST"])
+@api.validate(
+    resp=SpectreeResponse(
+        HTTP_200=InventedArchivedSchema, HTTP_400=ApiErrorResponseSchema
+    ),
+)
+@inject
+def archive_listed(
+    test_data_service: TestDataService = Provide[ServiceContainer.test_data_service],
+) -> Any:
+    """Archive every project the list shows, in one statement: the flag alone,
+    no transition written and none of Archive's effects run (F128.1), so that
+    `/projects/bring-back` of the ids answered leaves each as it was.
+
+    Returns:
+        200: The ids of the projects archived
+        400: The stage is prd
+    """
+    archived = test_data_service.archive_listed()
+    return InventedArchivedSchema(projects=archived).model_dump(mode="json")
+
+
+@testing_record_bp.route("/projects/bring-back", methods=["POST"])
+@api.validate(
+    json=InventedArchivedSchema,
+    resp=SpectreeResponse(
+        HTTP_204=None,
+        HTTP_400=ApiErrorResponseSchema,
+        HTTP_404=ApiErrorResponseSchema,
+    ),
+)
+@inject
+def bring_back(
+    test_data_service: TestDataService = Provide[ServiceContainer.test_data_service],
+) -> tuple[str, int]:
+    """Bring back the projects `/projects/archive` archived, by their flag
+    alone: no transition written and none of Bring back's effects run.
+
+    Returns:
+        204: The projects are listed
+        400: The body is not a list of project ids, or the stage is prd
+        404: An id names no project
+    """
+    data = InventedArchivedSchema.model_validate(request.get_json())
+    test_data_service.bring_back(data.projects)
+    return "", 204
 
 
 @testing_record_bp.route("/projects/<uuid:project_id>/items", methods=["POST"])
