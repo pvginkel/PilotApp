@@ -15,8 +15,8 @@ import { extractSseData, waitForSseEvent } from '../../support/helpers/test-even
 // Only a production build takes the SharedWorker path: under the Vite dev
 // server shouldUseSharedWorker() is false, so these tests would pass on the
 // direct connection. Preview mode serves such a build, made with
-// `VITE_TEST_MODE=true pnpm build`, and their @preview tag has the root suite
-// runner's preview pass run them.
+// `VITE_TEST_MODE=true pnpm build`, and the root suite runner and the frontend
+// test verb run the whole suite under it. Their @preview tag marks them.
 const SHARED_WORKER_SKIP_REASON =
   'Needs PLAYWRIGHT_PREVIEW_MODE=true: the Vite dev server never uses the SharedWorker';
 const sharedWorkerUnavailable = process.env.PLAYWRIGHT_PREVIEW_MODE !== 'true';

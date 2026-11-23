@@ -29,8 +29,8 @@ import {
 } from '../../support/helpers/test-events';
 
 // The SharedWorker cases need a production build: they skip unless
-// PLAYWRIGHT_PREVIEW_MODE=true, and their @preview tag has the root suite
-// runner's preview pass run them.
+// PLAYWRIGHT_PREVIEW_MODE=true, under which the root suite runner and the
+// frontend test verb run the whole suite. Their @preview tag marks them.
 const PREVIEW_ONLY_REASON =
   'Needs PLAYWRIGHT_PREVIEW_MODE=true: the Vite dev server never uses the SharedWorker';
 

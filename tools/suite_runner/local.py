@@ -7,20 +7,22 @@ Flow:
   2. wait for services, when backend/scripts/wait-for-services.py exists
   3. run backend pytest
   4. install the frontend's npm deps (standalone pnpm project), build the
-     frontend, install the Playwright browser, run Playwright on the dev server
-  5. the preview pass: rebuild the frontend with VITE_TEST_MODE=true and run
-     the specs tagged @preview on that build (PLAYWRIGHT_PREVIEW_MODE=true)
+     frontend once with VITE_TEST_MODE=true, install the Playwright browser,
+     and run Playwright once on that build under `vite preview`
+     (PLAYWRIGHT_PREVIEW_MODE=true)
 
 Step 2 is the app's hook for sidecars that are slow to come up in CI (a search
 engine, a message broker): the script runs under the backend's uv venv and
 must exit non-zero if a service never becomes ready.
 
-Step 5 covers what only a production build does, such as the SSE SharedWorker:
-those specs skip on the dev server. The runner owns VITE_TEST_MODE and
-PLAYWRIGHT_PREVIEW_MODE, clearing both for step 4 and setting them for step 5,
-and it skips step 5 when the selected specs hold no @preview one. It leaves
+Step 4's build is `pnpm build`, its check (lint, the type check, knip)
+included, under VITE_TEST_MODE=true, which puts the Playwright bridges into
+the bundle. The whole suite, or the selection --frontend-args gives it, runs
+on that build, the specs tagged @preview with it: they need a production
+build, such as the SSE SharedWorker's, and skip on the dev server. It leaves
 dist/ a test-mode build; .dockerignore keeps dist/ out of the image, whose
-build stays plain.
+build stays plain. A direct `pnpm playwright test` stays on the Vite dev
+server.
 
 The build cache (--build-cache, or BUILD_CACHE=true, which CI sets) restores
 the frontend's pnpm store before the install and uploads it after a miss,
@@ -38,13 +40,12 @@ Output modes:
             reports in --junitxml-dir (for CI)
 
 Each test run writes a JUnit XML report, in either mode: into --junitxml-dir
-when given (backend.xml, frontend.xml, frontend-preview.xml), into a temporary
-directory otherwise. The counts come from those reports.
+when given (backend.xml, frontend.xml), into a temporary directory otherwise.
+The counts come from those reports.
 """
 
 import argparse
 import os
-import re
 import shlex
 import shutil
 import subprocess
@@ -76,16 +77,12 @@ HAS_PYTHON313 = shutil.which("python3.13") is not None
 # every app: the same lockfile makes the same store.
 BUILD_CACHE_PREFIX = "pnpm"
 
-# Specs that need a production build carry this tag; the preview pass runs them.
-PREVIEW_TAG = "@preview"
-
-
 class StepResult(NamedTuple):
     step: str
     ok: bool
     detail: str
     peak_mb: float | None
-    # A test run (pytest, a Playwright pass): its counts come from its JUnit
+    # A test run (pytest, Playwright): its counts come from its JUnit
     # report, and are None when it wrote none (a crash, a timeout).
     suite: bool = False
     counts: Counts | None = None
@@ -97,7 +94,8 @@ class StepResult(NamedTuple):
 
 def parse_args(argv=None):
     parser = argparse.ArgumentParser(
-        description=f"Run the {APP_NAME} backend and frontend test suites.",
+        description=f"Run the {APP_NAME} backend and frontend test suites, the frontend's "
+                    "once on a test-mode build under `vite preview`.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""\
 examples:
@@ -115,7 +113,8 @@ examples:
     parser.add_argument("--backend-args", default="",
                         help='Extra pytest arguments (e.g., "tests/test_foo.py -k bar")')
     parser.add_argument("--frontend-args", default="",
-                        help='Extra playwright arguments')
+                        help='Extra playwright arguments, a selection of spec files among them '
+                             '(e.g., "tests/foo.spec.ts"), for the run on the test-mode build')
     parser.add_argument("--max-failures", type=int, default=None,
                         help="Max failures before stopping (pytest --maxfail / playwright --max-failures)")
     parser.add_argument("--retries", type=int, default=None,
@@ -130,7 +129,7 @@ examples:
                              "SUITE_RESULT markers when --junitxml-dir is given, for CI)")
     parser.add_argument("--junitxml-dir", default=None,
                         help="Directory to keep the JUnit XML reports in (backend.xml, "
-                             "frontend.xml, frontend-preview.xml), in either output mode "
+                             "frontend.xml), in either output mode "
                              "(default: a temporary directory)")
     parser.add_argument("--build-cache", action="store_true",
                         default=os.environ.get("BUILD_CACHE") == "true",
@@ -183,10 +182,6 @@ def _install_cmd(cmd, *, cwd, timeout=120, env=None):
     return run(cmd, cwd=cwd, timeout=timeout, env=env)
 
 
-def _env_without(*names):
-    return {k: v for k, v in os.environ.items() if k not in names}
-
-
 # ---------------------------------------------------------------------------
 # Build cache
 # ---------------------------------------------------------------------------
@@ -217,8 +212,11 @@ def _build_cache(action, frontend, store_path):
 # Playwright
 # ---------------------------------------------------------------------------
 
-def _run_playwright(args, report_dir, frontend, extra, results, *, preview):
-    """Run one Playwright pass and record it. Returns success."""
+def _run_playwright(args, report_dir, frontend, extra, results):
+    """Run Playwright on the test-mode build under `vite preview` and record it.
+
+    Returns success.
+    """
     cmd = ["pnpm", "playwright", "test", "--reporter=list,junit"]
     if args.max_failures is not None:
         cmd.append(f"--max-failures={args.max_failures}")
@@ -226,73 +224,22 @@ def _run_playwright(args, report_dir, frontend, extra, results, *, preview):
         cmd.append(f"--retries={args.retries}")
     if args.workers is not None:
         cmd.append(f"--workers={args.workers}")
-    env = _env_without("PLAYWRIGHT_PREVIEW_MODE")
-    env["PLAYWRIGHT_BACKEND_LOG_STREAM"] = "true"
-    junit_name = "frontend"
-    label = "frontend playwright"
-    if preview:
-        cmd.extend(["--grep", PREVIEW_TAG])
-        env["PLAYWRIGHT_PREVIEW_MODE"] = "true"
-        junit_name = "frontend-preview"
-        label = "frontend playwright (preview)"
-    report = report_dir / f"{junit_name}.xml"
+    report = report_dir / "frontend.xml"
     report.unlink(missing_ok=True)
-    env["PLAYWRIGHT_JUNIT_OUTPUT_NAME"] = str(report)
+    env = {
+        **os.environ,
+        "PLAYWRIGHT_PREVIEW_MODE": "true",
+        "PLAYWRIGHT_BACKEND_LOG_STREAM": "true",
+        "PLAYWRIGHT_JUNIT_OUTPUT_NAME": str(report),
+    }
     cmd.extend(extra)
 
-    col = progress_start(f"Running {label} tests")
+    col = progress_start("Running frontend playwright tests")
     ok, detail, peak_mb = _run_cmd(cmd, cwd=frontend, timeout=3600, env=env)
     progress_end(ok, col)
-    results.append(StepResult(label, ok, detail, peak_mb, suite=True,
+    results.append(StepResult("frontend playwright", ok, detail, peak_mb, suite=True,
                               counts=report_counts(report)))
     return ok
-
-
-def _count_preview_specs(frontend, extra):
-    """How many selected tests carry PREVIEW_TAG: (count or None, listing output)."""
-    ok, out = run(
-        ["pnpm", "playwright", "test", "--list", "--pass-with-no-tests", "--grep", PREVIEW_TAG,
-         *extra],
-        cwd=frontend, timeout=300,
-    )
-    match = re.search(r"^Total: (\d+) tests?", out, re.MULTILINE)
-    return (int(match.group(1)) if ok and match else None), out
-
-
-def _run_preview_pass(args, report_dir, frontend, extra, results):
-    """Rebuild in test mode and run the @preview specs on that build. Returns success.
-
-    Skipped when the selection holds no @preview spec, so a run of other spec
-    files doesn't pay for a second build.
-    """
-    count, listing = _count_preview_specs(frontend, extra)
-    if count is None:
-        col = progress_start("Listing frontend preview specs")
-        progress_end(False, col)
-        if is_full_mode():
-            print(listing, flush=True)
-        results.append(StepResult("frontend preview listing", False, listing, None))
-        return False
-    if count == 0:
-        col = progress_start(f"Preview pass: no {PREVIEW_TAG} specs selected")
-        progress_skip(col)
-        return True
-
-    # VITE_TEST_MODE puts the Playwright bridges into the bundle.
-    col = progress_start("Building frontend (test mode)")
-    ok, detail = _install_cmd(
-        ["pnpm", "build"], cwd=frontend, timeout=900,
-        env={**os.environ, "VITE_TEST_MODE": "true"},
-    )
-    progress_end(ok, col)
-    results.append(StepResult("frontend build (test mode)", ok, detail, None))
-    if not ok:
-        col = progress_start("Running frontend playwright (preview) tests")
-        progress_skip(col)
-        results.append(StepResult("frontend playwright (preview)", False, "Skipped (build failed)", None))
-        return False
-
-    return _run_playwright(args, report_dir, frontend, extra, results, preview=True)
 
 
 # ---------------------------------------------------------------------------
@@ -407,11 +354,12 @@ def run_tests(args, report_dir):
                 progress_skip(col)
                 results.append(StepResult(f"frontend {step}", False, "Skipped (install failed)", None))
         else:
-            # Build (generates the API client + routes, runs check, vite build),
-            # plain like the image's.
-            col = progress_start("Building frontend")
+            # Build (generates the API client + routes, runs check, vite build)
+            # in test mode, for the preview.
+            col = progress_start("Building frontend (test mode)")
             ok, detail = _install_cmd(
-                ["pnpm", "build"], cwd=frontend, timeout=900, env=_env_without("VITE_TEST_MODE"),
+                ["pnpm", "build"], cwd=frontend, timeout=900,
+                env={**os.environ, "VITE_TEST_MODE": "true"},
             )
             progress_end(ok, col)
             results.append(StepResult("frontend build", ok, detail, None))
@@ -433,10 +381,7 @@ def run_tests(args, report_dir):
                 results.append(StepResult("playwright install", ok_pw, detail_pw, None))
 
                 if not _run_playwright(args, report_dir, frontend, extra_args["frontend"],
-                                       results, preview=False):
-                    exit_code = 1
-                if not _run_preview_pass(args, report_dir, frontend, extra_args["frontend"],
-                                         results):
+                                       results):
                     exit_code = 1
 
     return exit_code, results

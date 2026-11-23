@@ -123,7 +123,7 @@ Template-owned code is improved in this repo, not in the template repos (D018): 
 gets wrong, or does less well than the work needs, is changed here, with no need to stay backwards
 compatible, in a commit of its own, and listed here as a standing edit, so that a `copier update`
 that conflicts on it resolves to this repo's side; an agent merges it into ModernAppTemplate.
-Twenty-seven stand today: the `Jenkinsfile`, the app's own as a whole, which tags its images `dev-<n>` and
+Twenty-eight stand today: the `Jenkinsfile`, the app's own as a whole, which tags its images `dev-<n>` and
 `dev-latest` and pins `dev-<n>` into PilotDeploy's `config/dev` and `prd-<n>` into its `config/prd`
 in one commit, where the template's tags `<n>` and `latest` and pins production alone, and which
 carries the sidecar's `golang` container and its `Test sidecar` and `Build pilot-sync image` stages,
@@ -195,7 +195,15 @@ the page before its first `goto`, which replaced the page and the tag with it, s
 reached no page; `run-suite`'s Playwright worker count,
 which `tools/suite_runner/local.py` reads from `PLAYWRIGHT_WORKERS` when no `--workers` is given,
 where the library's `modernApp.test` fixes run-suite's flags and so left CI on the Playwright
-config's count; the completion of `useSSETask` in `frontend/src/hooks/use-sse-task.ts`, which
+config's count; `run-suite`'s frontend run, which `tools/suite_runner/local.py` builds once with
+`VITE_TEST_MODE=true`, `pnpm build` with its check, and runs once on that build under
+`PLAYWRIGHT_PREVIEW_MODE=true`, the whole suite or the selection `--frontend-args` gives it, its
+report `frontend.xml`, the comments of `frontend/tests/infrastructure/sse/sse-auth-recovery.spec.ts`
+and `sse-connectivity.spec.ts` saying so, where the template's built plain, ran the suite on the
+dev servers, then built again in test mode and ran the `@preview` specs alone into
+`frontend-preview.xml`, so that CI runs the suite once, on a production build, its four workers
+peaking at 4.0 to 4.3 GiB where the dev servers' peaked at 6.0 to 6.3; the completion of
+`useSSETask` in `frontend/src/hooks/use-sse-task.ts`, which
 takes a `task_completed` as the task's result unless the result says it failed, with `success` false
 or an `error_message`, where the template's took one without `success: true` as failed, and so
 failed every task whose result is a plain model, as the backend's `TaskService` sends one; a
