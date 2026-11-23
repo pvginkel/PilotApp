@@ -123,8 +123,8 @@ follows from ([below](#pilots-own-work)):
   line: "0m", "12m", "1h 5m", past six hours "7h", past two days "2d", counted again every 15 s by
   the wall clock and at once as the page comes back into view (`useNow`), so that a page that
   lived through a suspend keeps time. "Running for 1h 5m" is its tooltip and its accessible name
-  (`role="timer"`). After it, while the work item shows one, the badge of the time it still takes
-  and the running step's kind, on a line of their own under the head where its row would cut them
+  (`role="timer"`). After it, while the work item shows one, the badge of the time it still takes,
+  alone, on a line of its own under the head where its row would cut it
   ([below](#the-time-it-still-takes)). Then, with Discuss at the head's end, Session log's icon, in every state, and
   Stop's, its square red, while `running`, `starting` or `held`, or `idle` with its nudge owed
   (D169): icon buttons with no label, "Session log" and "Stop" their tooltips and their accessible
@@ -262,10 +262,12 @@ it.
 ## The time it still takes
 
 A running work item shows how long it still takes, so that when the work ends shows without
-asking. The server estimates it from the list as it stands and the Step Timings of its steps'
-kinds, which a run's finished steps and the seed leave ([`mcp.md`](mcp.md)), at every read, and stores
-none (`work_estimates`, `backend/app/services/step_estimate.py`). It reads no step's code or label
-and orders no kinds: a kind is the run's, read as given.
+asking, and on hover or press the figures behind it. The server estimates it from the list as it
+stands and the Step Timings of its steps' kinds, which a run's finished steps and the seed leave
+([`mcp.md`](mcp.md)), at every read, and stores none (`work_estimates`,
+`backend/app/services/step_estimate.py`). It reads no step's label, matches a step's code only to
+its own on the run's other work items' lists, and orders no kinds: a kind is the run's, read as
+given.
 
 **A kind's timings** are those of the work item's repo, its `repo` label, else its environment's,
 once the repo holds ten timings of the kind, and those of all repos until then; a timing whose
@@ -281,9 +283,12 @@ the window's listed timings, never below zero.
 - each running step, at the median of what longer steps still took: of the last
   `ESTIMATE_RUNNING_STEPS` timings of its kind, 60 by default, that began as it did, listed ahead or
   not, those that ran at least as long as it has, each less the time it has run; the kind's last 60
-  taken whole where fewer than five began as it did or its listing is unknown. Its time run is
-  counted by the server's clock from the later of the step's start and the start of the session's
-  running turn, so that a step resumed after a stop counts no time it stood;
+  taken whole where fewer than five began as it did or its listing is unknown. They are of the
+  timings that had ended when the step began, one that ended at that instant among them, the
+  repo's ten and the five counted among them too, so that they hold still while it runs; those that
+  end since count in its kind's price alone. Its time run is counted by the server's clock from the
+  later of the step's start and the start of the session's running turn, so that a step resumed
+  after a stop counts no time it stood;
 - the repeats owed: a step listed ahead owes its kind's repeats' share while it runs and, done,
   until the next listed step on the list is done or a step of its kind that was not listed ahead
   has begun after it; with no listed step after it, for as long as a step is left to do. A step
@@ -293,40 +298,47 @@ the window's listed timings, never below zero.
 included; once the work item is done, though its Session runs on; while no step is left to do,
 none published or every one done; while a step left to do has no kind; while a kind it needs, a
 step's left to do or a done step's that still owes its share, has fewer than five timings in all
-repos; and while a kind's window holds no listed timing.
+repos, or a running step's had fewer when it began, however many have ended since; and while a
+kind's window holds no listed timing.
 
 **Longer than usual** (D250) is the badge's alert. Once every timing a running step is read against
 ran shorter than it has run, the step has outrun its kind: the alert stands with an em dash, "—",
 where the time stood, and no time left is given. A running step the workflow marked
 ([`mcp.md`](mcp.md)) that has outrun nothing turns the badge to the alert too, with the time left
 as the estimate gives it, or the alert alone where the work item has no estimate. With no estimate
-an outrun step shows nothing; only a marked one does.
+an outrun step shows nothing; only a marked one does. A marked step that has also outrun its kind
+shows the em dash where the work item has an estimate, the alert alone where it has none, and its
+sentence says its run marks it either way (D268, [below](#its-figures)).
 
 **The rounding** is the server's (`WorkEstimate.minutes`): under 55 minutes the time left to the
 nearest five minutes and at least five, from 55 to 89 an hour, from 90 the nearest hour.
 
 A work item's status carries it as **`estimate`** ([Its status](#its-status)), `{minutes,
-longer_than_usual, kind, ran_seconds}`, as it read when the status was built (`EstimateSchema`,
-`backend/app/schemas/timeline.py`): `minutes` the time left as rounded, 5 to 55 by fives, 60, then
-whole hours as 120 or 180, null where the badge shows no time; `longer_than_usual` `outrun`,
-`marked`, or null on a badge at rest, where `minutes` is always set; `kind` the first running
-step's kind as published, null where no step runs or it has none; and `ran_seconds` the seconds
-since the work item's Session started, by the server's clock, which the alert's sentence says,
-null while it has no start. It is null wherever the badge shows nothing. `work_status` asks the
-estimate for the work items whose Session is `running` alone, and the estimate reads at most four
-statements, whatever the number of work items, steps and timings. The two settings, both counted
-in steps, are `backend/app/app_config.py`'s and reach every reader through `StepEstimates`, a
-singleton of the service container.
+longer_than_usual, marked, kind, ran_seconds, step_figures, run_figures}`, as it read when the
+status was built (`EstimateSchema`, `backend/app/schemas/timeline.py`): `minutes` the time left as
+rounded, 5 to 55 by fives, 60, then whole hours as 120 or 180, null where the badge shows no time;
+`longer_than_usual` `outrun` where a running step has outrun its kind, marked or not, `marked`
+where the workflow marked one and none has outrun, or null on a badge at rest, where `minutes` is
+always set; `marked` whether the workflow marks a running step, outrun or not; `kind` the first
+running step's kind as published, null where no step runs or it has none; `ran_seconds` the run's
+time so far in whole seconds, as its row of the figures counts it, which the alert's sentence says;
+and `step_figures` and `run_figures` the figures' rows ([below](#its-figures)). It is null wherever
+the badge shows nothing. `work_status` asks the estimate for the work items whose Session is
+`running` alone, and the estimate reads at most four statements, whatever the number of work items,
+steps and timings. The three settings are `backend/app/app_config.py`'s and reach every reader
+through `StepEstimates`, a singleton of the service container: the 20 and the 60, both counted in
+steps, and `ESTIMATE_RUN_SLOW_FACTOR`, the run's slow over its normal, 1.6 by default and at least
+1, the 90th percentile of past runs' work over their list's price, set from the backtest each time
+it is run.
 
 **The badge** (`Eta`, `work.tsx`; `EtaBadge`, [`ui.md`](ui.md)) stands in the head after the
-running time, the running step's kind after it in the line's text, cut short with an ellipsis
-where long, its whole the tooltip, and no count of steps (D248). Where the head's row wraps with
-them in it, the two stand on a line of their own under the row, the row as it was (`eta-below`,
-`timeline.css`), measured on every change of the head's width or its parts; on a phone always.
-Off the alert it is words alone, with no hover and no press. The alert's sentence is "It has run
-12 min, longer than such work usually takes: it may be stuck.", or "It runs longer than such work
-usually takes: it may be stuck." while the Session has no start, the same for the three forms of
-the alert. The done line shows none.
+running time (D248), alone, with no kind and no count of steps after it. Where the head's row wraps
+with it in it, it stands on a line of its own under the row, as high as the head's row, the row as
+it was (`eta-below`, `timeline.css`), measured on every change of the head's width or its parts; on
+a phone always. It opens its figures ([below](#its-figures)) on hover off a phone and on a press,
+at rest and as the alert, on a phone spanning the page under it, 8px in from each side and at
+most 420px wide; a badge at rest with no row of them to show is words alone, with no hover and no
+press. The done line shows none.
 
 **Kept current.** A work item's `estimate` rides its timeline item and each `work_moved`, so a
 step's move, a kind and a mark reach its badge with no read of its own. A step of its kind timed or
@@ -334,6 +346,55 @@ seeded elsewhere moves it with no event: while any badge shows, the page reads t
 estimates each minute and writes them over the work items' and the head's
 ([`projects.md`](projects.md#the-time-its-work-still-takes)), a work item the read does not list
 losing its badge.
+
+### Its figures
+
+**The figures** are a table of three columns, *So far*, *Normal* and *Slow*: "this is us, this is
+normal, and this is slow". The server computes them with the estimate, at every read, and stores
+none (`StepFigures` and `RunFigures`, `step_estimate.py`); the page computes nothing of them, and
+no tool of Pilot's MCP server hands them back.
+
+- **A running step's row**, by its kind as published, several running steps a row each in the
+  list's order (`step_figures`, `{kind, so_far_minutes, normal_minutes, slow_minutes,
+  longest_minutes, timings}`): so far its time run, as the time left counts it; normal the median
+  of the timings it is read against, its 60 as they stood when it began; slow their 90th
+  percentile, within their range; and their longest, past which the step has outrun its kind and
+  the badge turns red, `timings` how many it read, fewer than 60 while those they are drawn from
+  hold fewer. A step with no kind, or whose kind had fewer than five timings in all repos when it
+  began, has no row. A row stands whatever the time left: on a marked step of a work item with no
+  estimate, and on an outrun step, its so far then never under its longest.
+- **The run's row** (`run_figures`, `{so_far_minutes, normal_minutes, slow_minutes}`), none of it
+  by phases. The run is the work items on the running one's conversation, the running one alone
+  where it has none, and its start the start of its first work item's first turn. So far is the
+  durations of the Step Timings its work items' finished steps left, the seed's not among them, and
+  its running steps' time run. Normal is every step on the running work item's
+  list that stood listed ahead, at its kind's price as the timings stood at the run's start, a step
+  not listed ahead adding nothing, its cost in the price, so that it holds still while the run goes
+  on and grows only as the list gains a step; a begun step whose listing the work item does not
+  know, one a continuation's first list brings, takes the listing of the earliest of the run's other
+  work items that knows it, and counts as listed where none does. Slow is normal times
+  `ESTIMATE_RUN_SLOW_FACTOR`. No run row stands on a list of one step, where a step listed ahead
+  has no kind, or where its kind had no price at the run's start.
+
+So far and the longest are to the nearest minute, normal and slow to the nearest minute under an
+hour and to the nearest five minutes from one, not by the badge's rounding; the page words them
+"18 min", "1 h", "2 h 10 min" (`minutesWords()`, `status-labels.ts`).
+
+**Opened** (`EtaBadge`, [`ui.md`](ui.md)), the badge's pop has on the alert its sentence first;
+else, in a project's head, the work item's title ([`projects.md`](projects.md)), and on the work
+item nothing; then the table, the run's row last as *The run*; then, muted, a line under it per
+running step's row, "Red past 52 min: no code-writer step of the last 60 ran longer."
+(`estimateRedLine()`). A badge with no row and no alert opens nothing; an alert with no row opens
+its sentence alone.
+
+**The alert's sentence** (`estimateAlertSentence()`) says, on a step the workflow marks, "It has
+run 12 min, and its run marks this step as in trouble: it may be stuck.", and otherwise "It has run
+12 min, longer than such work usually takes: it may be stuck.", "It" the work item's title in a
+project's head. Its time is the run's so far, `ran_seconds`, the run row's *So far* where it
+stands, on a list of one step too, and never the Session's clock, which a Resume restarts. A marked
+step keeps the marked sentence once it has also outrun its kind (D268): the table already shows the
+outrun, its so far past the red line, and only the sentence can say the run marked it, which keeps
+its words through a stuck step.
 
 ## Its debrief
 
@@ -875,9 +936,9 @@ The status, its event and the routes are pinned in `backend/tests/services/test_
 `nudge.spec.ts`, the usage limits ([`usage.md`](usage.md)), and `registered.spec.ts`, the round trip of a
 registered document ([`round-trip.md`](round-trip.md)), with `clarification.spec.ts`, the
 clarification run and its reply, `claimed.spec.ts`, a claimed action, and `estimate.spec.ts`, the
-badge of the time it still takes, on the work item and the head, its alert and its read each
-minute. The estimate's rules are pinned in `backend/tests/services/test_step_estimate.py`, a
-step's timing in `test_pilot_work_service.py`, the status's `estimate` in `test_timeline_service.py`
+badge of the time it still takes, on the work item and the head, its figures, its alert and its
+read each minute. The estimate's rules and its figures are pinned in
+`backend/tests/services/test_step_estimate.py`, a step's timing in `test_pilot_work_service.py`, the status's `estimate` in `test_timeline_service.py`
 and the minute's read in `test_project_service.py` and `backend/tests/api/test_projects.py`, on
 `backend/tests/support/estimates.py`'s `ESTIMATES`, `timed` and `listed`. A spec that needs an
 estimate publishes a kind's steps pending, then running, then done: a step first published running

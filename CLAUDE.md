@@ -33,7 +33,7 @@ alerting again, and the journal: the project's account the pass keeps from each 
 debrief, its row in the Documents tab, and Pilot's notable events with the stages' times in the
 debrief's notice, placed once the pass has ended, and the time a running work item still takes: a
 step's kind and its timing, the seed's tool, and the server's estimate as a badge on the head and
-the running work item. Every green build of
+the running work item, opening its figures on hover or press. Every green build of
 `main` deploys itself to the dev stage at `https://pilot-dev.home`, and production at
 `https://pilot.ginbov.nl` runs what the operator promotes from there
 ([`docs/deployment.md`](docs/deployment.md)). Version 1 is built from the design record in
@@ -338,7 +338,7 @@ Issue tracking follows the host convention: this project is **`PilotApp`** on th
   the server's long-lived jobs; the KubeCoder controller's client, its outage, its fleet stream,
   environments on demand and Pilot's own, with its fake; the sessions, the gate, its slot and the
   jobs' queue, a Turn's cause, the holds, their records, relay and live stream, Stop, Resume, Close and Retry; a work item's status,
-  its line, its progress, the time it still takes, its debrief and the debrief's notice, its session log and its close for good, and Pilot's own work: its jobs, their briefs, Retry.
+  its line, its progress, the time it still takes and its figures, its debrief and the debrief's notice, its session log and its close for good, and Pilot's own work: its jobs, their briefs, Retry.
 - [`docs/mcp.md`](docs/mcp.md), [`docs/round-trip.md`](docs/round-trip.md),
   [`docs/chats.md`](docs/chats.md): Pilot's MCP server, handed to every session it creates, the
   worker's tools and the brain's, and its projects surface, any session's, with its door and its

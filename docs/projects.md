@@ -436,10 +436,11 @@ those longer than usual, the first whose running step has outrun its kind, else 
 the most time left; with none, the one with the most time left; of two alike, the first in the
 head's order. So the head reads the alert's "—" where any of its work has outrun its kind, else
 the time left of the marked one with the most, else the most time left
-([`work.md`](work.md#the-time-it-still-takes)). Its alert's
-sentence names the work item, "<title> has run 12 min, longer than such work usually takes: it may
-be stuck.", or "<title> runs longer …" while its Session has no start; on a phone it hangs from the
-head, 8px in from each side. The Plan tab shows none.
+([`work.md`](work.md#the-time-it-still-takes)). Its figures
+([`work.md`](work.md#its-figures)) open with the work item's title, or on the alert with its
+sentence, which names the work item, "<title> has run 12 min, longer than such work usually takes:
+it may be stuck."; on a phone they hang from the head, 8px in from each side and at most 420px
+wide. The Plan tab shows none.
 
 The head carries it as `estimate`, as it read when the head was built: a work item's `estimate`
 ([`work.md`](work.md#the-time-it-still-takes)) with `item_id`, the one of `running_work` it is of

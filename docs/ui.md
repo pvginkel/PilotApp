@@ -297,14 +297,23 @@ In `src/components/shared/`:
   as the server gives it, the page computing none of it: Lucide's clock and the time left, "25 min",
   "1 h", "3 h", with no tilde (D249), on `--primary-muted` in `--primary-muted-foreground`, 22px high, its
   corners 6px, its text semibold in the size of what it stands in (`estimateBadge()`,
-  `src/lib/utils/status-labels.ts`). At rest it is words alone, named "25 min left" to a screen
-  reader, with no hover and no press. Longer than usual it is the alert (D250): red, on
+  `src/lib/utils/status-labels.ts`). Longer than usual it is the alert (D250): red, on
   `--destructive` at 12% (24% in the dark) in `--destructive-text`, with Lucide's clock-alert and
   an em dash, "—", where the time stood, or the time left on a step the workflow marked, or the
-  icon alone; a button named by its sentence (`estimateAlertSentence()`), opened by the time left
-  where it shows one, "10 min left.", the sentence dropping under it on hover off a phone and on a
-  press, closed by a press elsewhere, which does nothing else, Esc or the badge. `title` is the work item the sentence names, in a project's head; without it the
-  sentence opens "It".
+  icon alone. A badge with a row of the figures to show, and every alert, is a button that opens
+  its figures ([`work.md`](work.md#its-figures)) under it on hover off a phone and on a press,
+  closed by a press elsewhere, which does nothing else, Esc or the badge; it is named by the time
+  left where it shows one, "10 min left", then on the alert by its sentence
+  (`estimateAlertSentence()`), an outrun badge by its sentence alone. A badge at rest with no row
+  is words alone, named "25 min left" to a screen reader, with no hover and no press. The figures
+  are the alert's sentence, or with none `title` in semibold; then the table, *So far*, *Normal*
+  and *Slow* in muted heads over a row per running step, named by its kind, and *The run*, its times
+  right-aligned and whole, a row's name wrapping where the page is too narrow; then each step's
+  line, muted (`estimateRedLine()`). The pop is as wide as its table, which the sentence, the title
+  and the lines wrap within, up to the page's width less 16px, or 300px with no table; off a phone
+  it drops from the badge's left, moved left as far as it must go to stay 8px inside what clips it,
+  the timeline or the page, measured as the pointer enters and on the press. `title` is the work
+  item the figures name, in a project's head; without it the sentence opens "It".
 - `CopyButton({text, title, className?, testId})` (`copy-button.tsx`, D199): a ghost icon button that
   copies `text` to the clipboard as written, `title` its tooltip and its name, and shows a check
   in its icon's place for a moment once it has copied, the toast's copy's mark
