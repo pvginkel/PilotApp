@@ -112,6 +112,19 @@ class TestTheDays:
 
 
 class TestTheWrite:
+    def test_a_day_whose_first_conversation_stands_in_is_written_once(
+        self, session: DbSession, container: ServiceContainer
+    ) -> None:
+        day = draw(date(2026, 10, 27), 400)
+        first = day.scenario.sessions[0].name
+        day.pilots[first].standing_in = True
+        day.pilots[first].tokens = _tokens(_session(day, first))
+        writer = _Writer(container, session)
+
+        writer.write(day)
+
+        assert writer.written(day)
+
     def test_a_day_is_written_as_a_collector_and_pilot_write_it(
         self, session: DbSession, container: ServiceContainer
     ) -> None:

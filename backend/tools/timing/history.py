@@ -753,9 +753,17 @@ class _Writer:
         return projects
 
     def written(self, day: Day) -> bool:
-        """Whether the day's first conversation is published."""
+        """Whether the day's first conversation that is collected is
+        published."""
         builder = Builder(day.scenario, day.start)
-        first = builder.conversation(day.scenario.sessions[0])
+        first = builder.conversation(
+            next(
+                session
+                for session in day.scenario.sessions
+                if session.name not in day.pilots
+                or not day.pilots[session.name].standing_in
+            )
+        )
         held = select(Transcript.id).where(Transcript.session_id == first).limit(1)
         return self.db.execute(held).first() is not None
 
