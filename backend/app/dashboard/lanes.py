@@ -301,9 +301,13 @@ def _waits(waits: Sequence[Wait], resolution: float) -> list[Wait]:
 
 
 def _events(events: Sequence[LaneEvent], resolution: float) -> list[LaneEvent]:
+    """The events folded by kind, each merged event's cost that of the
+    Calls it is held on, each Call's once however many of its events it
+    holds."""
     folded: list[LaneEvent] = []
     last: dict[str, int] = {}
     previous: dict[str, datetime] = {}
+    calls: dict[int, set[int]] = {}
     for event in events:
         at = last.get(event.kind)
         if (
@@ -311,16 +315,18 @@ def _events(events: Sequence[LaneEvent], resolution: float) -> list[LaneEvent]:
             and (event.at - previous[event.kind]).total_seconds() < resolution
         ):
             run = folded[at]
-            folded[at] = replace(
-                run,
-                n=run.n + event.n,
-                cost=None
-                if run.cost is None and event.cost is None
-                else (run.cost or 0.0) + (event.cost or 0.0),
-                detail=None,
-            )
+            cost = run.cost
+            if event.call not in calls[at]:
+                calls[at].add(event.call)
+                cost = (
+                    None
+                    if run.cost is None and event.cost is None
+                    else (run.cost or 0.0) + (event.cost or 0.0)
+                )
+            folded[at] = replace(run, n=run.n + event.n, cost=cost, detail=None)
         else:
             last[event.kind] = len(folded)
+            calls[len(folded)] = {event.call}
             folded.append(event)
         previous[event.kind] = event.at
     return folded

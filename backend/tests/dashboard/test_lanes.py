@@ -17,7 +17,7 @@ from sqlalchemy.orm import Session as DbSession
 from app import models
 from app.dashboard import lanes as lanes_module
 from app.dashboard.items import Detail
-from app.dashboard.lanes import Lanes, LanesService, Wait, merged
+from app.dashboard.lanes import LaneEvent, Lanes, LanesService, Wait, merged
 from app.exceptions import StateRefusedException
 from app.models import Project, User
 from app.services.container import ServiceContainer
@@ -303,7 +303,7 @@ class TestMerged:
         events = found.lanes[0].events
         errors = [event for event in events if event.kind == "api_error"]
         assert [(event.at, event.n, event.detail, event.cost) for event in errors] == [
-            (_at(1.5), 4, None, 2.0)
+            (_at(1.5), 4, None, 0.5)
         ]
         assert len(events) == 10
         assert [wait.n for wait in found.lanes[0].waits] == [1, 1]
@@ -342,3 +342,19 @@ class TestMerged:
 
         assert resolution == 120 / 4_000
         assert joined == {"lane": [Wait(_at(0), _at(2), None, 2, True, n=2)]}
+
+    def test_a_merged_events_cost_counts_each_call_once(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(lanes_module, "MARKS", 1)
+
+        def error(second: float, call: int, cost: float) -> LaneEvent:
+            return LaneEvent(
+                _at(second), "api_error", True, "k", None, call, cost, None
+            )
+
+        events = {"lane": [error(0, 1, 0.5), error(0.5, 1, 0.5), error(1, 2, 0.25)]}
+
+        _, _, folded = merged({}, events, _at(0), _at(2))
+
+        assert [(event.n, event.cost) for event in folded["lane"]] == [(3, 0.75)]
