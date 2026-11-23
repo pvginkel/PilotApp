@@ -203,6 +203,26 @@ class TestAttributes:
             key=lambda count: count.dimension,
         ) == sorted(found, key=lambda count: count.dimension)
 
+    def test_each_facts_count_is_a_read_of_its_own(
+        self, container: ServiceContainer, service: CountsService, session: DbSession
+    ) -> None:
+        view = _view(container, "t=all")
+
+        with sent(session) as statements:
+            service.attributes(view, NOW)
+
+        reads = [
+            statement
+            for statement in statements
+            if statement == "SET TRANSACTION READ ONLY" or "GROUPING SETS" in statement
+        ]
+        assert [one == "SET TRANSACTION READ ONLY" for one in reads] == [
+            True,
+            False,
+            True,
+            False,
+        ]
+
     def test_one_statement_a_fact_counts_by_grouping_and_never_by_a_distinct_sort(
         self, container: ServiceContainer, service: CountsService, session: DbSession
     ) -> None:
@@ -296,6 +316,24 @@ class TestQuickFilters:
         ]
         assert len(tallies) == 2
         assert not any("count(DISTINCT" in statement for statement in tallies)
+
+    def test_the_judging_of_the_bys_rows_and_the_tallies_are_reads_of_their_own(
+        self, container: ServiceContainer, service: CountsService, session: DbSession
+    ) -> None:
+        view = _view(container, "t=all")
+
+        with sent(session) as statements:
+            service.quick_filters(view, NOW)
+
+        reads = [
+            statement
+            for statement in statements
+            if statement == "SET TRANSACTION READ ONLY" or "GROUPING SETS" in statement
+        ]
+        assert reads[0] == "SET TRANSACTION READ ONLY"
+        assert reads.count("SET TRANSACTION READ ONLY") == 2
+        tallies = reads.index("SET TRANSACTION READ ONLY", 1)
+        assert all("GROUPING SETS" in one for one in reads[tallies + 1 :])
 
     def test_one_on_the_bys_rows_counts_the_rows_it_keeps(
         self, container: ServiceContainer, service: CountsService, session: DbSession

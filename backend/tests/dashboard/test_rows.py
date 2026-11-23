@@ -828,18 +828,17 @@ class TestNarrowedToMany:
 
 @pytest.mark.usefixtures("worked")
 class TestBounded:
-    def test_its_statements_run_read_only_under_the_timeout(
+    def test_its_statements_run_in_one_read_of_the_engines_bounds(
         self, service: RowsService, session: DbSession
     ) -> None:
         with sent(session) as statements:
             _rows(service, "t=all&m=cost.sum&m=cost.median.conversation")
 
         at = statements.index("SET TRANSACTION READ ONLY")
-        assert statements[at + 1] == "SET LOCAL statement_timeout = 30000"
         ended = statements.index(
             next(one for one in statements[at:] if one.startswith("ROLLBACK"))
         )
-        read = statements[at + 2 : ended]
+        read = statements[at + 1 : ended]
         assert len(read) == 2
         assert all(one.startswith("SELECT") for one in read)
 

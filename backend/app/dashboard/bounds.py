@@ -2,9 +2,13 @@
 
 - **A read-only transaction under a timeout**, of the engine's own: a read
   ends the caller's transaction first, so that it waits for its slot
-  holding no connection of the database's, then opens one, read only, with
-  `statement_timeout` set in it, and rolls it back at its end. Both are set
-  per transaction, `SET LOCAL` as `configure_engine()` sets JIT off
+  holding no connection of the database's, then opens one, read only, and
+  rolls it back at its end. The timeout bounds the read whole, its wait for
+  a slot and every statement it runs: each statement's `statement_timeout`
+  is set, as it is sent, to what is left of it, so that a read behind the
+  proxies in front of `/api/` is answered or refused before they stop
+  waiting (nginx's `proxy_read_timeout`, 60 s). Both are set per
+  transaction, `SET LOCAL` as `configure_engine()` sets JIT off
   (app/startup.py): the stages reach PostgreSQL through a pooler in
   transaction mode. In the suite the transaction is a savepoint of the
   test's, and its rollback restores the test's own settings.
@@ -24,10 +28,13 @@
 """
 
 import threading
+import time
 from collections.abc import Iterator
 from contextlib import contextmanager
+from typing import Any
 
-from sqlalchemy import text
+from sqlalchemy import event, text
+from sqlalchemy.engine import Connection
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session
 
@@ -59,12 +66,14 @@ class Bounds:
 
     @contextmanager
     def read(self, db: Session) -> Iterator[Session]:
-        """`db` in a read-only transaction of its own under the timeout,
-        once a slot is free, for the engine's statements; the caller's
-        transaction committed first, so a caller with writes of its own
-        makes them after. `QueryRefusedException` where no slot freed, or a
-        statement ran past the timeout or the limit on temporary files."""
+        """`db` in a read-only transaction of its own, once a slot is free,
+        for the engine's statements, the wait and the statements together
+        under the timeout; the caller's transaction committed first, so a
+        caller with writes of its own makes them after.
+        `QueryRefusedException` where no slot freed, or a statement ran past
+        what was left of the timeout or the limit on temporary files."""
         db.commit()
+        deadline = time.monotonic() + self.timeout_seconds
         if not self._slots.acquire(timeout=self.timeout_seconds):
             raise QueryRefusedException(
                 "busy",
@@ -73,11 +82,22 @@ class Bounds:
             )
         try:
             db.execute(text("SET TRANSACTION READ ONLY"))
-            db.execute(
-                text(
-                    f"SET LOCAL statement_timeout = {round(self.timeout_seconds * 1000)}"
-                )
-            )
+            connection = db.connection()
+
+            def bounded(
+                conn: Connection,
+                cursor: Any,
+                statement: str,
+                parameters: Any,
+                context: Any,
+                executemany: bool,
+            ) -> None:
+                # A statement_timeout of 0 is none at all: one sent with
+                # nothing left of the read gets 1 ms.
+                left = round((deadline - time.monotonic()) * 1000)
+                cursor.execute(f"SET LOCAL statement_timeout = {max(left, 1)}")
+
+            event.listen(connection, "before_cursor_execute", bounded)
             try:
                 yield db
             except DBAPIError as error:
@@ -85,6 +105,8 @@ class Bounds:
                 if refusal is None:
                     raise
                 raise refusal from error
+            finally:
+                event.remove(connection, "before_cursor_execute", bounded)
         finally:
             db.rollback()
             self._slots.release()
@@ -94,7 +116,7 @@ class Bounds:
         if code == TIMEOUT:
             return QueryRefusedException(
                 "timeout",
-                "a statement ran past the engine's timeout of "
+                "its read ran past the engine's timeout of "
                 f"{_seconds(self.timeout_seconds)}: a shorter time range or a "
                 "narrower scope reads less",
             )

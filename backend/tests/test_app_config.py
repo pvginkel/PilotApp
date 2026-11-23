@@ -487,20 +487,20 @@ class TestAppSettings:
     def test_the_engines_bounds_have_their_defaults(self) -> None:
         settings = AppSettings.load(AppEnvironment(_env_file=None))
 
-        assert settings.dashboard_statement_timeout_seconds == 30
-        assert settings.dashboard_statements_at_once == 4
+        assert settings.dashboard_statement_timeout_seconds == 45
+        assert settings.dashboard_statements_at_once == 2
 
     def test_load_reads_the_engines_bounds_from_the_environment(self) -> None:
         settings = AppSettings.load(
             AppEnvironment(
                 _env_file=None,
                 DASHBOARD_STATEMENT_TIMEOUT_SECONDS=5,
-                DASHBOARD_STATEMENTS_AT_ONCE=2,
+                DASHBOARD_STATEMENTS_AT_ONCE=3,
             )
         )
 
         assert settings.dashboard_statement_timeout_seconds == 5
-        assert settings.dashboard_statements_at_once == 2
+        assert settings.dashboard_statements_at_once == 3
 
     def test_the_readings_have_no_collector_and_a_folder_of_their_own_by_default(
         self,
@@ -651,8 +651,8 @@ class TestAppSettings:
             "wait_quiet_window_seconds": repr(5.0),
             "dashboard_zone": repr("Europe/Amsterdam"),
             "dashboard_sitting_gap_seconds": repr(14400.0),
-            "dashboard_statement_timeout_seconds": repr(30.0),
-            "dashboard_statements_at_once": "4",
+            "dashboard_statement_timeout_seconds": repr(45.0),
+            "dashboard_statements_at_once": "2",
             "collector_url": "None",
             "dashboard_readings_dir": "None",
             "dashboard_readings_max_bytes": "268435456",
@@ -769,8 +769,8 @@ class TestAppSettings:
             "wait_quiet_window_seconds": repr(5.0),
             "dashboard_zone": repr("Europe/Amsterdam"),
             "dashboard_sitting_gap_seconds": repr(14400.0),
-            "dashboard_statement_timeout_seconds": repr(30.0),
-            "dashboard_statements_at_once": "4",
+            "dashboard_statement_timeout_seconds": repr(45.0),
+            "dashboard_statements_at_once": "2",
             "collector_url": "None",
             "dashboard_readings_dir": "None",
             "dashboard_readings_max_bytes": "268435456",

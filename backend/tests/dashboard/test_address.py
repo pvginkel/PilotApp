@@ -179,9 +179,8 @@ class TestEntry:
             service.address(f"f=project:{worked.project.id}")
 
         at = statements.index("SET TRANSACTION READ ONLY")
-        assert statements[at + 1] == "SET LOCAL statement_timeout = 30000"
-        assert statements[at + 2].startswith("SELECT DISTINCT")
-        assert statements[at + 3].startswith("ROLLBACK")
+        assert statements[at + 1].startswith("SELECT DISTINCT")
+        assert statements[at + 2].startswith("ROLLBACK")
 
     def test_one_the_record_holds_nothing_of_takes_all_time(
         self, service: AddressService

@@ -26,7 +26,10 @@ Part 1, "The routes, by what they answer").
 
 Each counts in the scope before a threshold on the By's rows and the
 outlier rows' chip (D5), `Plan.scope`, and every statement runs under the
-engine's bounds.
+engine's bounds. A task is answered when it is done, its reads one after
+another, each fact's attributes' count in a read of its own, and the quick
+filters' judging of the By's rows in one and their tallies in another, so
+that only a read, never the task whole, is held to the engine's timeout.
 """
 
 from __future__ import annotations
@@ -149,29 +152,27 @@ class CountsService:
                 homes.setdefault(offered[0], []).append(dimension.key)
         facts = [fact.key for fact in catalogue.facts if fact.key in homes]
         counts: dict[str, int] = {}
-        with self.bounds.read(self.db) as db:
-            for done, fact in enumerate(facts, start=1):
-                keys = homes[fact]
+        for done, fact in enumerate(facts, start=1):
+            keys = homes[fact]
+            with self.bounds.read(self.db) as db:
                 found_row = db.execute(
                     attributes(found, catalogue, fact, keys).select
                 ).one()
-                part = {
-                    key: _counted(found_row, index) for index, key in enumerate(keys)
+            part = {key: _counted(found_row, index) for index, key in enumerate(keys)}
+            part.update(
+                {
+                    dimension.key: part[dimension.base]
+                    for dimension in catalogue.dimensions
+                    if dimension.base in part
                 }
-                part.update(
-                    {
-                        dimension.key: part[dimension.base]
-                        for dimension in catalogue.dimensions
-                        if dimension.base in part
-                    }
+            )
+            counts.update(part)
+            if counted is not None:
+                counted(
+                    tuple(Count(key, count) for key, count in part.items()),
+                    done,
+                    len(facts),
                 )
-                counts.update(part)
-                if counted is not None:
-                    counted(
-                        tuple(Count(key, count) for key, count in part.items()),
-                        done,
-                        len(facts),
-                    )
         return tuple(
             Count(dimension.key, counts.get(dimension.key, 0))
             for dimension in catalogue.dimensions
@@ -194,8 +195,9 @@ class CountsService:
         found = _scope(plan(view.address.state, catalogue, view.weeks, now))
         with self.bounds.read(self.db) as db:
             judged, narrowed = _on_rows(db, view, now, held, chips)
-            if narrowed is not None:
-                found = replace(found, rows=tuple(narrowed))
+        if narrowed is not None:
+            found = replace(found, rows=tuple(narrowed))
+        with self.bounds.read(self.db) as db:
             counted = _tallied(db, found, catalogue, held, chips, judged)
         return tuple(
             judged[index] if index in judged else counted[index]

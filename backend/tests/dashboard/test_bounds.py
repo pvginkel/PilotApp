@@ -1,9 +1,11 @@
 """The bounds every statement of the dashboard's engine runs under (F154.5):
-a read-only transaction of its own under the timeout, `work_mem` never
+a read-only transaction of its own under the timeout, which bounds the read
+whole, its wait for a slot and its statements together, `work_mem` never
 raised, a statement past the timeout or the limit on temporary files refused
 with a reason told apart by PostgreSQL's code, and the statements at once
 bounded below the app's pool."""
 
+import threading
 from collections.abc import Iterator
 
 import pytest
@@ -45,7 +47,38 @@ class TestBounds:
     ) -> None:
         with bounds.read(session) as db:
             assert _setting(db, "transaction_read_only") == "on"
-            assert _setting(db, "statement_timeout") == "200ms"
+            assert 0 < int(_setting(db, "statement_timeout").removesuffix("ms")) <= 200
+
+    def test_its_statements_share_the_timeout(self, session: DbSession) -> None:
+        bounds = Bounds(timeout_seconds=1, at_once=1, pool=5)
+
+        with (
+            pytest.raises(QueryRefusedException) as refused,
+            bounds.read(session) as db,
+        ):
+            db.execute(text("SELECT pg_sleep(0.6)"))
+            db.execute(text("SELECT pg_sleep(0.6)"))
+
+        assert refused.value.reason == "timeout"
+
+    def test_its_wait_for_a_slot_counts_against_its_statements(
+        self, session: DbSession, other: DbSession
+    ) -> None:
+        bounds = Bounds(timeout_seconds=1, at_once=1, pool=5)
+        held = bounds.read(other)
+        held.__enter__()
+        freed = threading.Timer(0.5, held.__exit__, (None, None, None))
+        freed.start()
+        try:
+            with (
+                pytest.raises(QueryRefusedException) as refused,
+                bounds.read(session) as db,
+            ):
+                db.execute(text("SELECT pg_sleep(0.7)"))
+        finally:
+            freed.join()
+
+        assert refused.value.reason == "timeout"
 
     def test_a_write_in_it_is_refused_as_the_database_refuses_it(
         self, session: DbSession, bounds: Bounds, person: User
@@ -101,7 +134,7 @@ class TestBounds:
         assert refused.value.reason == "timeout"
         assert refused.value.error_code == "QUERY_TIMEOUT"
         assert refused.value.message == (
-            "Cannot answer the dashboard's view because a statement ran past the "
+            "Cannot answer the dashboard's view because its read ran past the "
             "engine's timeout of 0.2 s: a shorter time range or a narrower scope "
             "reads less"
         )
@@ -176,6 +209,6 @@ class TestBounds:
         config = container.config()
 
         assert held is container.dashboard_bounds()
-        assert held.timeout_seconds == 30
-        assert held.at_once == 4
+        assert held.timeout_seconds == 45
+        assert held.at_once == 2
         assert held.at_once < config.db_pool_size + config.db_pool_max_overflow

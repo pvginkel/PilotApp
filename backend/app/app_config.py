@@ -332,16 +332,17 @@ class AppEnvironment(BaseSettings):
         ),
     )
     DASHBOARD_STATEMENT_TIMEOUT_SECONDS: float = Field(
-        default=30.0,
+        default=45.0,
         gt=0,
         description=(
-            "Seconds a statement of the analysis dashboard's engine runs at "
-            "most before it is refused, and a read waits at most for a slot "
-            "among its statements at once (F154.5)"
+            "Seconds a read of the analysis dashboard's engine takes at most "
+            "before it is refused, its wait for a slot among its statements "
+            "at once and every statement it runs together, below the 60 s "
+            "the proxy in front of /api/ waits for an answer (F154.5)"
         ),
     )
     DASHBOARD_STATEMENTS_AT_ONCE: int = Field(
-        default=4,
+        default=2,
         gt=0,
         description=(
             "The analysis dashboard's statements running at once at most, "
@@ -589,11 +590,11 @@ class AppSettings(BaseModel):
     """The gap from one Transcript's last Call to the next one's first that
     ends a sitting (DB decision 80.3)."""
 
-    dashboard_statement_timeout_seconds: float = 30.0
-    """How long a statement of the dashboard's engine runs before it is
-    refused, and how long a read waits for a slot (F154.5)."""
+    dashboard_statement_timeout_seconds: float = 45.0
+    """How long a read of the dashboard's engine takes before it is refused,
+    its wait for a slot and its statements together (F154.5)."""
 
-    dashboard_statements_at_once: int = 4
+    dashboard_statements_at_once: int = 2
     """How many statements of the dashboard's engine run at once at most,
     fewer than the app's pool holds (F154.5)."""
 
