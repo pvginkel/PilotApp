@@ -763,7 +763,7 @@ class TestAFileThatGrew:
 
     @pytest.mark.parametrize(
         ("scenario", "read_whole", "read_on"),
-        [(SCENARIO, 3, 81), (_resumed(), 0, 9)],
+        [(SCENARIO, 3, 81), (_resumed(), 0, 11)],
         ids=["the scenario", "a resumed thread"],
     )
     def test_a_scenarios_file_grown_a_line_at_a_time_reads_as_its_whole(

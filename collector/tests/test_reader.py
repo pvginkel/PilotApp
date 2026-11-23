@@ -15,6 +15,7 @@ from pilot_scenario import COLLECTOR, SCENARIO, Builder, Scenario
 from pilot_scenario.script import (
     Call,
     Launch,
+    Occurrence,
     Prompt,
     Session,
     SubAgent,
@@ -119,23 +120,35 @@ does."""
 
 def _resumed() -> Scenario:
     """A thread two processes wrote, in a directory under no checkout,
-    hosted by no environment: the first was killed, and the second, under a
-    later version, took a queued prompt and went back to the first's
-    Call."""
+    hosted by no environment: the first was killed after the person
+    interrupted its last response, and the second, under a later version,
+    took a queued prompt and went back to the first's Call, whose request
+    then failed for good."""
     first = Prompt(
         at=0,
         source="typed",
         characters=24,
         steps=(
             Call(at=6, name="the first", tokens=Tokens(input=12, output=7)),
-            Call(at=9, tokens=Tokens(cache_read=30, output=2)),
+            Call(
+                at=9,
+                tokens=Tokens(cache_read=30, output=2),
+                occurred=(Occurrence(10, "interrupt", is_error=False),),
+            ),
         ),
     )
     second = Prompt(
         at=44,
         source="queued",
         characters=15,
-        steps=(Call(at=52, back_to="the first", tokens=Tokens(output=4)),),
+        steps=(
+            Call(
+                at=52,
+                back_to="the first",
+                tokens=Tokens(output=4),
+                occurred=(Occurrence(53, "api_error", is_error=True, detail="500"),),
+            ),
+        ),
     )
     return Scenario(
         name="a resumed thread",
@@ -421,6 +434,11 @@ class TestTheScenario:
         assert [
             event["kind"] for call in calls for event in call.get("events", [])
         ] == ["api_retry"]
+        assert [
+            (event["kind"], event["is_error"])
+            for call in resumed[0]["calls"]
+            for event in call.get("events", [])
+        ] == [("interrupt", False), ("api_error", True)]
         assert {
             asked["denial_kind"] for asked in tool_calls if "denial_kind" in asked
         } == {"rule", "person", "hook"}
