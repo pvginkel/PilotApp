@@ -73,9 +73,10 @@ pipeline {
                             // cache is switched on here instead of with --build-cache.
                             BUILD_CACHE: 'true',
                             // The suite as `kc project test` runs it: pytest on eight processes
-                            // (pytest-xdist), Playwright on four workers, about 1.1 GiB apiece. The
-                            // fixed flags again: pytest reads PYTEST_ADDOPTS itself, and run-suite
-                            // reads PLAYWRIGHT_WORKERS for its --workers.
+                            // (pytest-xdist), Playwright on four workers on a test-mode build under
+                            // `vite preview`, peaking at 4.0 to 4.3 GiB together. The fixed flags
+                            // again: pytest reads PYTEST_ADDOPTS itself, and run-suite reads
+                            // PLAYWRIGHT_WORKERS for its --workers.
                             PYTEST_ADDOPTS: '-n 8',
                             PLAYWRIGHT_WORKERS: '4',
                         ],
