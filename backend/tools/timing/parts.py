@@ -6,11 +6,11 @@ read over all time and over a quota week, timed on the history as it stands.
 Each part is read through the app as the page reads it, its route through
 the app's own client and a count's task by the service the task runs, under
 the engine's bounds with a timeout long enough that nothing is refused: once
-to warm the process and the database's cache, then `RUNS` times, its time
-the median. Its statements are then read once more, each run again under
-`EXPLAIN (ANALYZE, BUFFERS)`, so that a sort, a hashed grouping, a hash or
-a window that went to disk at the cluster's `work_mem` is named with the
-statement that did. A burst reads the Projects view over all time from one
+to warm the process and the database's cache, then `RUNS` times, or once
+where that first read took longer than `LONG_MS`, its time the median. Its
+statements are then read once more, each run again under `EXPLAIN (ANALYZE,
+BUFFERS)`, so that a sort, a hashed grouping, a hash or a window that went
+to disk at the cluster's `work_mem` is named with the statement that did. A burst reads the Projects view over all time from one
 to `BURST` clients at once. The record's size on disk is the database's,
 with its largest tables.
 
@@ -40,6 +40,9 @@ from app.exceptions import QueryRefusedException
 
 RUNS = 3
 """The timed reads of a part; its time is their median."""
+
+LONG_MS = 20_000
+"""A part whose first read takes longer is timed once, not `RUNS` times."""
 
 BURST = 4
 """The most reads of one view at once the burst times."""
@@ -314,6 +317,11 @@ def explained(
     return found
 
 
+def timed_runs(first_ms: float) -> int:
+    """The timed reads of a part whose first read took `first_ms`."""
+    return RUNS if first_ms <= LONG_MS else 1
+
+
 class Timing:
     """The parts read on `app`'s record."""
 
@@ -428,10 +436,12 @@ class Timing:
         state = part.state.format(t=range_, x=self.thresholds.get(range_, "0"))
         read = self._reader(part, state)
         try:
+            began = time.perf_counter()
             read()
+            first = (time.perf_counter() - began) * 1000
             runs = []
             before = self.temp_bytes()
-            for _ in range(RUNS):
+            for _ in range(timed_runs(first)):
                 began = time.perf_counter()
                 read()
                 runs.append(round((time.perf_counter() - began) * 1000, 1))
@@ -451,7 +461,7 @@ class Timing:
             state,
             statistics.median(runs),
             runs,
-            spilled // RUNS,
+            spilled // len(runs),
             statements,
         )
 

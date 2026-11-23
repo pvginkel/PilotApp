@@ -23,6 +23,7 @@ from tools.timing.history import (
     _Writer,
     days,
     draw,
+    in_lock_order,
     target,
 )
 
@@ -109,6 +110,29 @@ class TestTheDays:
         assert _words(day.scenario) & WORKFLOW == set()
         assert _words(list(day.pilots.values())) & WORKFLOW == set()
         assert _words(list(PLACES)) & WORKFLOW == set()
+
+
+class TestTheLockOrder:
+    def test_the_conversations_that_name_a_group_go_last_by_its_key(self) -> None:
+        recipes = {"key": "recipe-box-first-batches"}
+        rides = {"key": "bike-log-first-rides"}
+        published = [
+            {"session_id": "a", "group": recipes},
+            {"session_id": "a", "agent_id": "a0"},
+            {"session_id": "b"},
+            {"session_id": "c", "group": rides},
+            {"session_id": "d"},
+            {"session_id": "d", "agent_id": "d0"},
+        ]
+
+        assert in_lock_order(published) == [
+            published[2],
+            published[4],
+            published[5],
+            published[3],
+            published[0],
+            published[1],
+        ]
 
 
 class TestTheWrite:

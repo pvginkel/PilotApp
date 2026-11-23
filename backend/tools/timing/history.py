@@ -20,10 +20,13 @@ thousand Calls a day (`CALLS_A_DAY`), fewer at the weekend, about thirty a
 transcript, a third of the conversations with sub-agents. A day already
 written, its first conversation published, is skipped, so a history is
 grown by running the command again with more Calls. A day is one
-transaction, retried once where another worker wrote a vocabulary's row or
-adopted a group first. The days are written by `--workers` processes, and
-the record is vacuumed and analysed at the end, as autovacuum would leave
-it.
+transaction, tried again where another worker wrote a vocabulary's row or
+adopted a group first. A conversation that names a group takes the group's
+adoption lock until the day's transaction ends, so a day publishes those
+last, in the order of their groups' keys (`in_lock_order`): two days written
+at once take the locks in one order, and hold them only for the day's last
+publications. The days are written by `--workers` processes, and the record
+is vacuumed and analysed at the end, as autovacuum would leave it.
 """
 
 import argparse
@@ -37,6 +40,7 @@ from collections.abc import Iterator, Sequence
 from dataclasses import dataclass, field, replace
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
+from typing import Any
 from zoneinfo import ZoneInfo
 
 from pilot_collection.publication import PublicationSchema
@@ -785,7 +789,7 @@ class _Writer:
             if plan.standing_in:
                 standing.add(builder.conversation(session))
         publication = self.container.publication_service()  # type: ignore[attr-defined]
-        for published in builder.publications():
+        for published in in_lock_order(builder.publications()):
             if published["session_id"] in standing:
                 continue
             publication.publish(PublicationSchema.model_validate(published))
@@ -917,6 +921,25 @@ class _Writer:
             )
             .values(cost=spent.c.cost)
         )
+
+
+def in_lock_order(publications: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """`publications` with each conversation's threads together, the
+    conversations that name a group last, by the group's key, the others in
+    their order."""
+    conversations: dict[str, list[dict[str, Any]]] = {}
+    for published in publications:
+        conversations.setdefault(published["session_id"], []).append(published)
+
+    def group(threads: list[dict[str, Any]]) -> tuple[bool, str]:
+        named = threads[0].get("group")
+        return named is not None, "" if named is None else named["key"]
+
+    return [
+        published
+        for threads in sorted(conversations.values(), key=group)
+        for published in threads
+    ]
 
 
 def _all_moments(session: Session) -> Iterator[int]:

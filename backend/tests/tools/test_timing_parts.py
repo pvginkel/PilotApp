@@ -12,7 +12,15 @@ from sqlalchemy.orm import Session as DbSession
 from app.models.call import Call
 from app.services.container import ServiceContainer
 from tools.timing.history import _Writer, draw
-from tools.timing.parts import EACH_ITEM, PARTS, Part, explained
+from tools.timing.parts import (
+    EACH_ITEM,
+    LONG_MS,
+    PARTS,
+    RUNS,
+    Part,
+    explained,
+    timed_runs,
+)
 
 YESTERDAY = datetime.now(UTC).date() - timedelta(days=1)
 
@@ -65,6 +73,11 @@ def test_the_parts_have_keys_of_their_own() -> None:
     keys = [part.key for part in PARTS]
 
     assert len(keys) == len(set(keys))
+
+
+def test_a_part_whose_first_read_is_long_is_timed_once() -> None:
+    assert timed_runs(LONG_MS) == RUNS
+    assert timed_runs(LONG_MS + 1) == 1
 
 
 class TestExplained:
