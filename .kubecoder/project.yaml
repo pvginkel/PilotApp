@@ -63,10 +63,16 @@ projects:
     # `pnpm build` also runs `pnpm check`; the lint verb below repeats it so the
     # gate stands on its own.
     build: cexec modern-app pnpm build
-    # Four workers over the template's two: 2.4 min where two took 4.3.
-    # More gain nothing on the node's 8 cores, each worker a backend, a Vite
-    # server and a Chromium of its own, about 1.1 GiB apiece.
-    test: cexec modern-app pnpm playwright test --workers=4
+    # The whole suite on one production build in test mode, which `vite
+    # preview` serves under PLAYWRIGHT_PREVIEW_MODE
+    # (tests/support/process/servers.ts). `build-fast` alone: the lint verb runs
+    # the check `pnpm build` adds. One statement, so that a failed build runs no
+    # test on the dist/ an earlier build left. A direct `pnpm playwright test`
+    # stays on the Vite dev server and builds nothing.
+    # Four workers over the template's two, each a backend, a preview server
+    # and a Chromium of its own: 7.0 to 11.1 min on a loaded node, peaking at
+    # 4.0 to 4.3 GiB. Six took 6.8 min, inside four's spread, peaking at 5.0.
+    test: cexec modern-app sh -c 'VITE_TEST_MODE=true pnpm build-fast && PLAYWRIGHT_PREVIEW_MODE=true pnpm playwright test --workers=4'
     lint: cexec modern-app pnpm check
 
   sidecar:
