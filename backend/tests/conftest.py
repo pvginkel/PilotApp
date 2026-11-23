@@ -19,6 +19,7 @@ Without one the suite passes where ``.env`` sets it, and fails in CI.
 
 from collections.abc import Generator
 from datetime import UTC, datetime
+from pathlib import Path
 
 import pytest
 from dependency_injector import providers
@@ -28,6 +29,7 @@ from sqlalchemy.orm import Session as DbSession
 
 from app import models
 from app.app_config import AppSettings
+from app.dashboard.readings import ReadingsService
 from app.engine.bus import EngineEvent
 from app.models import Document, Environment, Item, Project, User
 from app.models.reference import DocumentRole, SessionState, UserKind
@@ -44,6 +46,7 @@ from app.utils.statement_cap import StatementCap
 # Import all infrastructure fixtures
 from tests.conftest_infrastructure import *  # noqa: F403
 from tests.support.detect_flakes import DetectFlakes
+from tests.support.fake_collector import ServedFakeCollector
 from tests.support.fake_controller import (
     ServedFakeController,
     client_of,
@@ -340,6 +343,31 @@ def committed_controller_client(
     """The real client, talking to ``fake_controller``: ``committed_app``'s
     container's client."""
     return client_of(committed_app.container, fake_controller)
+
+
+@pytest.fixture
+def fake_collector(app: Flask) -> Generator[ServedFakeCollector]:
+    """The collector's fake, served over HTTP with no reading, the
+    container's for the test: a scenario a test loads is handed to it."""
+    fake = ServedFakeCollector()
+    app.container.fake_collector.override(providers.Object(fake))
+    try:
+        yield fake
+    finally:
+        fake.close()
+
+
+@pytest.fixture
+def readings_service(
+    app: Flask, fake_collector: ServedFakeCollector, tmp_path: Path
+) -> ReadingsService:
+    """The real reads of a conversation's reading, from ``fake_collector``,
+    kept in a folder of the test's: the container's for the test."""
+    service = ReadingsService(
+        fake_collector.url, COLLECTOR_TOKEN, tmp_path / "readings", 64 * 1024 * 1024
+    )
+    app.container.readings_service.override(providers.Object(service))
+    return service
 
 
 @pytest.fixture

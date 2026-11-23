@@ -502,6 +502,36 @@ class TestAppSettings:
         assert settings.dashboard_statement_timeout_seconds == 5
         assert settings.dashboard_statements_at_once == 2
 
+    def test_the_readings_have_no_collector_and_a_folder_of_their_own_by_default(
+        self,
+    ) -> None:
+        settings = AppSettings.load(AppEnvironment(_env_file=None))
+
+        assert settings.collector_url is None
+        assert settings.dashboard_readings_dir is None
+        assert settings.dashboard_readings_max_bytes == 256 * 1024 * 1024
+
+    def test_load_reads_the_readings_collector_folder_and_size_from_the_environment(
+        self,
+    ) -> None:
+        settings = AppSettings.load(
+            AppEnvironment(
+                _env_file=None,
+                COLLECTOR_URL="http://collector:3503",
+                DASHBOARD_READINGS_DIR="/scratch/readings",
+                DASHBOARD_READINGS_MAX_BYTES=1024,
+            )
+        )
+
+        assert settings.collector_url == "http://collector:3503"
+        assert settings.dashboard_readings_dir == Path("/scratch/readings")
+        assert settings.dashboard_readings_max_bytes == 1024
+
+    @pytest.mark.parametrize("size", [0, -1])
+    def test_load_refuses_no_room_for_the_readings(self, size: int) -> None:
+        with pytest.raises(ValidationError, match="DASHBOARD_READINGS_MAX_BYTES"):
+            AppEnvironment.model_validate({"DASHBOARD_READINGS_MAX_BYTES": size})
+
     @pytest.mark.parametrize("count", [0, -1])
     def test_load_refuses_no_statement_at_once(self, count: int) -> None:
         with pytest.raises(ValidationError, match="DASHBOARD_STATEMENTS_AT_ONCE"):
@@ -623,6 +653,9 @@ class TestAppSettings:
             "dashboard_sitting_gap_seconds": repr(14400.0),
             "dashboard_statement_timeout_seconds": repr(30.0),
             "dashboard_statements_at_once": "4",
+            "collector_url": "None",
+            "dashboard_readings_dir": "None",
+            "dashboard_readings_max_bytes": "268435456",
             "pool_guard": "False",
             "statement_cap": "False",
         }
@@ -738,6 +771,9 @@ class TestAppSettings:
             "dashboard_sitting_gap_seconds": repr(14400.0),
             "dashboard_statement_timeout_seconds": repr(30.0),
             "dashboard_statements_at_once": "4",
+            "collector_url": "None",
+            "dashboard_readings_dir": "None",
+            "dashboard_readings_max_bytes": "268435456",
             "pool_guard": "False",
             "statement_cap": "False",
         }

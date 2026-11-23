@@ -7,7 +7,10 @@ conversation before a collector reads its transcript is written here: for
 each session a Turn of Pilot's ran, a Session of the project given for the
 scenario's, over, whose `conversation_id` is the conversation's id and whose
 one Turn is that Turn. It is written before the conversation is published,
-so that the publication places the Launch the Turn started (DB 538).
+so that the publication places the Launch the Turn started (DB 538). The
+scenario, as the load built it, is handed to the collector's fake, which
+serves its conversations' readings where it is the backend's collector
+(F122.5).
 
 The conversations' ids are the scenario's own, so a second load is a whole
 publication of the same transcripts and replaces the first: the record holds
@@ -30,14 +33,21 @@ from app.exceptions import RecordNotFoundException, ValidationException
 from app.models import Environment, Project, Transcript, Turn
 from app.models import Session as AgentSession
 from app.models.reference import SessionState, TurnCause
+from app.services.fake_collector import FakeCollector
 from app.services.launch_placement import conversation_turn
 from app.services.publication_service import PublicationService
 
 
 class ScenarioService:
-    def __init__(self, db: Session, publication_service: PublicationService) -> None:
+    def __init__(
+        self,
+        db: Session,
+        publication_service: PublicationService,
+        fake_collector: FakeCollector,
+    ) -> None:
         self.db = db
         self.publication_service = publication_service
+        self.fake_collector = fake_collector
 
     def load(self, projects: Mapping[str, uuid.UUID]) -> list[Transcript]:
         """Load the scenario in the caller's transaction, its last moment
@@ -77,12 +87,14 @@ class ScenarioService:
             standing[name] = project
         for turn in turns:
             self._session(standing[turn.project], turn)
-        return [
+        transcripts = [
             self.publication_service.publish(
                 PublicationSchema.model_validate(publication)
             )
             for publication in builder.publications()
         ]
+        self.fake_collector.scenario(builder)
+        return transcripts
 
     def adopting(self, transcripts: list[Transcript]) -> dict[uuid.UUID, Project]:
         """The adopted Projects that adopted `transcripts`, by id."""

@@ -76,6 +76,13 @@ class AppEnvironment(BaseSettings):
             "call of a collector's"
         ),
     )
+    COLLECTOR_URL: str = Field(
+        default="",
+        description=(
+            "The base URL of the collector's readings, which a conversation's "
+            "reader asks (F154.7); empty refuses every read of a conversation"
+        ),
+    )
     COLLECTOR_WALK_INTERVAL_SECONDS: float = Field(
         default=30.0,
         gt=0,
@@ -341,6 +348,23 @@ class AppEnvironment(BaseSettings):
             "each on a connection of the pool, which must be larger (F154.5)"
         ),
     )
+    DASHBOARD_READINGS_DIR: str = Field(
+        default="",
+        description=(
+            "The folder the conversations' readings are kept in, a scratch "
+            "volume of the pod's (F154.7); empty keeps them in a temporary "
+            "folder of the process's own, removed at its exit"
+        ),
+    )
+    DASHBOARD_READINGS_MAX_BYTES: int = Field(
+        default=256 * 1024 * 1024,
+        gt=0,
+        description=(
+            "The bytes of the conversations' readings kept at most, as the "
+            "collector compressed them; past it the least recently read go "
+            "first (F154.7)"
+        ),
+    )
     POOL_GUARD: bool = Field(
         default=False,
         description=(
@@ -573,6 +597,21 @@ class AppSettings(BaseModel):
     """How many statements of the dashboard's engine run at once at most,
     fewer than the app's pool holds (F154.5)."""
 
+    collector_url: str | None = None
+    """The base URL of the collector's readings (F152.13), under which
+    `/readings/<session_id>` is a main thread's: none refuses every read of a
+    conversation."""
+
+    dashboard_readings_dir: Path | None = None
+    """The folder the conversations' readings are kept in (F154.7): none
+    keeps them in a temporary folder of the process's own."""
+
+    dashboard_readings_max_bytes: int = 256 * 1024 * 1024
+    """The bytes of the readings kept at most, each as the collector
+    compressed it: some 12,000 readings of the median transcript's 21 KB, or
+    280 of the largest's 0.9 MB, as `tools/cost-dashboard/architecture.md`
+    measured them (F154.7)."""
+
     @field_validator("dashboard_zone")
     @classmethod
     def _is_a_zone(cls, zone: str) -> str:
@@ -652,6 +691,11 @@ class AppSettings(BaseModel):
             dashboard_sitting_gap_seconds=env.DASHBOARD_SITTING_GAP_SECONDS,
             dashboard_statement_timeout_seconds=env.DASHBOARD_STATEMENT_TIMEOUT_SECONDS,
             dashboard_statements_at_once=env.DASHBOARD_STATEMENTS_AT_ONCE,
+            collector_url=env.COLLECTOR_URL or None,
+            dashboard_readings_dir=(
+                Path(env.DASHBOARD_READINGS_DIR) if env.DASHBOARD_READINGS_DIR else None
+            ),
+            dashboard_readings_max_bytes=env.DASHBOARD_READINGS_MAX_BYTES,
             pool_guard=env.POOL_GUARD,
             statement_cap=env.STATEMENT_CAP,
         )

@@ -14,6 +14,7 @@ from app.dashboard.bounds import Bounds
 from app.dashboard.counts import CountsService
 from app.dashboard.items import ItemsService
 from app.dashboard.lanes import LanesService
+from app.dashboard.readings import ReadingsService
 from app.dashboard.rows import RowsService
 from app.dashboard.series import SeriesService
 from app.dashboard.strip import StripService
@@ -50,6 +51,7 @@ from app.services.dashboard_store_service import DashboardStoreService
 from app.services.draft_service import DraftService
 from app.services.effect_service import EffectService
 from app.services.environment_service import EnvironmentService
+from app.services.fake_collector import FakeCollector
 from app.services.fake_controller import FakeController
 from app.services.fake_push_service import FakePushService
 from app.services.fleet_consumer import FleetConsumer
@@ -310,6 +312,11 @@ class ServiceContainer(containers.DeclarativeContainer):
     # The fake push service, served under /api/testing/push-service in testing
     # mode
     fake_push_service = providers.Singleton(FakePushService)
+
+    # The collector's fake, served under /api/testing/collector in testing mode
+    fake_collector = providers.Singleton(
+        FakeCollector, token=app_config.provided.collector_token
+    )
 
     # The supervisor: the long-lived jobs' threads (design 2 §7). Built by its
     # starter so that it hears STARTUP; jobs register on it before then.
@@ -666,6 +673,15 @@ class ServiceContainer(containers.DeclarativeContainer):
         address_service=address_service,
         bounds=dashboard_bounds,
     )
+    # A conversation's reading, asked of the collector and kept on the pod's
+    # scratch volume, the process's one (F154.7)
+    readings_service = providers.Singleton(
+        ReadingsService,
+        url=app_config.provided.collector_url,
+        token=app_config.provided.collector_token,
+        directory=app_config.provided.dashboard_readings_dir,
+        max_bytes=app_config.provided.dashboard_readings_max_bytes,
+    )
     # A view's two counts, each answered as a task, and an attribute's values
     # (F154.6)
     counts_service = providers.Factory(
@@ -710,7 +726,10 @@ class ServiceContainer(containers.DeclarativeContainer):
 
     # The invented scenario, loaded through /api/testing/ (F122.6)
     scenario_service = providers.Factory(
-        ScenarioService, db=db_session, publication_service=publication_service
+        ScenarioService,
+        db=db_session,
+        publication_service=publication_service,
+        fake_collector=fake_collector,
     )
 
     testing_sync_service = providers.Factory(

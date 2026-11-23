@@ -31946,6 +31946,58 @@
         "tags": []
       }
     },
+    "/api/testing/collector/{path}": {
+      "get": {
+        "description": "",
+        "operationId": "get__api_testing_collector_{path}",
+        "parameters": [
+          {
+            "description": "",
+            "in": "path",
+            "name": "path",
+            "required": true,
+            "schema": {
+              "format": "path",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {},
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "The fake collector's answer to its route at `path`.",
+        "tags": [],
+        "x-required-role": "editor"
+      },
+      "post": {
+        "description": "",
+        "operationId": "post__api_testing_collector_{path}",
+        "parameters": [
+          {
+            "description": "",
+            "in": "path",
+            "name": "path",
+            "required": true,
+            "schema": {
+              "format": "path",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {},
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "The fake collector's answer to its route at `path`.",
+        "tags": [],
+        "x-required-role": "editor"
+      }
+    },
     "/api/testing/controller/{path}": {
       "delete": {
         "description": "",
