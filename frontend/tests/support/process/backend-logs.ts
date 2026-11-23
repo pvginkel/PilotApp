@@ -144,7 +144,13 @@ class Collector implements ServiceLogCollector {
           });
         });
 
-        if (captured.length > 0) {
+        // Only a test that did not end as expected keeps its log as an attachment:
+        // the HTML reporter holds every attachment body in the runner, and each
+        // body replays the worker's whole log so far, so its memory grew with the
+        // square of a worker's test count. A passing test's file is removed anyway
+        // (preserveOutput: 'failures-only').
+        const failed = testInfo.status !== undefined && testInfo.status !== testInfo.expectedStatus;
+        if (failed && captured.length > 0) {
           const text = captured.join('\n');
           await testInfo.attach(this.attachmentName, {
             body: Buffer.from(text ? `${text}\n` : ''),
