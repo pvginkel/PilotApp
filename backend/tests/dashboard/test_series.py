@@ -382,6 +382,25 @@ class TestInOrder:
         assert [point.focus for point in found.points] == [False, False, True]
         assert found.panels[0].measure.median == 1.5
 
+    def test_a_dot_that_is_the_focus_is_marked_and_left_out_of_the_median(
+        self, service: SeriesService, session: DbSession, project: Project
+    ) -> None:
+        runs = members(session, project, ["1", "2", "9"])
+
+        found = _series(
+            service, f"t=all&p=time,day&m=cost.max.psession&f=psession:{runs[2].id}"
+        )
+
+        panel = found.panels[0]
+        assert panel.kind == "items"
+        assert panel.dots is not None
+        assert [(dot.key, dot.focus) for dot in panel.dots] == [
+            (runs[0].id, False),
+            (runs[1].id, False),
+            (runs[2].id, True),
+        ]
+        assert panel.measure.median == 1.5
+
 
 class TestItemsBeforeTheRange:
     def test_the_dots_band_reads_the_items_that_started_before_the_range_first(
