@@ -1632,8 +1632,17 @@ class TestAFileThatDoesNotContinueItsCarry:
         ):
             read(named, SETTINGS, carry)
 
+    @pytest.mark.parametrize(
+        "body",
+        [
+            expanded(10),
+            user(10, [support.words("# Weave\n\nWeave tight.")])
+            | {"isMeta": True, "sourceToolUseID": "toolu_01"},
+        ],
+        ids=["opening as a skill's", "opening otherwise"],
+    )
     def test_a_skills_body_that_names_a_call_behind_the_boundary_is_not_read_on(
-        self, tmp_path: Path
+        self, body: Line, tmp_path: Path
     ) -> None:
         named = filed(
             tmp_path,
@@ -1647,7 +1656,7 @@ class TestAFileThatDoesNotContinueItsCarry:
             ),
         )
         carry = read(named, SETTINGS).carry
-        _added(named, [expanded(10) | {"uuid": "grown-1", "parentUuid": "line-4"}])
+        _added(named, [body | {"uuid": "grown-1", "parentUuid": "line-4"}])
 
         with pytest.raises(
             NotContinuedError,

@@ -153,11 +153,12 @@ its newline is written. The facts are read off the lines in the file's order:
     `invoked_skills` shows again, a `skill_body` named by its skill, of its
     content's characters; else a `reminder` named by its type, of the
     shown text's characters. A message taken in the middle of a run is no
-    part, and an attachment never shown none;
-  - a skill's body, the `isMeta` line opening with Claude Code's words for
-    one, a `skill_body` of its text's characters, named by the skill the
-    `Skill` call its `sourceToolUseID` names asked for: one expanded for a
-    typed command names no call, and no skill;
+    part on a main thread, where it is a Prompt, and an attachment never
+    shown none;
+  - a skill's body, the `isMeta` line whose `sourceToolUseID` names the
+    `Skill` call it expanded, or that opens with Claude Code's words for one,
+    a `skill_body` of its text's characters, named by the skill that call
+    asked for: one expanded for a typed command names no call, and no skill;
   - a compaction's summary, the `isCompactSummary` line, a
     `compact_summary` of its text's characters.
 
@@ -267,7 +268,8 @@ _SKILL = "Skill"
 names into the skill's body, a line of its own."""
 
 _SKILL_BODY = "Base directory for this skill:"
-"""What a skill's body opens with."""
+"""What a skill's body opens with where its skill has a folder: a typed
+command's names no call."""
 
 _FELL_BACK = "model_refusal_fallback"
 """The subtype of the `system` line that records a fallback: the model the
@@ -640,7 +642,7 @@ def _opened(
 
 def _shown(attachment: dict[str, Any], rendered: list[Any]) -> tuple[Part, ...]:
     """The Context Parts of an attachment shown to the model as `rendered`,
-    but for a Launch's instruction files and a message."""
+    but for a Launch's instruction files and a main thread's message."""
     kind = attachment["type"]
     if kind == _NESTED:
         loaded = attachment["content"]
@@ -652,6 +654,14 @@ def _shown(attachment: dict[str, Any], rendered: list[Any]) -> tuple[Part, ...]:
         )
     characters = sum(len(shown["content"]) for shown in rendered)
     return (Part("reminder", characters, kind),)
+
+
+def _expands(line: dict[str, Any], content: Any) -> bool:
+    """Whether an `isMeta` user line is a skill's body: it names the call
+    it expanded, or opens as one that names none."""
+    return line.get("sourceToolUseID") is not None or text_of(content).startswith(
+        _SKILL_BODY
+    )
 
 
 def _skill(tool: str, given: dict[str, Any]) -> str | None:
@@ -908,7 +918,7 @@ class _Thread:
                 self._occurred("interrupt", at)
             elif line.get("isCompactSummary"):
                 self._injected += (Part("compact_summary", len(text_of(content))),)
-            elif line.get("isMeta") and text_of(content).startswith(_SKILL_BODY):
+            elif line.get("isMeta") and _expands(line, content):
                 self._expanded(line.get("sourceToolUseID"), len(text_of(content)))
             elif self._main:
                 self._prompted(line, content, at)
@@ -1062,7 +1072,9 @@ class _Thread:
             else:
                 files = self._opening.files + loaded
                 self._opening = replace(self._opening, files=files)
-        elif attachment["type"] != _MID_RUN and line.get("rendered"):
+        elif line.get("rendered") and not (
+            self._main and attachment["type"] == _MID_RUN
+        ):
             self._injected += _shown(attachment, line["rendered"])
         if not self._main:
             return

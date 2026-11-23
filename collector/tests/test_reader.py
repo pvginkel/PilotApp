@@ -2604,6 +2604,58 @@ class TestInjectedParts:
 
         assert _parts(publication)[1] == [("skill_body", skill, len(BODY))]
 
+    @pytest.mark.parametrize(
+        "said",
+        [
+            "# Weave\n\nWeave tight.",
+            "Skill /loom:weave is already loaded above; instructions unchanged.",
+        ],
+        ids=["a command's body", "a skill loaded before"],
+    )
+    def test_what_a_skill_call_expanded_is_its_body_whatever_it_opens_with(
+        self, said: str, tmp_path: Path
+    ) -> None:
+        body = user(5.1, [support.words(said)]) | {
+            "isMeta": True,
+            "sourceToolUseID": "toolu_01",
+        }
+        publication = _read(
+            tmp_path,
+            linked(
+                [
+                    typed(0),
+                    requesting(4, "toolu_01", "Skill", {"skill": "loom:weave"}),
+                    result(5, "toolu_01", "Launching skill: loom:weave"),
+                    body,
+                    assistant(9, "msg_02"),
+                ]
+            ),
+        )
+
+        assert _parts(publication)[1] == [("skill_body", "loom:weave", len(said))]
+
+    @pytest.mark.parametrize(
+        "mode", ["task-notification", None], ids=["a task's notice", "a message"]
+    )
+    def test_a_message_a_sub_agent_takes_mid_run_is_a_reminder(
+        self, mode: str | None, tmp_path: Path
+    ) -> None:
+        """A sub-agent's thread holds no Prompt to count it."""
+        said = "And the weft."
+        given = {} if mode is None else {"commandMode": mode}
+        lines = linked(
+            [
+                user(0, "Count the threads."),
+                assistant(4, "msg_01"),
+                attached(5, "queued_command", said, prompt=said, **given),
+                assistant(9, "msg_02"),
+            ]
+        )
+
+        publication = read(filed(tmp_path, lines, AGENT), SETTINGS).publication
+
+        assert _parts(publication)[1] == [("reminder", "queued_command", len(said))]
+
     def test_a_meta_line_that_is_no_skills_body_is_no_part(
         self, tmp_path: Path
     ) -> None:
