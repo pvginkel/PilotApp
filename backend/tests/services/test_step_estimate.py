@@ -1765,17 +1765,23 @@ class TestWorkEstimatesRead:
         """In a repo's own and in all repos', as they stand and as they
         stood when a step began, with no sort and no walk of the kind's other
         listing, another repo's timings or those ended since: the plan the
-        planner has once a table this small is not read whole."""
+        planner has once a table this small is not read whole, on statistics
+        in which a repo holds an eighth of its kind's timings."""
         works = [
             _run(session, project, project_session, repo=repo)
             for repo in (REPO, OTHER_REPO)
         ]
-        _timed(session, past, "write", [20] * 10)
+        for repo in (REPO, *(f"example/Repo{number}" for number in range(7))):
+            _timed(session, past, "write", [20] * 10, repo=repo)
         for work_id in works:
             _list(session, work_id, [_active("write", 5), _pending("write")])
+        connection = session.connection()
+        # The pick between the kind's index and the repo's reads the table's
+        # statistics, which are otherwise whatever autovacuum last left; on
+        # statistics of a single repo the kind's index with a filter costs less.
+        connection.exec_driver_sql("ANALYZE step_timings")
         with sent(session) as statements:
             _estimates(session, works)
-        connection = session.connection()
         for path in ("seqscan", "bitmapscan", "sort"):
             connection.exec_driver_sql(f"SET LOCAL enable_{path} = off")
 
