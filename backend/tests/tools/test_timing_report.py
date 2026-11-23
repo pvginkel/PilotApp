@@ -3,7 +3,7 @@ two seconds, on the line through its times at two sizes."""
 
 import pytest
 
-from tools.timing.report import passes
+from tools.timing.report import parts, passes
 
 
 @pytest.mark.parametrize(
@@ -31,3 +31,26 @@ def test_where_a_part_passes_two_seconds(
     small: tuple[int, float], large: tuple[int, float], found: str
 ) -> None:
     assert passes(small, large) == found
+
+
+def _part(ms: float, error: str | None) -> dict[str, object]:
+    return {
+        "key": "attributes",
+        "label": "By's counts",
+        "range": "all",
+        "ms": ms,
+        "error": error,
+        "statements": [],
+    }
+
+
+def test_a_refused_part_reads_refused_in_every_cell_it_has_no_figure_for() -> None:
+    small = {"record": {"rows": {"calls": 630_000}}, "parts": [_part(19_472.0, None)]}
+    large = {
+        "record": {"rows": {"calls": 3_000_000}},
+        "parts": [_part(0, "a statement needed more temporary disk")],
+    }
+
+    assert parts(small, large)[2] == (
+        "| By's counts | all | 19,472 | refused |  | refused | refused |"
+    )

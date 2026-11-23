@@ -3,9 +3,10 @@
 Every part of the dashboard's engine was timed on two generated histories, at production's
 database settings. Over all time, every part passes two seconds by 1.7 million Calls, most of
 them before 800,000. Over a quota week, the rows, the medians, a pane's values and the series by
-weekday and by hour answer in under a second at both sizes; the events strip, the lanes and a
-conversation's calls take more than two seconds over any range at both sizes. At three million
-Calls, By's counts over all time are refused at the database's limit on temporary files.
+weekday and by hour answer in under a second at both sizes, but for the rows under a condition on
+each conversation, 3.9 s at three million; the events strip, the lanes and a conversation's calls
+take more than two seconds over any range at both sizes. At three million Calls, By's counts over
+all time are refused at the database's limit on temporary files.
 
 The engine's timeout and its statements at once take their defaults from it: 45 s for a whole
 read and 2 statements at once (below).
@@ -72,7 +73,7 @@ size, "—" where it did not grow.
 | Rows by project under a threshold on the By's rows | lqw | 331 | 678 | 11,900,000 | 490 | none |
 | Rows by project under a condition on each conversation | all | 1,322 | 7,575 | 890,000 | 10,996 | Aggregate (Hashed) to disk |
 | Rows by project under a condition on each conversation | lqw | 702 | 3,856 | 1,600,000 | 5,041 | Aggregate (Hashed) to disk |
-| The attributes' counts (By's panel), a task | all | 19,472 | refused |  | 0 | none |
+| The attributes' counts (By's panel), a task | all | 19,472 | refused |  | refused | refused |
 | The attributes' counts (By's panel), a task | lqw | 4,280 | 17,098 | below 631,341 | 15,870 | Hash in 2 batches; Hash in 32 batches; Sort to disk |
 | The quick filters' counts and amounts, an each-item one among them, a task | all | 3,531 | 27,556 | below 631,341 | 23,109 | Aggregate (Hashed) to disk; Aggregate (Mixed) to disk |
 | The quick filters' counts and amounts, an each-item one among them, a task | lqw | 1,949 | 15,408 | 640,000 | 19,447 | Aggregate (Hashed) to disk |

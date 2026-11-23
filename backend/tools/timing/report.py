@@ -101,13 +101,22 @@ def parts(small: dict[str, Any], large: dict[str, Any]) -> list[str]:
             if one is not None and not one["error"] and not other["error"]
             else ""
         )
-        slowest = max((s["ms"] for s in other["statements"]), default=0)
-        spills = sorted(
-            {s.split(",")[0] for st in other["statements"] for s in st["spills"]}
-        )
+        if other["error"]:
+            slowest, gone = "refused", "refused"
+        else:
+            slowest = f"{max((s['ms'] for s in other['statements']), default=0):,.0f}"
+            gone = "; ".join(
+                sorted(
+                    {
+                        s.split(",")[0]
+                        for st in other["statements"]
+                        for s in st["spills"]
+                    }
+                )
+            )
         lines.append(
             f"| {labels[key]} | {range_} | {_ms(one)} | {_ms(other)} | {crossing} | "
-            f"{slowest:,.0f} | {'; '.join(spills) or 'none'} |"
+            f"{slowest} | {gone or 'none'} |"
         )
     return lines
 
