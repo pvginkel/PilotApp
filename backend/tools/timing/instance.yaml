@@ -1,0 +1,123 @@
+# The timing's PostgreSQL (F154.9): production's image and settings, in the
+# prd cluster's `development` namespace, made for a timing and removed after
+# it by `instance.py`. Production's are the CloudNativePG cluster `postgres`
+# of `postgres-pas-prd`, its parameters as `kubectl get
+# clusters.postgresql.cnpg.io` gives them, ANS-390's guards among them, with a
+# memory limit of 2Gi and three CPUs, the node a failover leaves the primary
+# on. Left out are those of its replication and archive, which a read does
+# not meet, and of its TLS.
+apiVersion: v1
+kind: Service
+metadata:
+  name: pilot-timing
+  namespace: development
+  labels:
+    app.kubernetes.io/name: pilot-timing
+spec:
+  selector:
+    app.kubernetes.io/name: pilot-timing
+  ports:
+    - name: postgres
+      port: 5432
+      targetPort: postgres
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: pilot-timing
+  namespace: development
+  labels:
+    app.kubernetes.io/name: pilot-timing
+spec:
+  serviceName: pilot-timing
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: pilot-timing
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: pilot-timing
+    spec:
+      securityContext:
+        runAsUser: 26
+        runAsGroup: 26
+        fsGroup: 26
+      terminationGracePeriodSeconds: 30
+      containers:
+        - name: postgres
+          image: ghcr.io/cloudnative-pg/postgresql:18.3-system-trixie
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              set -e
+              if [ ! -s "$PGDATA/PG_VERSION" ]; then
+                printf '%s' "$POSTGRES_PASSWORD" > /tmp/password
+                initdb -D "$PGDATA" -U postgres --pwfile=/tmp/password \
+                  --auth=scram-sha-256 --encoding=UTF8 --locale-provider=icu \
+                  --icu-locale=und --lc-collate=C --lc-ctype=C
+                rm /tmp/password
+                echo "host all all all scram-sha-256" >> "$PGDATA/pg_hba.conf"
+              fi
+              # The volume's group, which fsGroup sets at every mount.
+              chmod 0700 "$PGDATA"
+              exec postgres -D "$PGDATA" \
+                -c listen_addresses='*' \
+                -c unix_socket_directories=/tmp \
+                -c max_connections=200 \
+                -c shared_buffers=256MB \
+                -c temp_file_limit=2GB \
+                -c dynamic_shared_memory_type=posix \
+                -c shared_memory_type=mmap \
+                -c max_parallel_workers=32 \
+                -c max_worker_processes=32 \
+                -c idle_in_transaction_session_timeout=10min \
+                -c log_min_duration_statement=2s \
+                -c log_temp_files=64MB \
+                -c wal_level=logical \
+                -c wal_log_hints=on \
+                -c wal_keep_size=512MB \
+                -c max_slot_wal_keep_size=2GB
+          env:
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+            - name: PATH
+              value: /usr/lib/postgresql/18/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: pilot-timing
+                  key: password
+          ports:
+            - name: postgres
+              containerPort: 5432
+          readinessProbe:
+            exec:
+              command: ["pg_isready", "-h", "127.0.0.1", "-U", "postgres"]
+            periodSeconds: 5
+          resources:
+            requests:
+              cpu: "1"
+              memory: 2Gi
+            limits:
+              cpu: "3"
+              memory: 2Gi
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+            - name: shm
+              mountPath: /dev/shm
+      volumes:
+        # CloudNativePG's own, for the posix dynamic shared memory.
+        - name: shm
+          emptyDir:
+            medium: Memory
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        storageClassName: csi-rbd-sc
+        resources:
+          requests:
+            storage: 30Gi
