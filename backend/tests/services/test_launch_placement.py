@@ -381,6 +381,30 @@ class TestDriverStarted:
             (continuation.id, 1),
         ]
 
+    def test_a_round_under_the_later_work_takes_no_turn_of_the_earlier_one(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        project: Project,
+        thread: Transcript,
+        waited: models.Session,
+    ) -> None:
+        """The earlier work item's Turn, sent after the later one was
+        created and before the round started, is no Turn of the later one's:
+        the round stands under the later work item and no Turn."""
+        turn_at(session, waited, _at(-9), _at(30))
+        continuation = _continuing(session, container, project, waited, _at(40))
+        turn_at(session, waited, _at(42))
+        first = transcripts.launch(session, thread, started_at=_at(1), ended_at=_at(9))
+        resumed = transcripts.launch(session, thread, started_at=_at(45))
+
+        place_launches(session, CAMP)
+
+        assert [_placed(session, first), _placed(session, resumed)] == [
+            (waited.id, 1),
+            (continuation.id, None),
+        ]
+
     def test_a_session_whose_step_names_another_conversation_runs_none_of_it(
         self,
         session: DbSession,
