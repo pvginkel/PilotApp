@@ -368,6 +368,16 @@ class RowsDimensionSchema(BaseModel):
     group: Group
 
 
+class StandInSchema(BaseModel):
+    """The measure answered in a refused one's place."""
+
+    key: str = Field(
+        description="It as the view's normal form writes a measure",
+        examples=["kind_cost.sum"],
+    )
+    label: str = Field(description="Its figure's label, or its ratio's")
+
+
 class RowsMeasureSchema(BaseModel):
     """A measure as the rows answer it, in the view's order."""
 
@@ -376,7 +386,7 @@ class RowsMeasureSchema(BaseModel):
         examples=["cost.median.conversation"],
     )
     label: str = Field(description="Its figure's label, or its ratio's")
-    format: Format
+    format: Format = Field(description="The format of what is answered")
     aggregate: str | None = Field(description="Its aggregate; null for a ratio")
     grain: str | None = Field(
         description=(
@@ -387,7 +397,13 @@ class RowsMeasureSchema(BaseModel):
         description="Whether it splits by the color, each row's `split` holding it"
     )
     refused: str | None = Field(
-        description="Why it is not answered, where it is not: its values are null"
+        description=(
+            "Why the By refuses it, where it does: its values are its "
+            "stand-in's, or null where none stands in"
+        )
+    )
+    stand_in: StandInSchema | None = Field(
+        description="The measure answered in its place, where it is refused"
     )
     median: float | None = Field(
         description=(
@@ -439,6 +455,13 @@ class LineSchema(BaseModel):
             "their order; null for a measure that does not stack"
         )
     )
+    marks: list[float | None] | None = Field(
+        description=(
+            "Where a chip marks values or each item, each measure's part on "
+            "the rows it marks, 0 on a row not marked, the All row's the sum "
+            "of its rows'; null for a measure that does not add up"
+        )
+    )
 
 
 class ByRowSchema(LineSchema):
@@ -449,6 +472,12 @@ class ByRowSchema(LineSchema):
         description="Its label; null where the key is its own, as a date or a time"
     )
     focus: bool = Field(description="Whether it holds the view's focus")
+    marked: bool = Field(
+        description=(
+            "Whether every mark holds on it: each marked threshold, the "
+            "outlier rows' chip where it marks, and a row a marked chip keeps"
+        )
+    )
 
 
 class SortSchema(BaseModel):
@@ -481,6 +510,11 @@ class RowsResponseSchema(BaseModel):
     measures: list[RowsMeasureSchema]
     color: ColorSchema | None
     all: LineSchema
-    rows: list[ByRowSchema] = Field(description="The By's rows, in the sort")
+    rows: list[ByRowSchema] = Field(
+        description=(
+            "The By's rows, in the sort: those a threshold or the outlier "
+            "rows' chip keeps, where one does"
+        )
+    )
     total_rows: int = Field(description="The By's rows, those answered and the rest")
     sort: SortSchema

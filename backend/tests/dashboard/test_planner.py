@@ -1,24 +1,35 @@
-"""The planner (F154.1): a checked state's window, scope, measures and what
-its statements leave; and the query it means, as the file of states holds
+"""The planner (F154.1): a checked state's window, scope, measures, marks,
+thresholds and outlier rows, the quick filters' chips and a refused
+measure's stand-in; and the query it means, as the file of states holds
 it."""
 
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 
 import pytest
 from sqlalchemy.orm import Session as DbSession
 
-from app.dashboard.catalogue import Catalogue
+from app.dashboard.catalogue import Catalogue, QuickFilter
 from app.dashboard.planner import (
     Condition,
     Plan,
     Planned,
     PlannedRatio,
+    Threshold,
     described,
     plan,
     window,
 )
 from app.dashboard.reading import read
-from app.dashboard.state import Between, Preset, RatioKey, Simple, Weeks
+from app.dashboard.state import (
+    Between,
+    Filter,
+    OnItems,
+    Preset,
+    RatioKey,
+    Simple,
+    Weeks,
+)
 from app.services.quota_week_service import Period
 from tests.support.dashboard import catalogue
 
@@ -114,26 +125,115 @@ class TestPlan:
             "!source:chat,pilot",
             "effort:high,~",
         ]
-        assert found.after == ()
+        assert (found.marks, found.thresholds, found.outliers) == ((), (), None)
+        assert not found.judges
 
     def test_an_order_dimensions_chip_is_its_parts(self, held: Catalogue) -> None:
         found = _plan(held, f"c=session_start:{PROJECT}")
 
+        assert isinstance(found.scope[0], Condition)
         assert found.scope[0].dimension == "psession"
 
-    def test_it_leaves_what_its_statements_do_not_apply(self, held: Catalogue) -> None:
+    def test_a_condition_on_each_item_keeps_or_marks_rows(
+        self, held: Catalogue
+    ) -> None:
         found = _plan(
-            held,
-            "c=~miss:1&c=@rows,gt,100,cost.sum&c=!@items,ge,1.5,cost.sum&c=@outliers",
+            held, "c=!@items,ge,1.5,cost.sum.conversation&c=~@items,gt,1,cost.sum"
         )
 
-        assert found.scope == ()
-        assert found.after == (
-            "~miss:1",
-            "@rows,gt,100,cost.sum",
-            "!@items,ge,1.5,cost.sum",
-            "@outliers",
+        assert found.scope == (
+            OnItems("ge", 1.5, Simple("cost", "sum", "conversation"), negated=True),
         )
+        assert found.marks == (OnItems("gt", 1, Simple("cost", "sum")),)
+
+    def test_a_marked_chip_on_values_marks(self, held: Catalogue) -> None:
+        found = _plan(held, "c=~!miss:1&c=effort:high")
+
+        assert found.scope == (Condition("effort", ("high",)),)
+        assert found.marks == (Condition("miss", (1,), negated=True),)
+
+    def test_a_threshold_on_the_bys_rows_is_its_measure_planned(
+        self, held: Catalogue
+    ) -> None:
+        found = _plan(
+            held, "by=model&c=@rows,gt,100,turns.count&c=~@rows,le,0.5,r:per_call"
+        )
+
+        assert found.thresholds == (
+            Threshold(
+                Planned(
+                    Simple("turns", "count"),
+                    "turn",
+                    None,
+                    "turns is a figure of Pilot turns, which have no model",
+                ),
+                "gt",
+                100,
+            ),
+            Threshold(
+                PlannedRatio(
+                    RatioKey("per_call"),
+                    Planned(Simple("cost", "sum"), "call", None),
+                    Planned(Simple("calls", "count"), "call", None),
+                ),
+                "le",
+                0.5,
+                marked=True,
+            ),
+        )
+        assert found.judges
+
+    def test_its_simples_take_the_thresholds_after_the_views(
+        self, held: Catalogue
+    ) -> None:
+        found = _plan(held, "m=miss_cost.sum&c=@rows,gt,1,r:per_call")
+
+        assert [one.measure for one in found.simples] == [
+            Simple("miss_cost", "sum"),
+            Simple("cost", "sum"),
+            Simple("calls", "count"),
+        ]
+
+    @pytest.mark.parametrize(
+        ("written", "judged"),
+        [
+            ("c=@outliers", "keep"),
+            ("c=~@outliers", "mark"),
+            ("c=~@outliers&c=@outliers", "keep"),
+            ("c=@outliers&c=~@outliers", "keep"),
+        ],
+    )
+    def test_the_outlier_rows_chip_keeps_where_any_keeps(
+        self, held: Catalogue, written: str, judged: str
+    ) -> None:
+        found = _plan(held, written)
+
+        assert found.outliers == judged
+        assert found.judges
+
+    def test_a_quick_filter_that_is_on_is_its_chip(self, held: Catalogue) -> None:
+        found = _plan(held, "b=misses,expensive,outliers")
+
+        assert found.scope == (
+            OnItems("gt", 1, Simple("cost", "sum")),
+            Condition("miss", (1,)),
+        )
+        assert found.outliers == "keep"
+
+    def test_a_quick_filter_that_marks_marks(self, held: Catalogue) -> None:
+        marking = replace(
+            held,
+            quick_filters=(
+                QuickFilter("marked_misses", "Misses", "miss:1", marks=True),
+                QuickFilter("marked_outliers", "Outliers", "@outliers", marks=True),
+            ),
+        )
+
+        found = _plan(marking, "b=marked_misses,marked_outliers")
+
+        assert found.scope == ()
+        assert found.marks == (Condition("miss", (1,)),)
+        assert found.outliers == "mark"
 
     def test_a_measure_is_its_figures_fact_at_its_grain(self, held: Catalogue) -> None:
         found = _plan(held, "m=cost.median.conversation&m=turns.count&m=events.count")
@@ -155,6 +255,54 @@ class TestPlan:
             None,
             "turns is a figure of Pilot turns, which have no model",
         )
+
+    def test_one_refused_is_answered_by_its_stand_in(self, held: Catalogue) -> None:
+        standing = _standing(held, "cost", "reported_cost")
+
+        found = _plan(
+            standing,
+            "by=model&m=reported_cost.sum(source=chat)&m=reported_cost.median.psession",
+        )
+
+        why = "reported_cost is a figure of Pilot turns, which have no model"
+        chats = (Filter("source", ("chat",)),)
+        assert found.measures == (
+            Planned(
+                Simple("reported_cost", "sum", filters=chats),
+                "call",
+                None,
+                why,
+                Simple("cost", "sum", filters=chats),
+            ),
+            Planned(
+                Simple("reported_cost", "median", "psession"),
+                "call",
+                "psession",
+                why,
+                Simple("cost", "median", "psession"),
+            ),
+        )
+        assert all(planned.answers for planned in found.simples)
+        assert found.simples[0].answered.figure == "cost"
+
+    @pytest.mark.parametrize(
+        ("standing", "stands_for", "written"),
+        [
+            ("cost", "reported_cost", "by=model&m=turns.count"),
+            ("cost", "reported_cost", "by=event_kind&m=reported_cost.sum"),
+            ("cost", "turns", "by=model&m=turns.count"),
+        ],
+        ids=["no figure stands for it", "on a fact with no By", "no such aggregate"],
+    )
+    def test_one_with_no_stand_in_is_refused_alone(
+        self, held: Catalogue, standing: str, stands_for: str, written: str
+    ) -> None:
+        found = _plan(_standing(held, standing, stands_for), written)
+
+        refused = found.simples[0]
+        assert refused.refused is not None
+        assert refused.stand_in is None
+        assert not refused.answers
 
     def test_a_ratio_by_its_key_has_the_catalogues_sides(self, held: Catalogue) -> None:
         found = _plan(held, "m=r:per_call")
@@ -184,6 +332,17 @@ class TestPlan:
         assert str(found.focus.key) == PROJECT
 
 
+def _standing(held: Catalogue, standing: str, stands_for: str) -> Catalogue:
+    """The catalogue with the figure `standing` standing for `stands_for`."""
+    return replace(
+        held,
+        figures=tuple(
+            replace(figure, stands_for=stands_for) if figure.key == standing else figure
+            for figure in held.figures
+        ),
+    )
+
+
 class TestDescribed:
     def test_a_range_by_its_key_and_another_by_its_spans(self, held: Catalogue) -> None:
         by_key = described(_plan(held, "t=qw"), [])
@@ -196,7 +355,9 @@ class TestDescribed:
         found = _plan(
             held,
             f"by=model&m=turns.count&m=r:per_call&m=cost.p90.conversation"
-            f"&c=!source:work&c=~miss:1&f=project:{PROJECT}&col=effort",
+            f"&c=!source:work&c=~miss:1&c=@items,gt,1,cost.sum.psession"
+            f"&c=@rows,gt,2,cost.sum&c=~@rows,lt,0.5,r:per_call&c=~@outliers"
+            f"&f=project:{PROJECT}&col=effort",
         )
 
         assert described(found, [{"fact": "call"}]) == {
@@ -204,7 +365,7 @@ class TestDescribed:
             "by": "model",
             "color": "effort",
             "focus": f"project:{PROJECT}",
-            "scope": ["!source:work"],
+            "scope": ["!source:work", "@items,gt,1,cost.sum.psession"],
             "measures": [
                 {
                     "measure": "turns.count",
@@ -225,8 +386,40 @@ class TestDescribed:
                 },
             ],
             "statements": [{"fact": "call"}],
-            "after": ["~miss:1"],
+            "marks": ["miss:1"],
+            "thresholds": [
+                {"keeps": "gt,2", "measure": {"measure": "cost.sum", "fact": "call"}},
+                {
+                    "marks": "lt,0.5",
+                    "measure": {
+                        "measure": "r:per_call",
+                        "over": [
+                            {"measure": "cost.sum", "fact": "call"},
+                            {"measure": "calls.count", "fact": "call"},
+                        ],
+                    },
+                },
+            ],
+            "outliers": "mark",
         }
+
+    def test_a_stand_in_beside_the_measure_it_stands_in_for(
+        self, held: Catalogue
+    ) -> None:
+        found = _plan(
+            _standing(held, "cost", "reported_cost"), "by=model&m=reported_cost.sum"
+        )
+
+        assert described(found, [])["measures"] == [
+            {
+                "measure": "reported_cost.sum",
+                "fact": "call",
+                "refused": (
+                    "reported_cost is a figure of Pilot turns, which have no model"
+                ),
+                "stand_in": "cost.sum",
+            }
+        ]
 
     def test_a_condition_writes_none_as_a_state_does(self) -> None:
         assert Condition("effort", ("high", None), True).written() == "!effort:high,~"

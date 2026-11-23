@@ -13,12 +13,22 @@ and what the process does"), built from a plan.
   across the items. A median or a P90 of the fact's own rows is a statement
   of the rows alone. Each is a hashed grouping, never a distinct count by
   sort.
+- **One marks statement per fact** the view's measures read, where a chip
+  marks: by the By, the rows the marks keep, their count and each marking
+  measure's part.
 
-A measure stacks where its figure does, its aggregate adds up — a sum, or a
-count of its fact's rows — and the color is a dimension its fact has, or
-the token kinds and the figure has them. Each row a measure reads carries
-its figure where the measure's own filters keep the row, else none, so that
-every aggregate over it ignores the row.
+A condition on each item reads its figure over each item's rows of all
+time, its own filters keeping them: on a fact's own rows the row's figure,
+on a part the items whose figure, taken together as it says, passes. The
+By's values a plan is narrowed to are one array, bound once whatever their
+number.
+
+A measure adds up where its figure stacks and its aggregate is a sum, or a
+count of its fact's rows. It stacks where it adds up and the color is a
+dimension its fact has, or the token kinds and the figure has them; it marks
+where it adds up. Each row a measure reads carries its figure where the
+measure's own filters keep the row, else none, so that every aggregate over
+it ignores the row.
 """
 
 from __future__ import annotations
@@ -32,20 +42,30 @@ from sqlalchemy import (
     Double,
     Select,
     and_,
+    any_,
     case,
     cast,
     false,
     func,
+    literal,
     not_,
     or_,
     select,
     true,
     tuple_,
 )
+from sqlalchemy.dialects.postgresql import ARRAY
 
 from app.dashboard.catalogue import COUNT, Catalogue, Dimension, Figure, Row
-from app.dashboard.planner import Condition, Plan, Planned, Window
-from app.dashboard.state import TOKEN_KIND, Filter, Value
+from app.dashboard.planner import (
+    Kept,
+    Plan,
+    Planned,
+    Window,
+    sides,
+    written,
+)
+from app.dashboard.state import TOKEN_KIND, Filter, OnItems, Value
 
 SCANNED = ("sum", COUNT, "max", "mean")
 """The aggregates the grouped scan takes over its fact's own rows."""
@@ -87,42 +107,70 @@ class Items:
     measures: tuple[int, ...]
 
 
-Statement = Scan | Items
+@dataclass(frozen=True)
+class Marked:
+    """A fact's rows the plan's marks keep, by the By: their count, and the
+    part of each measure that marks, `measures` the indexes of those."""
+
+    fact: str
+    select: Select[Any]
+    joins: tuple[str, ...]
+    through: tuple[tuple[str, str], ...]
+    measures: tuple[int, ...]
+
+
+Statement = Scan | Items | Marked
+
+
+def adds(planned: Planned, catalogue: Catalogue) -> bool:
+    """Whether the measure adds up over the rows: a sum, or a count of its
+    fact's rows, of a figure that stacks, answered."""
+    measure = planned.answered
+    if not planned.answers or not catalogue.figure(measure.figure).stacks:
+        return False
+    return measure.aggregate == "sum" or (
+        measure.aggregate == COUNT and planned.grain is None
+    )
 
 
 def stacks(planned: Planned, color: str | None, catalogue: Catalogue) -> bool:
     """Whether the measure splits by the color."""
-    measure = planned.measure
-    figure = catalogue.figure(measure.figure)
-    if color is None or planned.refused is not None or not figure.stacks:
+    if color is None or not adds(planned, catalogue):
         return False
-    adds = measure.aggregate == "sum" or (
-        measure.aggregate == COUNT and planned.grain is None
-    )
     if color == TOKEN_KIND:
-        return figure.kinds is not None and measure.aggregate == "sum"
-    return adds and planned.fact in catalogue.offered(color)
+        figure = catalogue.figure(planned.answered.figure)
+        return figure.kinds is not None and planned.answered.aggregate == "sum"
+    return planned.fact in catalogue.offered(color)
 
 
 def statements(found: Plan, catalogue: Catalogue) -> tuple[Statement, ...]:
-    """The statements of the plan's rows, the scans first, each fact in the
-    catalogue's order."""
+    """The statements of the plan's rows, the scans first, then the items',
+    then the marks', each fact in the catalogue's order."""
     simples = found.simples
+    viewed = {side.measure for measured in found.measures for side in sides(measured)}
     scans: list[Statement] = []
     items: list[Statement] = []
+    marked: list[Statement] = []
     for fact in catalogue.facts:
         mine = [
             index
             for index, planned in enumerate(simples)
-            if planned.fact == fact.key and planned.refused is None
+            if planned.fact == fact.key and planned.answers
         ]
         if not mine:
             continue
+        shown = [index for index in mine if simples[index].measure in viewed]
+        if found.marks and shown:
+            marked.append(
+                _Builder(found, catalogue, fact.key).marked(
+                    [index for index in shown if adds(simples[index], catalogue)]
+                )
+            )
         scanned = [
             index
             for index in mine
             if simples[index].grain is None
-            and simples[index].measure.aggregate in SCANNED
+            and simples[index].answered.aggregate in SCANNED
         ]
         split = [
             index for index in mine if stacks(simples[index], found.color, catalogue)
@@ -138,7 +186,7 @@ def statements(found: Plan, catalogue: Catalogue) -> tuple[Statement, ...]:
                 if index not in scanned and simples[index].grain == grain
             ]
             items.append(_Builder(found, catalogue, fact.key).items(grain, answered))
-    return (*scans, *items)
+    return (*scans, *items, *marked)
 
 
 def described(found: Plan, catalogue: Catalogue) -> list[dict[str, Any]]:
@@ -148,7 +196,10 @@ def described(found: Plan, catalogue: Catalogue) -> list[dict[str, Any]]:
     entries = []
     for statement in statements(found, catalogue):
         entry: dict[str, Any] = {"fact": statement.fact}
-        if isinstance(statement, Scan):
+        if isinstance(statement, Marked):
+            entry["marks"] = True
+            groupings = [[found.by]]
+        elif isinstance(statement, Scan):
             groupings = [[found.by], []]
             if statement.colored:
                 groupings.append([found.by, str(found.color)])
@@ -178,16 +229,22 @@ class _Builder:
     # ------------------------------------------------------------ the rows read
 
     def scoped(self) -> list[ColumnElement[bool]]:
-        """What keeps a row: the window and the scope."""
-        return [
+        """What keeps a row: the window, the scope, and the By's values the
+        plan is narrowed to."""
+        scoped = [
             _in_window(self.row, self.plan.window),
             *(self.kept(condition) for condition in self.plan.scope),
         ]
+        if self.plan.rows is not None:
+            scoped.append(_among(self.by().path(self.row), self.plan.rows))
+        return scoped
 
-    def kept(self, condition: Condition | Filter) -> ColumnElement[bool]:
+    def kept(self, condition: Kept | Filter) -> ColumnElement[bool]:
         """Whether the row passes `condition`: on its own dimension where
         the fact has it, else through the conversations of the first fact
         that has it, among that fact's rows in the window."""
+        if isinstance(condition, OnItems):
+            return self.each(condition)
         key = condition.dimension
         dimension = self.catalogue.dimension(key)
         offered = self.catalogue.offered(key)
@@ -214,16 +271,79 @@ class _Builder:
             matched = false()
         return not_(matched) if condition.negated else matched
 
+    def each(self, chip: OnItems) -> ColumnElement[bool]:
+        """Whether the row passes a condition on each item: its own figure,
+        on its fact's own rows; else whether its item is among those that
+        pass, on the item's part where the fact has it; else through the
+        conversations of the rows that pass, among the figure's fact's rows
+        in the window."""
+        measure = chip.measure
+        figure = self.catalogue.figure(measure.figure)
+        home = _Builder(self.plan, self.catalogue, figure.fact)
+        if measure.grain is None:
+            if self.row.fact.key == figure.fact:
+                matched = _past(
+                    self.filtered(figure.path(self.row), measure.filters), chip
+                )
+            else:
+                passing = _past(
+                    home.filtered(figure.path(home.row), measure.filters), chip
+                )
+                matched = self.conversations(home, passing, written(chip))
+            return not_(matched) if chip.negated else matched
+        part = self.catalogue.dimension(measure.grain)
+        item = part.path(home.row)
+        value = _within(figure, home.filtered(figure.path(home.row), measure.filters))
+        items = (
+            select(item)
+            .select_from(home.row.source())
+            .where(item.is_not(None))
+            .group_by(item)
+            .having(_past(value, chip))
+            .correlate(None)
+        )
+        if self.row.fact.key in self.catalogue.offered(part.key):
+            matched = func.coalesce(part.path(self.row).in_(items), false())
+        else:
+            other = _Builder(self.plan, self.catalogue, figure.fact)
+            matched = self.conversations(
+                other, part.path(other.row).in_(items), written(chip)
+            )
+        return not_(matched) if chip.negated else matched
+
+    def conversations(
+        self, home: _Builder, passing: ColumnElement[bool], key: str
+    ) -> ColumnElement[bool]:
+        """Whether the row's conversation holds a row of `home`'s fact in
+        the window that `passing` keeps."""
+        self.through[key] = home.row.fact.key
+        where = [
+            home.row["transcript_id"].is_not(None),
+            passing,
+            _in_window(home.row, self.plan.window),
+        ]
+        conversations = (
+            select(home.row["transcript_id"])
+            .select_from(home.row.source())
+            .where(*where)
+            .correlate(None)
+        )
+        return func.coalesce(self.row["transcript_id"].in_(conversations), false())
+
     def value(self, planned: Planned, *also: ColumnElement[bool]) -> ColumnElement[Any]:
         """The measure's figure on the row, none where its filters, or
         `also`, do not keep it."""
-        figure = self.catalogue.figure(planned.measure.figure)
-        return self.filtered(figure.path(self.row), planned, *also)
+        measure = planned.answered
+        figure = self.catalogue.figure(measure.figure)
+        return self.filtered(figure.path(self.row), measure.filters, *also)
 
     def filtered(
-        self, path: ColumnElement[Any], planned: Planned, *also: ColumnElement[bool]
+        self,
+        path: ColumnElement[Any],
+        filters: Sequence[Filter],
+        *also: ColumnElement[bool],
     ) -> ColumnElement[Any]:
-        conditions = [*(self.kept(one) for one in planned.measure.filters), *also]
+        conditions = [*(self.kept(one) for one in filters), *also]
         if not conditions:
             return path
         return case((and_(*conditions), path))
@@ -272,13 +392,13 @@ class _Builder:
             )
             if color == TOKEN_KIND:
                 kinds.append(index)
-                figure = self.catalogue.figure(planned.measure.figure)
+                figure = self.catalogue.figure(planned.answered.figure)
                 assert figure.kinds is not None
                 for kind, path in figure.kinds.items():
                     columns.append(
-                        self.filtered(path(self.row), planned, *also).label(
-                            f"k{index}_{kind}"
-                        )
+                        self.filtered(
+                            path(self.row), planned.answered.filters, *also
+                        ).label(f"k{index}_{kind}")
                     )
             else:
                 columns.append(self.value(planned, *also).label(f"s{index}"))
@@ -305,13 +425,13 @@ class _Builder:
         for index in scanned:
             value = inner.c[f"v{index}"]
             outer += [
-                _scanned(simples[index].measure.aggregate, value).label(f"v{index}"),
+                _scanned(simples[index].answered.aggregate, value).label(f"v{index}"),
                 func.count(value).label(f"n{index}"),
             ]
         for index in split:
-            aggregate = simples[index].measure.aggregate
+            aggregate = simples[index].answered.aggregate
             if index in kinds:
-                figure = self.catalogue.figure(simples[index].measure.figure)
+                figure = self.catalogue.figure(simples[index].answered.figure)
                 assert figure.kinds is not None
                 outer += [
                     func.sum(inner.c[f"k{index}_{kind}"]).label(f"k{index}_{kind}")
@@ -380,7 +500,7 @@ class _Builder:
                     rows.c.item,
                     *(
                         _within(
-                            self.catalogue.figure(simples[index].measure.figure),
+                            self.catalogue.figure(simples[index].answered.figure),
                             rows.c[f"v{index}"],
                         ).label(f"v{index}")
                         for index in answered
@@ -399,7 +519,7 @@ class _Builder:
         for index in answered:
             value = per_item.c[f"v{index}"]
             columns += [
-                _across(simples[index].measure.aggregate, value).label(f"v{index}"),
+                _across(simples[index].answered.aggregate, value).label(f"v{index}"),
                 func.count(value).label(f"n{index}"),
             ]
         statement = select(*columns).select_from(per_item)
@@ -415,6 +535,46 @@ class _Builder:
             joins=self.row.taken,
             through=tuple(self.through.items()),
             measures=tuple(answered),
+        )
+
+    # ------------------------------------------------------------ the marks
+
+    def marked(self, marking: Sequence[int]) -> Marked:
+        """By the By, the rows the scope and the marks keep, and the part of
+        each measure of `marking` on them."""
+        simples = self.plan.simples
+        columns: list[ColumnElement[Any]] = [self.by().path(self.row).label("b")]
+        for index in marking:
+            planned = simples[index]
+            also = (
+                [self.grain_of(planned).is_not(None)]
+                if planned.grain is not None
+                else []
+            )
+            columns.append(self.value(planned, *also).label(f"v{index}"))
+        where = [*self.scoped(), *(self.kept(mark) for mark in self.plan.marks)]
+        inner = (
+            select(*columns).select_from(self.row.source()).where(*where).subquery("r")
+        )
+        outer: list[ColumnElement[Any]] = [inner.c.b, func.count().label("n")]
+        for index in marking:
+            value = inner.c[f"v{index}"]
+            outer.append(
+                (
+                    func.count(value)
+                    if simples[index].answered.aggregate == COUNT
+                    else func.sum(value)
+                ).label(f"v{index}")
+            )
+        return Marked(
+            fact=self.row.fact.key,
+            select=select(*outer)
+            .select_from(inner)
+            .group_by(inner.c.b)
+            .execution_options(max_statement_length=_LENGTH),
+            joins=self.row.taken,
+            through=tuple(self.through.items()),
+            measures=tuple(marking),
         )
 
 
@@ -447,6 +607,28 @@ def _in_window(row: Row, window: Window) -> ColumnElement[bool]:
         ]
         spans.append(and_(*bounds) if bounds else true())
     return or_(*spans) if spans else false()
+
+
+def _among(path: ColumnElement[Any], values: Sequence[Value]) -> ColumnElement[bool]:
+    """Whether the path's value is among `values`, bound as one array of the
+    path's type, none among them matching a row with none."""
+    known = [value for value in values if value is not None]
+    matched = [
+        *([path == any_(literal(known, ARRAY(path.type)))] if known else []),
+        *([path.is_(None)] if len(known) < len(values) else []),
+    ]
+    return func.coalesce(or_(*matched), false()) if matched else false()
+
+
+def _past(value: ColumnElement[Any], chip: OnItems) -> ColumnElement[bool]:
+    """Whether `value` is past the condition's number; none is not."""
+    compared = {
+        "gt": value > chip.number,
+        "ge": value >= chip.number,
+        "lt": value < chip.number,
+        "le": value <= chip.number,
+    }[chip.operator]
+    return func.coalesce(compared, false())
 
 
 def _matches(path: ColumnElement[Any], values: Sequence[Value]) -> ColumnElement[bool]:

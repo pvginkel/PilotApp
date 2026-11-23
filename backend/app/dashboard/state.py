@@ -22,7 +22,7 @@ are one address:
                | r:<name>:<simple>/<simple>
     filter  := [!]<dimension>=<value>|<value>…
     level   := <part>:<value>[@<dimension drilled from>]
-    chip    := [~][!]<dimension>:<value>,… | [~]@rows,<op>,<number>,<simple>
+    chip    := [~][!]<dimension>:<value>,… | [~]@rows,<op>,<number>,<measure>
                | [~][!]@items,<op>,<number>,<simple> | [~]@outliers
 
 A value is percent-encoded as `enc` writes it, and a bare `~` is none. A
@@ -227,12 +227,12 @@ class Pin:
 
 @dataclass(frozen=True)
 class OnRows:
-    """A threshold on the By's rows: those whose `measure` is past
-    `number`, kept or marked."""
+    """A threshold on the By's rows: those whose `measure`, a ratio among
+    them, is past `number`, kept or marked."""
 
     operator: str
     number: float
-    measure: Simple
+    measure: Measure
     marked: bool = False
 
 
@@ -391,7 +391,7 @@ def chip_key(chip: Chip) -> str:
     if isinstance(chip, Outliers):
         return f"{marked}@outliers"
     if isinstance(chip, OnRows):
-        return f"{marked}@rows,{chip.operator},{number(chip.number)},{simple_key(chip.measure)}"
+        return f"{marked}@rows,{chip.operator},{number(chip.number)},{measure_key(chip.measure)}"
     negated = "!" if chip.negated else ""
     if isinstance(chip, OnItems):
         return (

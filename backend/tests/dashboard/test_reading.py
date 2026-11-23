@@ -562,6 +562,36 @@ class TestChips:
             Outliers(marked=True),
         )
 
+    def test_a_threshold_on_the_rows_by_a_ratio(self, reads: Reads) -> None:
+        assert _state(
+            reads, "c=@rows,gt,0.5,r:per_call&c=~@rows,lt,2,r:Mine:cost.sum/calls.count"
+        ).chips == (
+            OnRows("gt", 0.5, RatioKey("per_call")),
+            OnRows(
+                "lt",
+                2.0,
+                WrittenRatio("Mine", Simple("cost", "sum"), Simple("calls", "count")),
+                marked=True,
+            ),
+        )
+
+    def test_a_threshold_by_a_ratio_whose_key_is_gone_is_dropped_with_a_note(
+        self, reads: Reads
+    ) -> None:
+        checked = reads("c=@rows,gt,1,r:per_cal&c=miss:1")
+
+        assert checked.state.chips == (Pin("miss", (1,)),)
+        assert checked.notes == (
+            'c=@rows,gt,1,r:per_cal: no ratio has the key "per_cal", so the chip is '
+            'dropped. Did you mean "per_call"?',
+        )
+
+    def test_a_condition_on_each_item_takes_no_ratio(self, refuses: Refuses) -> None:
+        assert refuses("c=@items,gt,1,r:per_call")[1] == (
+            '- c=@items,gt,1,r:per_call: "r:per_call" is no figure. The '
+            "catalogue's measures list the figures."
+        )
+
     @pytest.mark.parametrize(
         ("written", "fault"),
         [
@@ -930,6 +960,17 @@ class TestReadOne:
 
         assert refused.value.message.splitlines()[1] == (
             '- c=miss:2: "2" is no value of miss. The values of miss are 1 and 0.'
+        )
+
+    def test_one_by_a_ratio_whose_key_is_gone_is_refused(
+        self, held: Catalogue, weeks: list[Period]
+    ) -> None:
+        with pytest.raises(StateRefusedException) as refused:
+            read_chip("@rows,gt,1,r:per_cal", held, weeks)
+
+        assert refused.value.message.splitlines()[1] == (
+            '- c=@rows,gt,1,r:per_cal: no ratio has the key "per_cal". Did you mean '
+            '"per_call"? The catalogue\'s measures list the ratios.'
         )
 
     def test_one_whose_threshold_is_no_finite_number_is_refused(

@@ -2,7 +2,7 @@
   "about": [
     "States of a dashboard view as written, each with what the server reads in it (F154.2, F159).",
     "An entry that reads has its normal form, the state after #dash/ in the address the server answers, its look-only parts as that form writes them, and its notes where it has any, one per part dropped.",
-    "It has the query it means too, the planner's: its time, a range by its key as written, else its spans as instants in UTC, each end exclusive; its By, color and focus; its scope, each drill level and each chip on a dimension's values as a chip writes it; each measure with its fact and the part its items are, or why it is refused, a ratio with its two; its statements, a grouped scan per fact and a statement per fact and grain over a part's items, each with its groupings, the joins it reads and each dimension it reads through another fact's conversations; and the chips and quick filters its statements leave to what follows them.",
+    "It has the query it means too, the planner's: its time, a range by its key as written, else its spans as instants in UTC, each end exclusive; its By, color and focus; its scope, each drill level, each chip on a dimension's values and each condition on each item as a chip writes it, a quick filter that is on as its chip; each measure with its fact and the part its items are, or why it is refused and what stands in for it, a ratio with its two; its statements, a grouped scan per fact, a statement per fact and grain over a part's items and, where a chip marks, a statement of the marked rows per fact, each with its groupings, the joins it reads and each dimension or item condition it reads through another fact's conversations; its marks, the marked chips with no mark; each threshold on the By's rows with what it keeps or marks and its measure; and whether the outlier rows' chip keeps or marks.",
     "An entry with a fault has the refusal's exact text, a line an item.",
     "The backend's suite reads every entry through GET /api/dashboard/address's service (tests/dashboard/test_states.py), on the suite's database, whose quota weeks start on 2 January 2025."
   ],
@@ -788,10 +788,26 @@
               "project",
               "clarification"
             ]
+          },
+          {
+            "fact": "call",
+            "marks": true,
+            "grouping": [
+              [
+                "project"
+              ]
+            ],
+            "joins": [
+              "session",
+              "thread",
+              "main",
+              "project",
+              "clarification"
+            ]
           }
         ],
-        "after": [
-          "~miss:1"
+        "marks": [
+          "miss:1"
         ]
       }
     },
@@ -826,13 +842,199 @@
               "main",
               "project"
             ]
+          },
+          {
+            "fact": "call",
+            "items": "psession",
+            "grouping": [
+              [
+                "project"
+              ],
+              []
+            ],
+            "joins": [
+              "session",
+              "thread",
+              "main",
+              "project"
+            ]
+          },
+          {
+            "fact": "call",
+            "marks": true,
+            "grouping": [
+              [
+                "project"
+              ]
+            ],
+            "joins": [
+              "session",
+              "thread",
+              "main",
+              "project"
+            ]
           }
         ],
-        "after": [
-          "@rows,gt,100,cost.median.psession",
-          "~!@items,ge,1.5,cost.sum",
-          "~@outliers"
+        "marks": [
+          "!@items,ge,1.5,cost.sum"
+        ],
+        "thresholds": [
+          {
+            "keeps": "gt,100",
+            "measure": {
+              "measure": "cost.median.psession",
+              "fact": "call",
+              "items": "psession"
+            }
+          }
+        ],
+        "outliers": "mark"
+      }
+    },
+    {
+      "about": "A threshold on the By's rows by a ratio, kept and marked, and one by a ratio whose key is gone",
+      "state": "c=@rows,gt,0.5,r:per_call&c=~@rows,lt,2,r:Mine:cost.sum/calls.count&c=@rows,gt,1,r:gone",
+      "normal": "t=qw&by=project&m=cost.sum&c=@rows,gt,0.5,r:per_call&c=~@rows,lt,2,r:Mine:cost.sum/calls.count&col=none",
+      "look": [],
+      "notes": [
+        "c=@rows,gt,1,r:gone: no ratio has the key \"gone\", so the chip is dropped."
+      ],
+      "query": {
+        "time": "qw",
+        "by": "project",
+        "color": null,
+        "scope": [],
+        "measures": [
+          {
+            "measure": "cost.sum",
+            "fact": "call"
+          }
+        ],
+        "statements": [
+          {
+            "fact": "call",
+            "grouping": [
+              [
+                "project"
+              ],
+              []
+            ],
+            "joins": [
+              "session",
+              "thread",
+              "main",
+              "project"
+            ]
+          }
+        ],
+        "thresholds": [
+          {
+            "keeps": "gt,0.5",
+            "measure": {
+              "measure": "r:per_call",
+              "over": [
+                {
+                  "measure": "cost.sum",
+                  "fact": "call"
+                },
+                {
+                  "measure": "calls.count",
+                  "fact": "call"
+                }
+              ]
+            }
+          },
+          {
+            "marks": "lt,2",
+            "measure": {
+              "measure": "r:Mine:cost.sum/calls.count",
+              "over": [
+                {
+                  "measure": "cost.sum",
+                  "fact": "call"
+                },
+                {
+                  "measure": "calls.count",
+                  "fact": "call"
+                }
+              ]
+            }
+          }
         ]
+      }
+    },
+    {
+      "about": "Conditions on each item, on a fact's own rows and on a part with a filter of its own",
+      "state": "c=!@items,gt,1,cost.sum&c=@items,ge,2,cost.sum.conversation(!miss=1)&by=psession",
+      "normal": "t=qw&by=psession&m=cost.sum&c=!@items,gt,1,cost.sum&c=@items,ge,2,cost.sum.conversation(!miss=1)&col=none",
+      "look": [],
+      "query": {
+        "time": "qw",
+        "by": "psession",
+        "color": null,
+        "scope": [
+          "!@items,gt,1,cost.sum",
+          "@items,ge,2,cost.sum.conversation(!miss=1)"
+        ],
+        "measures": [
+          {
+            "measure": "cost.sum",
+            "fact": "call"
+          }
+        ],
+        "statements": [
+          {
+            "fact": "call",
+            "grouping": [
+              [
+                "psession"
+              ],
+              []
+            ],
+            "joins": [
+              "session"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "about": "The quick filters that are on, each its chip",
+      "state": "b=outliers,misses,expensive",
+      "normal": "t=qw&by=project&m=cost.sum&b=expensive,misses,outliers&col=none",
+      "look": [],
+      "query": {
+        "time": "qw",
+        "by": "project",
+        "color": null,
+        "scope": [
+          "@items,gt,1,cost.sum",
+          "miss:1"
+        ],
+        "measures": [
+          {
+            "measure": "cost.sum",
+            "fact": "call"
+          }
+        ],
+        "statements": [
+          {
+            "fact": "call",
+            "grouping": [
+              [
+                "project"
+              ],
+              []
+            ],
+            "joins": [
+              "session",
+              "thread",
+              "main",
+              "project"
+            ]
+          }
+        ],
+        "outliers": "keep"
       }
     },
     {

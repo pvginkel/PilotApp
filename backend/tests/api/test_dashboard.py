@@ -541,10 +541,26 @@ class TestGetRows:
             "values": [2.6, 2.0],
             "n": [5, 2],
             "split": [[1.85, 0.75], None],
+            "marks": None,
+            "marked": False,
         }
         assert body["rows"][1]["key"] is None
         assert body["total_rows"] == 2
         assert body["sort"] == {"direction": "desc", "column": "cost.sum"}
+        assert [measure["stand_in"] for measure in body["measures"]] == [None, None]
+
+    def test_a_marked_chip_marks_rows_and_their_parts(
+        self, client: FlaskClient, worked: Record
+    ) -> None:
+        body = client.get(
+            ROWS, query_string={"state": "t=all&by=psession&c=~miss:1"}
+        ).get_json()
+
+        rows = {row["key"]: row for row in body["rows"]}
+        assert rows[str(worked.work.id)]["marked"] is True
+        assert rows[str(worked.work.id)]["marks"] == [1.0]
+        assert rows[str(worked.chat.id)]["marks"] == [0.0]
+        assert body["all"]["marks"] == [1.0]
 
     def test_a_time_key_is_an_instant(
         self, client: FlaskClient, worked: Record

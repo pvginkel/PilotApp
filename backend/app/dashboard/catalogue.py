@@ -169,7 +169,10 @@ class Figure:
     rows together, their sum or their largest; `aggregate` the aggregate a
     measure of it takes where it names none. `kinds` is the figure split by
     Token Kind, a path each, on a figure that counts tokens; `stacks` whether
-    a color may stack it."""
+    a color may stack it. `stands_for` is the figure of another fact this one
+    stands in for under a By that fact has not: a measure of that figure
+    refused there is answered by one of this, as cost by kind stands in for
+    cost By a kind of work."""
 
     key: str
     label: str
@@ -181,6 +184,7 @@ class Figure:
     aggregate: str = "sum"
     kinds: Mapping[str, Path] | None = None
     stacks: bool = True
+    stands_for: str | None = None
 
 
 @dataclass(frozen=True)

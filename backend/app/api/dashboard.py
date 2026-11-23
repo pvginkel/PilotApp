@@ -41,6 +41,7 @@ from app.schemas.dashboard import (
     RowsResponseSchema,
     SortSchema,
     SpanSchema,
+    StandInSchema,
     TimeRangeSchema,
     ValueSchema,
 )
@@ -182,6 +183,11 @@ def _rows(found: Rows) -> RowsResponseSchema:
                 grain=measure.grain,
                 stacks=measure.stacks,
                 refused=measure.refused,
+                stand_in=None
+                if measure.stand_in is None
+                else StandInSchema(
+                    key=measure.stand_in.key, label=measure.stand_in.label
+                ),
                 median=measure.median,
             )
             for measure in found.measures
@@ -197,7 +203,13 @@ def _rows(found: Rows) -> RowsResponseSchema:
         ),
         all=LineSchema(**_line(found.all)),
         rows=[
-            ByRowSchema(**_line(row), key=row.key, label=row.label, focus=row.focus)
+            ByRowSchema(
+                **_line(row),
+                key=row.key,
+                label=row.label,
+                focus=row.focus,
+                marked=row.marked,
+            )
             for row in found.rows
         ],
         total_rows=found.total_rows,
@@ -218,6 +230,7 @@ def _line(line: Line) -> dict[str, Any]:
         "split": None
         if line.split is None
         else [None if one is None else list(one) for one in line.split],
+        "marks": None if line.marks is None else list(line.marks),
     }
 
 

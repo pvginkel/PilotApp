@@ -9,33 +9,48 @@ the bounds.
   start to the instant before which it ends: a range of days or of quota
   weeks as it stands at the call, a bound written as a date or a time of
   day read in the catalogue's zone; none for all time.
-- The **scope** is what keeps a fact's row: each drill level, and each chip
-  that keeps a dimension's values, or all but them. A fact that lacks a
-  filter's dimension keeps the rows of the conversations whose rows of the
-  first fact that has it pass, among that fact's rows in the window.
+- The **scope** is what keeps a fact's row: each drill level, each chip
+  that keeps a dimension's values, or all but them, and each condition on
+  each item of a measure's grain, the item's figure over all its rows, kept
+  where it passes or, negated, where it fails. A fact that lacks a filter's
+  dimension, or an item condition's grain, keeps the rows of the
+  conversations whose rows of the fact that has it pass, among that fact's
+  rows in the window.
+- The **marks** are the marked chips on values and on each item: they keep
+  nothing, and mark the By's rows that hold a row they keep, and in each
+  sum its part on those rows.
+- A **threshold** on the By's rows keeps, or marks, the rows whose measure,
+  a ratio among them, is past its number; the **outlier rows' chip** keeps,
+  or marks, the rows whose first measure is an outlier among them. Both are
+  judged on the rows in the process (`rows`), and where they keep fewer than
+  all, the plan's `rows` narrows its statements to those kept.
+- A **quick filter** that is on is its chip, marked where its row marks.
 - A **measure** of a figure is its fact's: its items are its grain's, a
   part, none being its fact's own rows, and only the rows its own filters
-  keep. It is refused where its fact has no By.
+  keep. It is refused where its fact has no By, and answered by its
+  **stand-in** where one is: the first figure, on a fact that has the By,
+  that stands for the measure's (`Figure.stands_for`) and takes its
+  aggregate and its grain.
 - A **ratio** is its two measures, each planned so; one by its key has the
   sides the catalogue writes.
-- The chips the statements do not apply, a threshold on the By's rows, a
-  condition on each item, the outlier rows' chip and a marked chip, and the
-  quick filters that are on, the plan carries as the state writes them.
 """
 
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, date, datetime, time, timedelta
-from typing import Any
+from typing import Any, Literal
 from zoneinfo import ZoneInfo
 
 from app.dashboard.address import fixed
 from app.dashboard.catalogue import Catalogue
-from app.dashboard.reading import read_simple
+from app.dashboard.reading import read_chip, read_simple
 from app.dashboard.state import (
     Between,
     Bound,
+    Chip,
     Focus,
+    OnItems,
+    OnRows,
     Pin,
     Preset,
     RatioKey,
@@ -46,9 +61,9 @@ from app.dashboard.state import (
     Weeks,
     WrittenRatio,
     chip_key,
-    enc,
     instant,
     measure_key,
+    number,
     simple_key,
     write_value,
 )
@@ -76,15 +91,40 @@ class Condition:
         return f"{'!' if self.negated else ''}{self.dimension}:{values}"
 
 
+Kept = Condition | OnItems
+"""What keeps a fact's row: a dimension's values, or each item of a
+measure's grain whose figure is past a number."""
+
+
+def written(kept: Kept) -> str:
+    """What keeps a row as a chip writes it, with no mark."""
+    if isinstance(kept, Condition):
+        return kept.written()
+    return chip_key(replace(kept, marked=False))
+
+
 @dataclass(frozen=True)
 class Planned:
     """A measure of a figure: the fact that answers it, the part its items
-    are, none being its fact's own rows, and why it is refused, where it is."""
+    are, none being its fact's own rows, why it is refused, where it is, and
+    the measure that stands in for it, where one does, which its fact's
+    rows then answer."""
 
     measure: Simple
     fact: str
     grain: str | None
     refused: str | None = None
+    stand_in: Simple | None = None
+
+    @property
+    def answered(self) -> Simple:
+        """The measure its statements answer: its stand-in, else itself."""
+        return self.stand_in or self.measure
+
+    @property
+    def answers(self) -> bool:
+        """Whether its statements answer it, itself or its stand-in."""
+        return self.refused is None or self.stand_in is not None
 
 
 @dataclass(frozen=True)
@@ -99,35 +139,77 @@ class PlannedRatio:
 Measured = Planned | PlannedRatio
 
 
+def sides(measured: Measured) -> tuple[Planned, ...]:
+    """The measures of a figure a measure reads: a ratio's two, else itself."""
+    if isinstance(measured, PlannedRatio):
+        return (measured.numerator, measured.denominator)
+    return (measured,)
+
+
+@dataclass(frozen=True)
+class Threshold:
+    """A threshold on the By's rows: those whose measure is past `number`
+    kept, or marked."""
+
+    measured: Measured
+    operator: str
+    number: float
+    marked: bool = False
+
+    def passes(self, value: float | None) -> bool:
+        """Whether a row's value of the measure is past the number: none is
+        not."""
+        if value is None:
+            return False
+        return {
+            "gt": value > self.number,
+            "ge": value >= self.number,
+            "lt": value < self.number,
+            "le": value <= self.number,
+        }[self.operator]
+
+
+Judged = Literal["keep", "mark"]
+
+
 @dataclass(frozen=True)
 class Plan:
     """What a view's statements read: its time as the state names it and as
-    a window, the By, the color, the focus, the scope, each measure, and the
-    chips and quick filters the statements leave to what follows them."""
+    a window, the By, the color, the focus, the scope, each measure, the
+    marks, the thresholds on the By's rows and the outlier rows' chip, and
+    `rows`, the By's values its statements are narrowed to, none where they
+    are not."""
 
     time: Time
     window: Window
     by: str
     color: str | None
     focus: Focus | None
-    scope: tuple[Condition, ...]
+    scope: tuple[Kept, ...]
     measures: tuple[Measured, ...]
-    after: tuple[str, ...]
+    marks: tuple[Kept, ...] = ()
+    thresholds: tuple[Threshold, ...] = ()
+    outliers: Judged | None = None
+    rows: tuple[Value, ...] | None = None
 
     @property
     def simples(self) -> tuple[Planned, ...]:
         """Every measure of a figure the plan reads, a ratio's sides among
-        them, once each, in the order the state names them."""
+        them, once each: the view's in the order the state names them, then
+        the thresholds'."""
         found: dict[Simple, Planned] = {}
-        for measured in self.measures:
-            sides = (
-                (measured.numerator, measured.denominator)
-                if isinstance(measured, PlannedRatio)
-                else (measured,)
-            )
-            for side in sides:
+        for measured in (
+            *self.measures,
+            *(threshold.measured for threshold in self.thresholds),
+        ):
+            for side in sides(measured):
                 found.setdefault(side.measure, side)
         return tuple(found.values())
+
+    @property
+    def judges(self) -> bool:
+        """Whether a threshold or the outlier rows' chip judges its rows."""
+        return bool(self.thresholds) or self.outliers is not None
 
 
 def plan(
@@ -135,29 +217,57 @@ def plan(
 ) -> Plan:
     """The plan of a checked state's rows, its time as it stands at `now`,
     `weeks` the quota weeks the record holds in the order they start."""
-    scope = tuple(
+    chips = state.chips + _quick_filters(state, catalogue, weeks)
+    scope: list[Kept] = [
         Condition(level.dimension, (level.value,)) for level in state.levels
-    ) + tuple(
-        Condition(chip.dimension, chip.values, chip.negated)
-        for chip in state.chips
-        if isinstance(chip, Pin) and not chip.marked
-    )
-    after = tuple(
-        chip_key(chip)
-        for chip in state.chips
-        if not isinstance(chip, Pin) or chip.marked
-    ) + tuple(f"b={enc(key)}" for key in state.quick_filters)
+    ]
+    marks: list[Kept] = []
+    thresholds: list[Threshold] = []
+    outliers: Judged | None = None
+    for chip in chips:
+        if isinstance(chip, Pin):
+            condition = Condition(chip.dimension, chip.values, chip.negated)
+            (marks if chip.marked else scope).append(condition)
+        elif isinstance(chip, OnItems):
+            (marks if chip.marked else scope).append(replace(chip, marked=False))
+        elif isinstance(chip, OnRows):
+            thresholds.append(
+                Threshold(
+                    _measured(chip.measure, state.by, catalogue, weeks),
+                    chip.operator,
+                    chip.number,
+                    chip.marked,
+                )
+            )
+        else:
+            outliers = "keep" if outliers == "keep" or not chip.marked else "mark"
     return Plan(
         time=state.time,
         window=window(state.time, catalogue, weeks, now),
         by=state.by,
         color=state.color,
         focus=state.focus,
-        scope=scope,
+        scope=tuple(scope),
         measures=tuple(
             _measured(measure, state.by, catalogue, weeks) for measure in state.measures
         ),
-        after=after,
+        marks=tuple(marks),
+        thresholds=tuple(thresholds),
+        outliers=outliers,
+    )
+
+
+def _quick_filters(
+    state: State, catalogue: Catalogue, weeks: Sequence[Period]
+) -> tuple[Chip, ...]:
+    """The chip of each quick filter that is on, marked where its row
+    marks."""
+    held = {quick_filter.key: quick_filter for quick_filter in catalogue.quick_filters}
+    return tuple(
+        replace(
+            read_chip(held[key].condition, catalogue, weeks), marked=held[key].marks
+        )
+        for key in state.quick_filters
     )
 
 
@@ -185,10 +295,39 @@ def _measured(
 def _planned(measure: Simple, by: str, catalogue: Catalogue) -> Planned:
     figure = catalogue.figure(measure.figure)
     fact = catalogue.fact(figure.fact)
-    refused = None
-    if fact.key not in catalogue.offered(by):
-        refused = f"{figure.key} is a figure of {fact.many}, which have no {by}"
-    return Planned(measure, fact.key, measure.grain, refused)
+    offered = catalogue.offered(by)
+    if fact.key in offered:
+        return Planned(measure, fact.key, measure.grain)
+    refused = f"{figure.key} is a figure of {fact.many}, which have no {by}"
+    stand_in = _stand_in(measure, offered, catalogue)
+    if stand_in is None:
+        return Planned(measure, fact.key, measure.grain, refused)
+    return Planned(
+        measure,
+        catalogue.figure(stand_in.figure).fact,
+        measure.grain,
+        refused,
+        stand_in,
+    )
+
+
+def _stand_in(
+    measure: Simple, offered: Sequence[str], catalogue: Catalogue
+) -> Simple | None:
+    """The measure that stands in for `measure` on a fact among `offered`:
+    the first figure that stands for its figure there and takes its
+    aggregate and its grain, under its filters."""
+    for figure in catalogue.figures:
+        if figure.stands_for != measure.figure or figure.fact not in offered:
+            continue
+        if measure.aggregate not in catalogue.aggregates_of(figure):
+            continue
+        if measure.grain is not None and figure.fact not in catalogue.offered(
+            measure.grain
+        ):
+            continue
+        return replace(measure, figure=figure.key)
+    return None
 
 
 def window(
@@ -231,8 +370,9 @@ def described(found: Plan, joins: Sequence[dict[str, Any]]) -> dict[str, Any]:
     """The plan as the file of states holds the query a state means: its
     time, a range by its key as written, else its spans' instants; its By,
     color and scope; each measure with its fact and the part its items are,
-    or why it is refused; `joins`, its statements as `statements.described`
-    gives them; and the chips and quick filters its statements leave."""
+    or why it is refused and what stands in for it; `joins`, its statements
+    as `statements.described` gives them; and its marks, its thresholds,
+    each with what it keeps or marks, and the outlier rows' chip."""
     query: dict[str, Any] = {
         "time": (
             found.time.key
@@ -247,11 +387,23 @@ def described(found: Plan, joins: Sequence[dict[str, Any]]) -> dict[str, Any]:
     }
     if found.focus is not None:
         query["focus"] = f"{found.focus.dimension}:{write_value(found.focus.key)}"
-    query["scope"] = [condition.written() for condition in found.scope]
+    query["scope"] = [written(kept) for kept in found.scope]
     query["measures"] = [_described(measured) for measured in found.measures]
     query["statements"] = list(joins)
-    if found.after:
-        query["after"] = list(found.after)
+    if found.marks:
+        query["marks"] = [written(kept) for kept in found.marks]
+    if found.thresholds:
+        query["thresholds"] = [
+            {
+                "marks" if threshold.marked else "keeps": (
+                    f"{threshold.operator},{number(threshold.number)}"
+                ),
+                "measure": _described(threshold.measured),
+            }
+            for threshold in found.thresholds
+        ]
+    if found.outliers is not None:
+        query["outliers"] = found.outliers
     return query
 
 
@@ -269,4 +421,6 @@ def _described(measured: Measured) -> dict[str, Any]:
         entry["items"] = measured.grain
     if measured.refused is not None:
         entry["refused"] = measured.refused
+    if measured.stand_in is not None:
+        entry["stand_in"] = simple_key(measured.stand_in)
     return entry

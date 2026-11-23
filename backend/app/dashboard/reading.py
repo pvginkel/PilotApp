@@ -154,8 +154,9 @@ def read_simple(written: str, catalogue: Catalogue, weeks: Sequence[Period]) -> 
 
 def read_chip(written: str, catalogue: Catalogue, weeks: Sequence[Period]) -> Chip:
     """One chip as a state writes it, a quick filter's condition among them;
-    `StateRefusedException` where it has a fault."""
-    reader = _Reader(catalogue, weeks)
+    `StateRefusedException` where it has a fault, a ratio by a key that is
+    gone among them, since a chip alone has nothing to drop it from."""
+    reader = _Reader(catalogue, weeks, alone=True)
     chip = reader.chip(_Part(0, f"c={written}", "c", written))
     reader.done()
     assert chip is not None
@@ -163,8 +164,11 @@ def read_chip(written: str, catalogue: Catalogue, weeks: Sequence[Period]) -> Ch
 
 
 class _Reader:
-    def __init__(self, catalogue: Catalogue, weeks: Sequence[Period]) -> None:
+    def __init__(
+        self, catalogue: Catalogue, weeks: Sequence[Period], alone: bool = False
+    ) -> None:
         self.catalogue = catalogue
+        self.alone = alone
         self.weeks = tuple(weeks)
         self.starts = {week.starts_at: week for week in self.weeks}
         self.dimensions = {
@@ -599,7 +603,7 @@ class _Reader:
         measures: list[Measure] = []
         gone: set[str] = set()
         for part in parts:
-            measure = self.measure(part, gone)
+            measure = self.measure(part, part.value, gone)
             if measure is not None:
                 measures.append(measure)
         if parts and not measures and gone:
@@ -609,8 +613,11 @@ class _Reader:
             )
         return tuple(measures) or State().measures, gone
 
-    def measure(self, part: _Part, gone: set[str]) -> Measure | None:
-        written = part.value
+    def measure(
+        self, part: _Part, written: str, gone: set[str], dropped: str = "measure"
+    ) -> Measure | None:
+        """A measure, a ratio among them; one by a key that is gone added to
+        `gone` and dropped with a note that names what is dropped with it."""
         if not written.startswith("r:"):
             return self.simple(part, written)
         rest = written[2:]
@@ -622,10 +629,18 @@ class _Reader:
             if not rest:
                 self.fault(part, "r: names no ratio")
                 return None
-            gone.add(written)
             near = nearest(rest, keys)
+            if self.alone:
+                self.fault(
+                    part,
+                    f'no ratio has the key "{rest}"',
+                    near,
+                    "The catalogue's measures list the ratios",
+                )
+                return None
+            gone.add(written)
             self.notes.append(
-                f'{part.written}: no ratio has the key "{rest}", so the measure is '
+                f'{part.written}: no ratio has the key "{rest}", so the {dropped} is '
                 "dropped."
                 + (
                     f" Did you mean {listed([f'"{key}"' for key in near], 'or')}?"
@@ -871,11 +886,15 @@ class _Reader:
         threshold = _number(written_number)
         if threshold is None:
             self.fault(part, f'"{written_number}" is no number')
-        simple = self.simple(part, ",".join(measure))
+        written_measure = ",".join(measure)
+        if kind == "rows":
+            on_rows = self.measure(part, written_measure, set(), "chip")
+            if operator not in OPERATORS or threshold is None or on_rows is None:
+                return None
+            return OnRows(operator, threshold, on_rows, marked)
+        simple = self.simple(part, written_measure)
         if operator not in OPERATORS or threshold is None or simple is None:
             return None
-        if kind == "rows":
-            return OnRows(operator, threshold, simple, marked)
         return OnItems(operator, threshold, simple, negated, marked)
 
     def quick_filters(self, part: _Part) -> tuple[str, ...]:
@@ -969,7 +988,7 @@ class _Reader:
         columns = [*OWN_COLUMNS, *(measure_key(measure) for measure in measures)]
         if column not in columns:
             quiet = _Reader(self.catalogue, self.weeks)
-            read = quiet.measure(_Part(0, "", "m", column), set())
+            read = quiet.measure(_Part(0, "", "m", column), column, set())
             if read is not None and not quiet.faults and measure_key(read) in columns:
                 column = measure_key(read)
             else:

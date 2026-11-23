@@ -1,7 +1,11 @@
 """The statements of a view's rows: one grouped scan per fact, a statement
-per fact and grain for the measures over a part's items, which measures
-stack, and each statement as the file of states holds it."""
+per fact and grain for the measures over a part's items, a marks statement
+per fact where a chip marks, which measures add up and stack, a stand-in's
+fact, the By's values a plan is narrowed to, and each statement as the file
+of states holds it."""
 
+import uuid
+from dataclasses import replace
 from datetime import UTC, datetime
 
 import pytest
@@ -11,7 +15,15 @@ from app.dashboard.catalogue import Catalogue
 from app.dashboard.planner import Plan, Planned, plan
 from app.dashboard.reading import read
 from app.dashboard.state import Simple
-from app.dashboard.statements import Items, Scan, described, stacks, statements
+from app.dashboard.statements import (
+    Items,
+    Marked,
+    Scan,
+    adds,
+    described,
+    stacks,
+    statements,
+)
 from tests.support.dashboard import catalogue
 
 NOW = datetime(2026, 11, 20, tzinfo=UTC)
@@ -58,6 +70,40 @@ class TestStacks:
         planned = Planned(Simple("cost", "sum"), "call", None, "refused")
 
         assert stacks(planned, "model", held) is False
+
+    def test_as_its_stand_in_where_one_stands_in(self, held: Catalogue) -> None:
+        planned = Planned(
+            Simple("reported_cost", "sum"),
+            "call",
+            None,
+            "refused",
+            Simple("cost", "sum"),
+        )
+
+        assert stacks(planned, "model", held) is True
+
+
+class TestAdds:
+    @pytest.mark.parametrize(
+        ("measure", "added"),
+        [
+            (Simple("cost", "sum"), True),
+            (Simple("cost", "sum", "conversation"), True),
+            (Simple("calls", "count"), True),
+            (Simple("calls", "count", "conversation"), False),
+            (Simple("cost", "median"), False),
+            (Simple("ctx", "sum"), False),
+        ],
+    )
+    def test_a_sum_or_a_count_of_rows_of_a_figure_that_stacks(
+        self, held: Catalogue, measure: Simple, added: bool
+    ) -> None:
+        assert adds(Planned(measure, "call", measure.grain), held) is added
+
+    def test_not_where_it_is_refused(self, held: Catalogue) -> None:
+        planned = Planned(Simple("turns", "count"), "turn", None, "refused")
+
+        assert adds(planned, held) is False
 
 
 class TestStatements:
@@ -112,6 +158,62 @@ class TestStatements:
     ) -> None:
         assert statements(_plan(held, "by=model&m=turns.count"), held) == ()
 
+    def test_a_marks_statement_per_fact_the_views_measures_read(
+        self, held: Catalogue
+    ) -> None:
+        found = statements(
+            _plan(
+                held,
+                "m=cost.sum&m=cost.median&m=turns.count&c=~miss:1"
+                "&c=@rows,gt,1,events.count",
+            ),
+            held,
+        )
+
+        marked = [one for one in found if isinstance(one, Marked)]
+        assert [(one.fact, one.measures) for one in marked] == [
+            ("call", (0,)),
+            ("turn", (2,)),
+        ]
+        assert [type(one).__name__ for one in found[-2:]] == ["Marked", "Marked"]
+
+    def test_none_with_no_chip_that_marks(self, held: Catalogue) -> None:
+        found = statements(_plan(held, "c=~@rows,gt,1,cost.sum&c=~@outliers"), held)
+
+        assert not any(isinstance(one, Marked) for one in found)
+
+    def test_a_stand_in_is_answered_by_its_own_fact(self, held: Catalogue) -> None:
+        standing = replace(
+            held,
+            figures=tuple(
+                replace(figure, stands_for="reported_cost")
+                if figure.key == "cost"
+                else figure
+                for figure in held.figures
+            ),
+        )
+
+        found = statements(_plan(standing, "by=model&m=reported_cost.sum"), standing)
+
+        assert [(type(one).__name__, one.fact, one.measures) for one in found] == [
+            ("Scan", "call", (0,)),
+        ]
+
+    def test_the_bys_values_it_is_narrowed_to_are_one_array(
+        self, held: Catalogue
+    ) -> None:
+        kept = (*(uuid.uuid4() for _ in range(3_000)), None)
+        narrowed = replace(_plan(held, "t=all&by=psession"), rows=kept)
+
+        scan = statements(narrowed, held)[0]
+        compiled = scan.select.compile()
+
+        assert "= ANY (" in str(compiled)
+        assert "IS NULL" in str(compiled)
+        assert [
+            list(value) for value in compiled.params.values() if isinstance(value, list)
+        ] == [list(kept[:-1])]
+
     def test_an_items_statement_groups_by_its_items(self, held: Catalogue) -> None:
         found = statements(_plan(held, "m=cost.max.conversation"), held)[1]
 
@@ -142,3 +244,16 @@ class TestDescribed:
                 "through": {"event_kind": "event"},
             },
         ]
+
+    def test_a_marks_statement_and_an_item_condition_through_conversations(
+        self, held: Catalogue
+    ) -> None:
+        found = _plan(held, "m=turns.count&c=~@items,gt,1,cost.sum")
+
+        assert described(found, held)[-1] == {
+            "fact": "turn",
+            "marks": True,
+            "grouping": [["project"]],
+            "joins": ["session", "thread", "main", "project"],
+            "through": {"@items,gt,1,cost.sum": "call"},
+        }

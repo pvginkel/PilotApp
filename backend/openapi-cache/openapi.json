@@ -12773,7 +12773,7 @@
             "type": "array"
           },
           "rows": {
-            "description": "The By's rows, in the sort",
+            "description": "The By's rows, in the sort: those a threshold or the outlier rows' chip keeps, where one does",
             "items": {
               "$ref": "#/components/schemas/RowsResponseSchema.b67cf98.ByRowSchema"
             },
@@ -12876,6 +12876,33 @@
             "description": "Its label; null where the key is its own, as a date or a time",
             "title": "Label"
           },
+          "marked": {
+            "description": "Whether every mark holds on it: each marked threshold, the outlier rows' chip where it marks, and a row a marked chip keeps",
+            "title": "Marked",
+            "type": "boolean"
+          },
+          "marks": {
+            "anyOf": [
+              {
+                "items": {
+                  "anyOf": [
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Where a chip marks values or each item, each measure's part on the rows it marks, 0 on a row not marked, the All row's the sum of its rows'; null for a measure that does not add up",
+            "title": "Marks"
+          },
           "n": {
             "description": "Each measure's items with a value here",
             "items": {
@@ -12929,9 +12956,11 @@
           "values",
           "n",
           "split",
+          "marks",
           "key",
           "label",
-          "focus"
+          "focus",
+          "marked"
         ],
         "title": "ByRowSchema",
         "type": "object"
@@ -13037,6 +13066,28 @@
       "RowsResponseSchema.b67cf98.LineSchema": {
         "description": "The All row: each measure's value, in the view's order.",
         "properties": {
+          "marks": {
+            "anyOf": [
+              {
+                "items": {
+                  "anyOf": [
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Where a chip marks values or each item, each measure's part on the rows it marks, 0 on a row not marked, the All row's the sum of its rows'; null for a measure that does not add up",
+            "title": "Marks"
+          },
           "n": {
             "description": "Each measure's items with a value here",
             "items": {
@@ -13089,7 +13140,8 @@
         "required": [
           "values",
           "n",
-          "split"
+          "split",
+          "marks"
         ],
         "title": "LineSchema",
         "type": "object"
@@ -13146,6 +13198,7 @@
             "title": "Aggregate"
           },
           "format": {
+            "description": "The format of what is answered",
             "enum": [
               "usd",
               "tokens",
@@ -13202,13 +13255,24 @@
                 "type": "null"
               }
             ],
-            "description": "Why it is not answered, where it is not: its values are null",
+            "description": "Why the By refuses it, where it does: its values are its stand-in's, or null where none stands in",
             "title": "Refused"
           },
           "stacks": {
             "description": "Whether it splits by the color, each row's `split` holding it",
             "title": "Stacks",
             "type": "boolean"
+          },
+          "stand_in": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RowsResponseSchema.b67cf98.StandInSchema"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The measure answered in its place, where it is refused"
           }
         },
         "required": [
@@ -13219,6 +13283,7 @@
           "grain",
           "stacks",
           "refused",
+          "stand_in",
           "median"
         ],
         "title": "RowsMeasureSchema",
@@ -13283,6 +13348,30 @@
           "end"
         ],
         "title": "SpanSchema",
+        "type": "object"
+      },
+      "RowsResponseSchema.b67cf98.StandInSchema": {
+        "description": "The measure answered in a refused one's place.",
+        "properties": {
+          "key": {
+            "description": "It as the view's normal form writes a measure",
+            "examples": [
+              "kind_cost.sum"
+            ],
+            "title": "Key",
+            "type": "string"
+          },
+          "label": {
+            "description": "Its figure's label, or its ratio's",
+            "title": "Label",
+            "type": "string"
+          }
+        },
+        "required": [
+          "key",
+          "label"
+        ],
+        "title": "StandInSchema",
         "type": "object"
       },
       "SSEOutageQuerySchema.6b6ce9f": {

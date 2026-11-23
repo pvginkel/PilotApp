@@ -1,6 +1,9 @@
 """A view's rows (F154.1, F154.3): each measure on every row of the By and on
 the All row, with the split by the color, answered from the record at the
-query under the engine's bounds (F154.5).
+query under the engine's bounds (F154.5); a threshold on the By's rows and
+the outlier rows' chip narrowing the rows and the All row (D5), a condition
+on each item, the marks, the quick filters that are on, and a refused
+measure's stand-in.
 
 The record is `tests.support.dashboard.record`'s: on the project Recipe box,
 a work item's thread of three Calls, 0.50, 0.25 and 1.00, with its sub-agent's
@@ -8,6 +11,7 @@ Call of 0.10, and a chat's Turn of 0.75 standing in, its conversation never
 collected; and on no project a thread of one Call of 0.05, a day later.
 """
 
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 
 import pytest
@@ -15,8 +19,9 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session as DbSession
 
 from app import models
+from app.dashboard import assembly
 from app.dashboard import rows as rows_module
-from app.dashboard.rows import ByRow, ColorValue, Rows, RowsService
+from app.dashboard.rows import ByRow, ColorValue, Rows, RowsService, StandIn
 from app.dashboard.state import Sort
 from app.exceptions import QueryRefusedException, StateRefusedException
 from app.models import Project, User
@@ -394,11 +399,399 @@ class TestAnswer:
         with pytest.raises(StateRefusedException):
             _rows(service, "by=nothing")
 
-    def test_what_its_statements_do_not_apply_it_does_not_answer_yet(
+    def test_with_no_chip_that_marks_no_row_is_marked_and_no_part_is(
         self, service: RowsService
     ) -> None:
-        with pytest.raises(NotImplementedError, match="@outliers"):
-            _rows(service, "c=@outliers")
+        found = _rows(service, "t=all&by=psession")
+
+        assert not any(row.marked for row in found.rows)
+        assert all(line.marks is None for line in (found.all, *found.rows))
+
+
+@pytest.mark.usefixtures("worked")
+class TestThreshold:
+    def test_it_keeps_the_rows_that_pass_and_the_all_row_counts_them(
+        self, service: RowsService, worked: Record
+    ) -> None:
+        found = _rows(service, "t=all&by=conversation&c=@rows,gt,0.5,cost.sum")
+
+        assert set(_by_key(found)) == {worked.thread.id, None}
+        assert found.total_rows == 2
+        assert _round(found.all.values) == (2.5,)
+        assert found.all.n == (4,)
+        assert not any(row.marked for row in found.rows)
+
+    def test_its_measure_need_not_be_the_views(
+        self, service: RowsService, worked: Record
+    ) -> None:
+        found = _rows(
+            service, "t=all&by=conversation&m=calls.count&c=@rows,gt,0.5,cost.sum"
+        )
+
+        assert {key: row.values for key, row in _by_key(found).items()} == {
+            worked.thread.id: (3,),
+            None: (1,),
+        }
+        assert found.all.values == (4,)
+        assert [measure.key for measure in found.measures] == ["calls.count"]
+
+    def test_the_all_row_is_answered_again_from_the_rows_kept(
+        self, service: RowsService
+    ) -> None:
+        kept = _rows(
+            service, "t=all&by=conversation&m=cost.median&c=@rows,gt,0.5,cost.sum"
+        )
+        every = _rows(service, "t=all&by=conversation&m=cost.median")
+
+        assert _round(kept.all.values) == (0.625,)
+        assert _round(every.all.values) == (0.375,)
+
+    def test_on_a_ratio(self, service: RowsService, worked: Record) -> None:
+        found = _rows(service, "t=all&by=psession&c=@rows,lt,0.5,r:per_call")
+
+        assert set(_by_key(found)) == {worked.work.id, None}
+        assert _round(found.all.values) == (1.9,)
+
+    def test_a_row_with_no_value_of_its_measure_fails_it(
+        self, service: RowsService
+    ) -> None:
+        found = _rows(service, "t=all&by=model&c=@rows,ge,0,turns.count")
+
+        assert found.rows == ()
+        assert found.all.values == (None,)
+        assert found.total_rows == 0
+
+    def test_one_no_row_passes_keeps_none_and_reads_nothing_again(
+        self, service: RowsService, session: DbSession
+    ) -> None:
+        with sent(session) as statements:
+            found = _rows(service, "t=all&c=@rows,gt,100,cost.sum")
+
+        read = statements[statements.index("SET TRANSACTION READ ONLY") :]
+        assert found.rows == ()
+        assert found.all.values == (None,)
+        assert len([one for one in read if one.startswith("SELECT")]) == 1
+
+    def test_a_color_splits_the_rows_kept_alone(
+        self, service: RowsService, worked: Record
+    ) -> None:
+        found = _rows(
+            service, "t=all&by=conversation&col=model&c=@rows,gt,0.5,cost.sum"
+        )
+
+        assert found.color is not None
+        assert [round(value.total or 0, 6) for value in found.color.values] == [
+            1.75,
+            0.75,
+        ]
+        assert found.all.split is not None
+        assert _round(found.all.split[0] or ()) == (1.75, 0.75)
+
+    def test_one_that_marks_keeps_every_row_and_marks_those_that_pass(
+        self, service: RowsService, worked: Record
+    ) -> None:
+        found = _rows(service, "t=all&by=psession&c=~@rows,gt,0.5,cost.sum")
+
+        rows = _by_key(found)
+        assert set(rows) == {worked.work.id, worked.chat.id, None}
+        assert {key: row.marked for key, row in rows.items()} == {
+            worked.work.id: True,
+            worked.chat.id: True,
+            None: False,
+        }
+        assert _round(found.all.values) == (2.65,)
+        assert found.all.marks is None
+
+
+@pytest.mark.usefixtures("worked")
+class TestEachItem:
+    def test_on_its_facts_own_rows_the_rows_that_pass(
+        self, service: RowsService, worked: Record
+    ) -> None:
+        found = _rows(service, "t=all&by=psession&c=@items,gt,0.4,cost.sum")
+
+        assert {key: _round(row.values) for key, row in _by_key(found).items()} == {
+            worked.work.id: (1.5,),
+            worked.chat.id: (0.75,),
+        }
+        assert _round(found.all.values) == (2.25,)
+
+    def test_negated_the_rows_that_fail(
+        self, service: RowsService, worked: Record
+    ) -> None:
+        found = _rows(service, "t=all&by=psession&c=!@items,gt,0.4,cost.sum")
+
+        assert {key: _round(row.values) for key, row in _by_key(found).items()} == {
+            worked.work.id: (0.35,),
+            None: (0.05,),
+        }
+
+    def test_on_a_part_the_items_whose_figure_passes(
+        self, service: RowsService, worked: Record
+    ) -> None:
+        found = _rows(
+            service, "t=all&by=conversation&c=@items,gt,1,cost.sum.conversation"
+        )
+
+        assert set(_by_key(found)) == {worked.thread.id}
+        assert _round(found.all.values) == (1.75,)
+
+    def test_an_items_figure_is_over_all_its_rows_not_the_windows(
+        self, service: RowsService, worked: Record
+    ) -> None:
+        found = _rows(
+            service,
+            "t=c,2026-11-12T00%3A00,2026-11-12T11%3A00&by=project"
+            "&c=@items,gt,2,cost.sum.project",
+        )
+
+        assert {key: _round(row.values) for key, row in _by_key(found).items()} == {
+            worked.project.id: (1.85,)
+        }
+
+    def test_its_own_filters_keep_the_items_rows(
+        self, service: RowsService, worked: Record
+    ) -> None:
+        found = _rows(
+            service, "t=all&by=psession&c=@items,gt,1,cost.sum.psession(!miss=1)"
+        )
+
+        assert set(_by_key(found)) == set()
+        kept = _rows(
+            service, "t=all&by=psession&c=@items,gt,0.8,cost.sum.psession(!miss=1)"
+        )
+        assert set(_by_key(kept)) == {worked.work.id}
+
+    def test_on_a_fact_that_lacks_its_part_through_its_conversations(
+        self, service: RowsService, worked: Record
+    ) -> None:
+        own = _rows(service, "t=all&by=psession&m=turns.count&c=@items,gt,0.6,cost.sum")
+        part = _rows(
+            service, "t=all&by=psession&m=turns.count&c=@items,gt,1,cost.sum.psession"
+        )
+
+        assert {key: row.values for key, row in _by_key(own).items()} == {
+            worked.work.id: (1,)
+        }
+        assert {key: row.values for key, row in _by_key(part).items()} == {
+            worked.work.id: (1,)
+        }
+
+
+@pytest.mark.usefixtures("worked")
+class TestMarks:
+    def test_a_marked_chip_marks_the_rows_that_hold_what_it_names(
+        self, service: RowsService, worked: Record
+    ) -> None:
+        found = _rows(
+            service,
+            "t=all&by=psession&m=cost.sum&m=calls.count&m=cost.median&c=~miss:1",
+        )
+
+        rows = _by_key(found)
+        assert set(rows) == {worked.work.id, worked.chat.id, None}
+        assert {key: row.marked for key, row in rows.items()} == {
+            worked.work.id: True,
+            worked.chat.id: False,
+            None: False,
+        }
+        assert rows[worked.work.id].marks == (1.0, 1.0, None)
+        assert rows[worked.chat.id].marks == (0.0, 0.0, None)
+        assert _round(rows[worked.work.id].values) == (1.85, 4, 0.375)
+        assert found.all.marks == (1.0, 1.0, None)
+
+    def test_negated_the_rows_it_does_not_name(
+        self, service: RowsService, worked: Record
+    ) -> None:
+        found = _rows(service, "t=all&by=psession&c=~!miss:1")
+
+        rows = _by_key(found)
+        assert all(row.marked for row in rows.values())
+        assert {key: _round(row.marks or ()) for key, row in rows.items()} == {
+            worked.work.id: (0.85,),
+            worked.chat.id: (0.75,),
+            None: (0.05,),
+        }
+        assert _round(found.all.marks or ()) == (1.65,)
+
+    def test_on_each_item(self, service: RowsService, worked: Record) -> None:
+        found = _rows(service, "t=all&by=psession&c=~@items,gt,0.4,cost.sum")
+
+        rows = _by_key(found)
+        assert {key: _round(row.marks or ()) for key, row in rows.items()} == {
+            worked.work.id: (1.5,),
+            worked.chat.id: (0.75,),
+            None: (0.0,),
+        }
+        assert not rows[None].marked
+
+    def test_a_ratio_and_a_measure_over_items_have_no_part(
+        self, service: RowsService, worked: Record
+    ) -> None:
+        found = _rows(
+            service,
+            "t=all&by=psession&m=r:per_call&m=cost.sum.conversation"
+            "&m=calls.count.conversation&c=~miss:1",
+        )
+
+        assert _by_key(found)[worked.work.id].marks == (None, 1.0, None)
+
+    def test_a_row_is_marked_where_every_mark_holds(self, service: RowsService) -> None:
+        found = _rows(service, "t=all&by=psession&c=~miss:1&c=~@rows,lt,1,cost.sum")
+
+        assert not any(row.marked for row in found.rows)
+        assert found.all.marks == (0.0,)
+
+    def test_under_a_threshold_the_all_rows_part_is_the_rows_kept(
+        self, service: RowsService, worked: Record
+    ) -> None:
+        found = _rows(service, "t=all&by=psession&c=~!miss:1&c=@rows,gt,0.5,cost.sum")
+
+        assert set(_by_key(found)) == {worked.work.id, worked.chat.id}
+        assert _round(found.all.marks or ()) == (1.6,)
+        assert _round(found.all.values) == (2.6,)
+
+
+@pytest.fixture
+def spread(session: DbSession, worked: Record) -> None:
+    """Five more Calls of the work item's thread, each of a cent, so that by
+    the Call the third of the thread's first Calls, of $1.00, is the one
+    outlier among eleven."""
+    session.execute(
+        text(
+            """
+            INSERT INTO calls (transcript_id, message_id, position, completed_at,
+                model_code, input_tokens, cache_write_5m_tokens,
+                cache_write_1h_tokens, cache_read_tokens, output_tokens, cost)
+            SELECT :thread, 'msg_spread_' || n, 100 + n,
+                :at + make_interval(secs => n), :model, 1, 0, 0, 0, 1, 0.01
+            FROM generate_series(1, 5) AS n
+            """
+        ),
+        {"thread": worked.thread.id, "at": STARTED, "model": OPUS},
+    )
+
+
+@pytest.mark.usefixtures("spread")
+class TestOutlierRows:
+    def test_the_chip_keeps_the_rows_whose_first_measure_is_an_outlier(
+        self, service: RowsService, worked: Record
+    ) -> None:
+        found = _rows(service, "t=all&by=call&m=cost.sum&m=calls.count&c=@outliers")
+
+        assert [row.key for row in found.rows] == [worked.calls[2].id]
+        assert found.all.values == (1.0, 1)
+
+    def test_marked_it_keeps_every_row_and_marks_the_outliers(
+        self, service: RowsService, worked: Record
+    ) -> None:
+        found = _rows(service, "t=all&by=call&c=~@outliers")
+
+        assert found.total_rows == 11
+        assert [row.key for row in found.rows if row.marked] == [worked.calls[2].id]
+
+    def test_its_outliers_are_judged_before_a_threshold_drops_a_row(
+        self, service: RowsService, worked: Record
+    ) -> None:
+        found = _rows(service, "t=all&by=call&c=~@outliers&c=@rows,gt,0.2,cost.sum")
+
+        assert found.total_rows == 4
+        assert [row.key for row in found.rows if row.marked] == [worked.calls[2].id]
+
+    def test_as_a_quick_filter(self, service: RowsService, worked: Record) -> None:
+        found = _rows(service, "t=all&by=call&b=outliers")
+
+        assert [row.key for row in found.rows] == [worked.calls[2].id]
+
+
+@pytest.mark.usefixtures("worked")
+class TestQuickFilters:
+    def test_one_that_is_on_filters_as_its_row_says(
+        self, service: RowsService, worked: Record
+    ) -> None:
+        found = _rows(service, "t=all&by=psession&b=misses")
+
+        assert {key: _round(row.values) for key, row in _by_key(found).items()} == {
+            worked.work.id: (1.0,)
+        }
+
+    def test_one_that_marks_marks(
+        self, service: RowsService, session: DbSession, worked: Record
+    ) -> None:
+        session.add(
+            models.QuickFilter(
+                code="marked_misses",
+                label="Marked misses",
+                condition="miss:1",
+                marks=True,
+                saved_at=NOW,
+            )
+        )
+        session.flush()
+
+        found = _rows(service, "t=all&by=psession&b=marked_misses")
+
+        rows = _by_key(found)
+        assert set(rows) == {worked.work.id, worked.chat.id, None}
+        assert [key for key, row in rows.items() if row.marked] == [worked.work.id]
+
+    def test_those_on_together_each_keep_their_rows(self, service: RowsService) -> None:
+        found = _rows(service, "t=all&by=psession&b=misses,expensive")
+
+        assert found.rows == ()
+
+
+@pytest.fixture
+def standing(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The catalogue with the computed cost standing for Pilot's reported
+    cost under a By its Turns have not."""
+    monkeypatch.setattr(
+        assembly,
+        "FIGURES",
+        tuple(
+            replace(figure, stands_for="reported_cost")
+            if figure.key == "cost"
+            else figure
+            for figure in assembly.FIGURES
+        ),
+    )
+
+
+@pytest.mark.usefixtures("worked", "standing")
+class TestStandIn:
+    def test_a_refused_measure_carries_its_stand_ins_values(
+        self, service: RowsService
+    ) -> None:
+        found = _rows(service, "t=all&by=model&m=cost.sum&m=reported_cost.sum")
+
+        stood = found.measures[1]
+        assert stood.key == "reported_cost.sum"
+        assert stood.label == "Pilot's reported cost"
+        assert stood.refused == (
+            "reported_cost is a figure of Pilot turns, which have no model"
+        )
+        assert stood.stand_in == StandIn("cost.sum", "Cost")
+        assert stood.format == "usd"
+        for line in (found.all, *found.rows):
+            assert line.values[1] == line.values[0]
+
+    def test_a_ratio_with_a_side_stood_in_for(self, service: RowsService) -> None:
+        found = _rows(
+            service, "t=all&by=model&m=r:Reported:reported_cost.sum/calls.count"
+        )
+
+        assert found.measures[0].stand_in == StandIn(
+            "r:Reported:cost.sum/calls.count", "Reported"
+        )
+        assert _round(found.all.values) == (round(2.65 / 6, 6),)
+
+    def test_none_stands_in_where_no_figure_stands_for_it(
+        self, service: RowsService
+    ) -> None:
+        found = _rows(service, "t=all&by=model&m=turns.count")
+
+        assert found.measures[0].stand_in is None
+        assert found.all.values == (None,)
 
 
 @pytest.fixture
@@ -417,6 +810,20 @@ def many(session: DbSession, worked: Record) -> None:
         ),
         {"thread": worked.thread.id, "at": STARTED, "model": OPUS},
     )
+
+
+@pytest.mark.usefixtures("many")
+class TestNarrowedToMany:
+    def test_the_all_row_of_thousands_of_rows_kept_binds_them_once(
+        self, service: RowsService, session: DbSession
+    ) -> None:
+        with sent(session) as statements:
+            found = _rows(service, "t=all&by=call&c=@rows,gt,0.5,cost.sum")
+
+        assert found.total_rows == 4_502
+        assert round(found.all.values[0] or 0, 6) == 12_379.0
+        read = statements[statements.index("SET TRANSACTION READ ONLY") :]
+        assert max(len(one) for one in read) < 10_000
 
 
 @pytest.mark.usefixtures("worked")

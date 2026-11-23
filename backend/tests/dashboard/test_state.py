@@ -161,6 +161,21 @@ class TestWrite:
             "c=@outliers",
         ]
 
+    def test_a_threshold_on_the_rows_by_a_ratio(self) -> None:
+        chips = (
+            OnRows("gt", 0.5, RatioKey("per_call")),
+            OnRows(
+                "lt",
+                2,
+                WrittenRatio("Mine", Simple("cost", "sum"), Simple("calls", "count")),
+            ),
+        )
+
+        assert write(State(chips=chips)).split("&")[3:5] == [
+            "c=@rows,gt,0.5,r:per_call",
+            "c=@rows,lt,2,r:Mine:cost.sum/calls.count",
+        ]
+
 
 class TestMeasureKey:
     def test_a_figures_measure_its_grain_and_its_filters(self) -> None:

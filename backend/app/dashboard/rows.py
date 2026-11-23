@@ -18,6 +18,19 @@ it.
   Each row splits each measure that stacks over those values.
 - A measure's `median` is the median of its rows' values, the rows that hold
   the focus left out: the peers' median the Rows draw a tick at.
+- A measure refused names why, and the measure that stands in for it where
+  one does, whose values it then carries.
+- A threshold on the By's rows and the outlier rows' chip are judged on
+  every row before any is dropped; where they keep fewer than all, the All
+  row is answered again from the rows kept, so that it counts what the
+  chart shows (D5). A filter pane's and By's counts keep the scope before
+  them.
+- A row is marked where every mark holds: each marked threshold passes, it
+  is an outlier where the outlier rows' chip marks, and it holds a row the
+  marked chips on values and on each item keep, where there are any. Under
+  those chips each measure that adds up has its marked part, on a row that
+  is marked, and 0 on one that is not; the All row's is the sum of its
+  rows'.
 - Times are instants with the engine's zone beside them, never text, which
   the page writes: the window's spans, and a key of the By or of the color
   that is a time.
@@ -27,7 +40,7 @@ from __future__ import annotations
 
 import statistics
 from collections.abc import Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
@@ -38,6 +51,7 @@ from app.dashboard.address import Address, AddressService
 from app.dashboard.assembly import ratio_format
 from app.dashboard.bounds import Bounds
 from app.dashboard.catalogue import COUNT, Catalogue, Dimension, Format
+from app.dashboard.outliers import outliers
 from app.dashboard.planner import Plan, Planned, PlannedRatio, Window, plan
 from app.dashboard.state import (
     OWN_COLUMNS,
@@ -45,9 +59,19 @@ from app.dashboard.state import (
     RatioKey,
     Sort,
     Value,
+    WrittenRatio,
     measure_key,
+    simple_key,
 )
-from app.dashboard.statements import Items, Scan, Statement, stacks, statements
+from app.dashboard.statements import (
+    Items,
+    Marked,
+    Scan,
+    Statement,
+    adds,
+    stacks,
+    statements,
+)
 
 ROWS = 2_000
 """The rows an answer carries at most."""
@@ -59,9 +83,20 @@ TOKEN_KIND_LABEL = "Token kind"
 
 
 @dataclass(frozen=True)
+class StandIn:
+    """The measure answered in a refused one's place: its key as the normal
+    form writes it, and its label."""
+
+    key: str
+    label: str
+
+
+@dataclass(frozen=True)
 class Measure:
     """A measure as the rows answer it: `key` as the normal form writes it,
-    `aggregate` and `grain` none for a ratio, `refused` why where it is."""
+    `aggregate` and `grain` none for a ratio, `refused` why where it is, and
+    `stand_in` what is answered in its place, where anything is; `format`
+    that of what is answered."""
 
     key: str
     label: str
@@ -71,6 +106,7 @@ class Measure:
     stacks: bool
     refused: str | None
     median: float | None
+    stand_in: StandIn | None = None
 
 
 @dataclass(frozen=True)
@@ -94,12 +130,14 @@ class Color:
 @dataclass(frozen=True)
 class Line:
     """The All row or a row of the By: each measure's value and its items
-    with one, and each measure's split over the color's values, none for one
-    that does not stack."""
+    with one, each measure's split over the color's values, none for one
+    that does not stack, and, where a chip marks a fact's rows, each
+    measure's marked part, none for one that does not add up."""
 
     values: tuple[float | None, ...]
     n: tuple[int, ...]
     split: tuple[tuple[float, ...] | None, ...] | None
+    marks: tuple[float | None, ...] | None = None
 
 
 @dataclass(frozen=True)
@@ -107,6 +145,7 @@ class ByRow(Line):
     key: Value = None
     label: str | None = None
     focus: bool = False
+    marked: bool = False
 
 
 @dataclass(frozen=True)
@@ -135,6 +174,13 @@ class _Taken:
     name: str | None = None
     axis: Any = None
     focus: bool = False
+    marked: dict[int, Any] = field(default_factory=dict)
+    """Each marking measure's part under the marks."""
+    held: int = 0
+    """The rows the marks keep."""
+    judged: bool = True
+    """Whether every marked threshold passes, and it is an outlier where
+    the outlier rows' chip marks."""
 
 
 class RowsService:
@@ -158,17 +204,20 @@ class RowsService:
         found = plan(
             view.address.state, view.catalogue, view.weeks, now or datetime.now(UTC)
         )
-        if found.after:
-            raise NotImplementedError(
-                "The rows apply no threshold, item condition, outlier rows' "
-                "chip, marked chip or quick filter yet: " + ", ".join(found.after)
-            )
-        built = statements(found, view.catalogue)
+        shaper = _Shaper(view.catalogue, found, view.address)
         with self.bounds.read(self.db) as db:
-            answers = [
-                (statement, db.execute(statement.select).all()) for statement in built
-            ]
-        return _Shaper(view.catalogue, found, view.address).shaped(answers)
+            shaper.take(_ran(db, statements(found, view.catalogue)))
+            kept = shaper.judge()
+            if kept:
+                narrowed = replace(found, rows=kept, marks=())
+                shaper.take(_ran(db, statements(narrowed, view.catalogue)), whole=True)
+        return shaper.shaped()
+
+
+def _ran(
+    db: Session, built: Sequence[Statement]
+) -> list[tuple[Statement, Sequence[Any]]]:
+    return [(statement, db.execute(statement.select).all()) for statement in built]
 
 
 class _Shaper:
@@ -181,13 +230,60 @@ class _Shaper:
         self.all = _Taken()
         self.names: dict[Value, Any] = {}
 
-    def shaped(self, answers: Sequence[tuple[Statement, Sequence[Any]]]) -> Rows:
+    def take(
+        self, answers: Sequence[tuple[Statement, Sequence[Any]]], whole: bool = False
+    ) -> None:
+        """What the statements give; with `whole`, of the All row alone."""
         for statement, found in answers:
             for row in found:
-                if isinstance(statement, Scan):
-                    self.scanned(statement, row)
+                if isinstance(statement, Marked):
+                    self.held(statement, row)
+                elif isinstance(statement, Scan):
+                    self.scanned(statement, row, whole)
                 else:
-                    self.itemised(statement, row)
+                    self.itemised(statement, row, whole)
+
+    def judge(self) -> tuple[Value, ...] | None:
+        """The rows judged by the thresholds and the outlier rows' chip, on
+        every row before any is dropped: those that fail one that keeps
+        dropped, and the All row then left to be answered again; the By's
+        values kept, none where every row is."""
+        found = self.plan
+        if not found.judges:
+            return None
+        outlying: set[Value] = set()
+        if found.outliers is not None:
+            outlying = outliers(
+                {
+                    key: value
+                    for key, taken in self.rows.items()
+                    if (value := self.value(taken, found.measures[0])[0]) is not None
+                }
+            )
+
+        def passes(taken: _Taken, marked: bool) -> bool:
+            return all(
+                threshold.passes(self.value(taken, threshold.measured)[0])
+                for threshold in found.thresholds
+                if threshold.marked == marked
+            )
+
+        kept = {
+            key: taken
+            for key, taken in self.rows.items()
+            if passes(taken, False) and (found.outliers != "keep" or key in outlying)
+        }
+        for key, taken in kept.items():
+            taken.judged = passes(taken, True) and (
+                found.outliers != "mark" or key in outlying
+            )
+        if len(kept) == len(self.rows):
+            return None
+        self.rows = kept
+        self.all = _Taken()
+        return tuple(kept)
+
+    def shaped(self) -> Rows:
         for taken in self.rows.values():
             for index, cells in taken.by_color.items():
                 whole = self.all.by_color.setdefault(index, {})
@@ -202,20 +298,27 @@ class _Shaper:
             for planned in self.plan.measures
         ]
         color = self.color(stacked)
-        lines = {
-            key: self.line(taken, color, stacked) for key, taken in self.rows.items()
-        }
-        rows = [
-            ByRow(
-                values=line.values,
-                n=line.n,
-                split=line.split,
-                key=key,
-                label=_label(by, key, self.rows[key].name),
-                focus=self.rows[key].focus,
+        marking = (
+            bool(self.plan.marks)
+            or self.plan.outliers == "mark"
+            or any(threshold.marked for threshold in self.plan.thresholds)
+        )
+        rows = []
+        for key, taken in self.rows.items():
+            marked = marking and self.marked(taken)
+            line = self.line(taken, color, stacked, marked)
+            rows.append(
+                ByRow(
+                    values=line.values,
+                    n=line.n,
+                    split=line.split,
+                    marks=line.marks,
+                    key=key,
+                    label=_label(by, key, taken.name),
+                    focus=taken.focus,
+                    marked=marked,
+                )
             )
-            for key, line in lines.items()
-        ]
         sort = state.sort or Sort("desc", measure_key(state.measures[0]))
         rows = _sorted(
             rows,
@@ -228,6 +331,17 @@ class _Shaper:
             self.measure(index, measured, stacked[index], peers)
             for index, measured in enumerate(self.plan.measures)
         )
+        total = self.line(self.all, color, stacked, False)
+        if total.marks is not None:
+            total = replace(
+                total,
+                marks=tuple(
+                    None
+                    if part is None
+                    else sum(row.marks[index] or 0.0 for row in rows if row.marks)
+                    for index, part in enumerate(total.marks)
+                ),
+            )
         return Rows(
             address=self.address,
             zone=self.catalogue.zone,
@@ -235,17 +349,24 @@ class _Shaper:
             by=by,
             measures=measures,
             color=color,
-            all=self.line(self.all, color, stacked),
+            all=total,
             rows=tuple(rows[:ROWS]),
             total_rows=len(rows),
             sort=sort,
         )
 
+    def marked(self, taken: _Taken) -> bool:
+        """Whether every mark holds on the row."""
+        return taken.judged and (not self.plan.marks or taken.held > 0)
+
     # ------------------------------------------------------------ what the statements give
 
-    def scanned(self, statement: Scan, row: Any) -> None:
+    def scanned(self, statement: Scan, row: Any, whole_only: bool = False) -> None:
         mapping = row._mapping
         g = mapping["g"]
+        whole = g == (3 if statement.colored else 1)
+        if whole_only and not whole:
+            return
         if statement.colored and g == 0:
             taken = self.rows.setdefault(mapping["b"], _Taken())
             key = mapping["c"]
@@ -254,7 +375,6 @@ class _Shaper:
             for index in statement.splits:
                 taken.by_color.setdefault(index, {})[key] = mapping[f"s{index}"]
             return
-        whole = g == (3 if statement.colored else 1)
         taken = self.all if whole else self.rows.setdefault(mapping["b"], _Taken())
         if not whole:
             if "b_name" in mapping:
@@ -272,12 +392,24 @@ class _Shaper:
                 kind: mapping[f"k{index}_{kind}"] for kind in figure.kinds
             }
 
-    def itemised(self, statement: Items, row: Any) -> None:
+    def itemised(self, statement: Items, row: Any, whole_only: bool = False) -> None:
         mapping = row._mapping
         whole = mapping["g"] == 1
+        if whole_only and not whole:
+            return
         taken = self.all if whole else self.rows.setdefault(mapping["b"], _Taken())
         for index in statement.measures:
             taken.values[index] = (mapping[f"v{index}"], mapping[f"n{index}"])
+
+    def held(self, statement: Marked, row: Any) -> None:
+        mapping = row._mapping
+        key = mapping["b"]
+        if key not in self.rows:
+            return
+        taken = self.rows[key]
+        taken.held += mapping["n"]
+        for index in statement.measures:
+            taken.marked[index] = mapping[f"v{index}"]
 
     # ------------------------------------------------------------ the color
 
@@ -349,10 +481,17 @@ class _Shaper:
 
     # ------------------------------------------------------------ the lines
 
-    def line(self, taken: _Taken, color: Color | None, stacked: Sequence[bool]) -> Line:
+    def line(
+        self,
+        taken: _Taken,
+        color: Color | None,
+        stacked: Sequence[bool],
+        marked: bool,
+    ) -> Line:
         values: list[float | None] = []
         counts: list[int] = []
         splits: list[tuple[float, ...] | None] = []
+        marks: list[float | None] = []
         for measured, stacks_ in zip(self.plan.measures, stacked, strict=True):
             value, n = self.value(taken, measured)
             values.append(value)
@@ -360,10 +499,20 @@ class _Shaper:
             splits.append(
                 self.split(taken, measured, color) if stacks_ and color else None
             )
+            marks.append(
+                (
+                    _number(taken.marked.get(self.simples.index(measured))) or 0.0
+                    if marked
+                    else 0.0
+                )
+                if isinstance(measured, Planned) and adds(measured, self.catalogue)
+                else None
+            )
         return Line(
             tuple(values),
             tuple(counts),
             tuple(splits) if color is not None else None,
+            tuple(marks) if self.plan.marks else None,
         )
 
     def value(
@@ -373,7 +522,11 @@ class _Shaper:
             return self.simple(taken, measured)
         top, _ = self.simple(taken, measured.numerator)
         bottom, n = self.simple(taken, measured.denominator)
-        if top is None and n and measured.numerator.measure.aggregate in ("sum", COUNT):
+        if (
+            top is None
+            and n
+            and measured.numerator.answered.aggregate in ("sum", COUNT)
+        ):
             top = 0.0
         if top is None or not bottom:
             return None, n
@@ -415,16 +568,20 @@ class _Shaper:
         known = [value for row in peers if (value := row.values[index]) is not None]
         median = statistics.median(known) if known else None
         if isinstance(measured, PlannedRatio):
+            numerator, denominator = measured.numerator, measured.denominator
             if isinstance(measured.measure, RatioKey):
                 ratio = self.catalogue.ratio(measured.measure.key)
                 label, format_ = ratio.label, ratio.format
             else:
                 label = measured.measure.name
                 format_ = ratio_format(
-                    self.catalogue,
-                    measured.numerator.measure,
-                    measured.denominator.measure,
+                    self.catalogue, numerator.answered, denominator.answered
                 )
+            stood = (
+                numerator.answers
+                and denominator.answers
+                and (numerator.stand_in or denominator.stand_in) is not None
+            )
             return Measure(
                 key=measure_key(measured.measure),
                 label=label,
@@ -432,19 +589,31 @@ class _Shaper:
                 aggregate=None,
                 grain=None,
                 stacks=False,
-                refused=measured.numerator.refused or measured.denominator.refused,
+                refused=numerator.refused or denominator.refused,
                 median=median,
+                stand_in=StandIn(
+                    measure_key(
+                        WrittenRatio(label, numerator.answered, denominator.answered)
+                    ),
+                    label,
+                )
+                if stood
+                else None,
             )
         figure = self.catalogue.figure(measured.measure.figure)
+        answered = self.catalogue.figure(measured.answered.figure)
         return Measure(
             key=measure_key(measured.measure),
             label=figure.label,
-            format=figure.format,
+            format=answered.format,
             aggregate=measured.measure.aggregate,
             grain=measured.grain,
             stacks=stacks_,
             refused=measured.refused,
             median=median,
+            stand_in=None
+            if measured.stand_in is None
+            else StandIn(simple_key(measured.stand_in), answered.label),
         )
 
 
