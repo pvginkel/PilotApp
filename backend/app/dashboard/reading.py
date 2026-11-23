@@ -195,6 +195,11 @@ class _Reader:
             (part.at, Fault(part.written, part.key, wrong, tuple(near), allowed))
         )
 
+    def faulted(self, key: str) -> bool:
+        """Whether the part `key` faulted already: a check that leans on it
+        is skipped, so that the refusal names no part that is right."""
+        return any(fault.kind == key for _, fault in self.faults)
+
     def done(self) -> None:
         if self.faults:
             ordered = sorted(self.faults, key=lambda fault: fault[0])
@@ -1068,6 +1073,8 @@ class _Reader:
         return Item(grain, text)
 
     def call(self, part: _Part, item: Item | None) -> int | None:
+        if self.faulted("it"):
+            return None
         if item is None or item.grain != READER:
             self.fault(
                 part,
@@ -1142,6 +1149,8 @@ class _Reader:
         return Roll()
 
     def lit(self, part: _Part, color: str | None) -> tuple[Lit, ...] | None:
+        if self.faulted("col"):
+            return None
         if color is None:
             self.fault(
                 part,

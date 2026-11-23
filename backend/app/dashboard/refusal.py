@@ -77,6 +77,7 @@ FORMS: dict[str, tuple[str, str, str]] = {
         "c=[~][!]@items,<op>,<number>,<measure> or c=[~]@outliers",
         "c=miss:1 or c=@items,gt,1,cost.sum",
     ),
+    "b": ("A list of quick filters", "b=<quick filter>,…", "b=misses,outliers"),
     "col": ("A color", "col=<dimension>, col=token_kind or col=none", "col=model"),
     "o": ("A sort", "o=<asc|desc>,<column>", "o=desc,cost.sum"),
     "d": ("The drawer", "d=items", "d=items"),

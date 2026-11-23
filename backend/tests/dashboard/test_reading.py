@@ -679,6 +679,14 @@ class TestQuickFilters:
             'dropped. Did you mean "misses"?',
         )
 
+    def test_one_written_wrong_ends_on_an_example(self, refuses: Refuses) -> None:
+        assert refuses("b=%zz")[1:] == [
+            '- b=%zz: "%zz" holds a "%" that encodes no character. A value\'s '
+            "reserved characters are percent-encoded, as in %2C for a comma.",
+            "A list of quick filters reads b=<quick filter>,…, as in "
+            "b=misses,outliers.",
+        ]
+
 
 class TestColor:
     def test_none_the_token_kinds_and_a_part_or_an_attribute(
@@ -744,6 +752,14 @@ class TestSort:
 
 
 class TestDrawer:
+    def test_a_call_beside_an_item_that_faulted_adds_no_fault(
+        self, refuses: Refuses
+    ) -> None:
+        refusal = refuses("it=conversation,xyz&call=7")
+
+        assert refusal[0] == "Cannot read the view because its state has 1 fault."
+        assert refusal[1].startswith("- it=conversation,xyz: ")
+
     def test_its_parts(self, reads: Reads) -> None:
         state = _state(
             reads, f"d=items&sel={PROJECT}&ig=call&it=conversation,{PROJECT}&call=7"
@@ -904,6 +920,14 @@ class TestLook:
             "input",
             "output",
         )
+
+    def test_values_lit_beside_a_color_that_faulted_add_no_fault(
+        self, refuses: Refuses
+    ) -> None:
+        refusal = refuses("col=dya&lit=work")
+
+        assert refusal[0] == "Cannot read the view because its state has 1 fault."
+        assert refusal[1].startswith("- col=dya: ")
 
     @pytest.mark.parametrize(
         ("written", "normal"),
