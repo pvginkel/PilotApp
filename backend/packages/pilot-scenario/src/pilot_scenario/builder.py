@@ -13,10 +13,11 @@ read off: a thread's ids and where it ran, its Launches, Prompts, Calls and
 Tool Calls, a denied call's denial among them, its Compactions, each Call's
 place on the chain, the request it answered and those that failed before
 it, what Claude Code records of its choices, the Events, the Stop hooks
-run at a Prompt's end, and the context parts of a Launch's first Call: the
-system prompt and the tools its request's shape sent, the instruction files
-and the Prompts received before it, a sub-agent's task. No line is written
-for a later Call's context parts, which the publications carry alone.
+run at a Prompt's end, and each Call's context parts: on a Launch's first
+Call the system prompt and the tools its request's shape sent, the
+instruction files and the Prompts received before it, a sub-agent's task,
+and on any Call what was injected before it, a compaction's summary among
+it.
 
 A conversation's ids are the scenario's own, the same in every build, so
 that a scenario published again is the same conversations again. A build's
@@ -35,6 +36,7 @@ from typing import Any
 
 from pilot_scenario.script import (
     Call,
+    Carried,
     Compaction,
     Launch,
     Scenario,
@@ -114,6 +116,54 @@ def _moments(steps: Sequence[Step]) -> Iterator[int]:
                 yield from (retry.sent, retry.failed)
 
 
+_SHAPED = ("system_prompt", "tool_schemas")
+"""The Context Part Kinds a request's shape holds."""
+
+_SUMMARY = "compact_summary"
+"""The Context Part Kind of a compaction's summary."""
+
+
+def _summary(later: Sequence[Step], made: int) -> int:
+    """The characters of the summary of a compaction, the `made`th since
+    the last Call from 0, `later` the steps after it in its Launch: the
+    `made`th summary the next Call carries."""
+    call = next((step for step in later if isinstance(step, Call)), None)
+    summaries = (
+        []
+        if call is None
+        else [part.characters for part in call.carried if part.kind == _SUMMARY]
+    )
+    if len(summaries) <= made:
+        raise ValueError(
+            "A compaction's summary is a part of the next Call of its Launch: it"
+            " carries a `compact_summary`"
+        )
+    return summaries[made]
+
+
+def _injected(call: Call, first: bool) -> list[Carried]:
+    """The parts of `call` whose lines are written just before its request:
+    all but those of its request's shape, a compaction's summary and, on a
+    Launch's first Call, its instruction files. The Call lists its parts as
+    their lines are written: on a Launch's first Call the system prompt, the
+    tools and the instruction files first, then a compaction's summary, then
+    what else was injected."""
+    ranks = (
+        {"system_prompt": 0, "tool_schemas": 1, "instruction_file": 2, _SUMMARY: 3}
+        if first
+        else {"system_prompt": 0, "tool_schemas": 0, _SUMMARY: 1}
+    )
+    order = [ranks.get(part.kind, len(ranks)) for part in call.carried]
+    if order != sorted(order):
+        raise ValueError(
+            "A Call's parts are listed as its lines are written: a Launch's first"
+            " Call's system prompt, tools and instruction files first, then a"
+            " compaction's summary, then what else was injected"
+        )
+    held = (*_SHAPED, _SUMMARY, *(("instruction_file",) if first else ()))
+    return [part for part in call.carried if part.kind not in held]
+
+
 def _instruction_files(steps: Iterator[Step]) -> list[tuple[str, int]]:
     """The instruction files the first Call of the steps carries, each its
     path and its characters."""
@@ -188,6 +238,12 @@ class _Thread:
         """The chain's last line once each named Call was written, with its
         tools' results."""
         self._crossed: int | None = None
+        self._summaries = 0
+        """The compactions since the last Call, whose summaries the next
+        carries."""
+        self._skills: dict[str, str] = {}
+        """The latest `Skill` call that asked for each skill: its id, by the
+        skill."""
         self.opening: list[int] | None = None
         """The characters of each Prompt received since the Launch began,
         or of a sub-agent's task, none once its first Call carried them."""
@@ -198,8 +254,9 @@ class _Thread:
         if isinstance(step, Call) and step.back_to is not None:
             self.lines.leaf = self._leaves[step.back_to]
 
-    def read(self, step: Step, prompt: int | None) -> None:
-        """Take the thread's next step, under the Prompt at that place."""
+    def read(self, step: Step, prompt: int | None, later: Sequence[Step]) -> None:
+        """Take the thread's next step, under the Prompt at that place,
+        `later` the steps after it in its Launch."""
         at = self._builder.time
         if isinstance(step, Compaction):
             self.compactions.append(
@@ -212,8 +269,25 @@ class _Thread:
                 )
             )
             self._crossed = len(self.compactions)
-            self.lines.compacted(step, self._builder.when(step.at))
+            summary = _summary(later, self._summaries)
+            self._summaries += 1
+            self.lines.compacted(step, self._builder.when(step.at), summary)
             return
+        if sum(part.kind == _SUMMARY for part in step.carried) != self._summaries:
+            raise ValueError(
+                "A Call carries the summary of each compaction since the Call"
+                " before it, and no other"
+            )
+        self._summaries = 0
+        injected = [
+            (
+                part,
+                self._skills.get(part.name or "")
+                if part.kind == "skill_body"
+                else None,
+            )
+            for part in _injected(step, self.opening is not None)
+        ]
         self.ids.messages += 1
         message_id = f"msg_{self.ids.messages:04}"
         if step.back_to is not None:
@@ -279,7 +353,9 @@ class _Thread:
         )
         self.opening = None
         self._crossed = None
-        self._write(step, message_id, [call["tool_use_id"] for call in tool_calls])
+        self._write(
+            step, message_id, [call["tool_use_id"] for call in tool_calls], injected
+        )
         if step.name is not None:
             self._leaves[step.name] = self.lines.leaf
         for occurrence in step.occurred:
@@ -304,13 +380,26 @@ class _Thread:
         )
         if use.spawns is not None:
             self.spawned[use.spawns] = _Spawning(tool_call, call.at, self.lines.version)
+        if use.tool == "Skill" and use.argument is not None:
+            self._skills[use.argument] = tool_call["tool_use_id"]
         return tool_call
 
-    def _write(self, call: Call, message_id: str, tool_use_ids: list[str]) -> None:
-        """The Call's lines: each attempt at its request that failed, its
-        response's, then each result that arrived, in the order the tools
-        were requested."""
+    def _write(
+        self,
+        call: Call,
+        message_id: str,
+        tool_use_ids: list[str],
+        injected: list[tuple[Carried, str | None]],
+    ) -> None:
+        """The Call's lines: what was `injected` before its request, each
+        part with the id of the `Skill` call a skill's body expands, written
+        as its first request was sent; each attempt at its request that
+        failed, its response's, then each result that arrived, in the order
+        the tools were requested."""
         when = self._builder.when
+        sent = call.retried[0].sent if call.retried else call.sent
+        for part, skill in injected:
+            self.lines.injected(part, when(call.at if sent is None else sent), skill)
         for attempt, retry in enumerate(call.retried, start=1):
             self.lines.retried(
                 call, retry, attempt, when(retry.sent), when(retry.failed)
@@ -455,6 +544,8 @@ class Builder:
         launches: list[dict[str, Any]] = []
         place = 0
         for launch in session.launches:
+            steps = [step for prompt in launch.prompts for step in prompt.steps]
+            taken = 0
             lines.launched(dict(launch.versions)[CLAUDE_CODE])
             thread.opening = []
             loaded = _instruction_files(
@@ -494,7 +585,8 @@ class Builder:
                 for followed, step in enumerate(prompt.steps):
                     if followed:
                         thread.back(step)
-                    thread.read(step, place)
+                    taken += 1
+                    thread.read(step, place, steps[taken:])
                 if prompt.hooks:
                     last = max((prompt.at, *_moments(prompt.steps)))
                     lines.hooked(prompt.hooks, self.when(last))
@@ -544,9 +636,9 @@ class Builder:
         )
         thread = _Thread(self, main.ids, lines, {})
         thread.opening = [len(_TASK)]
-        for step in agent.steps:
+        for taken, step in enumerate(agent.steps, start=1):
             thread.back(step)
-            thread.read(step, None)
+            thread.read(step, None, agent.steps[taken:])
         publication, files = self._thread(session, lines, _moments(agent.steps))
         publication |= _given(
             agent_id=self.agent(session, agent),

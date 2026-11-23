@@ -86,7 +86,11 @@ class Call:
     ended where it was no ordinary end, a Stop Reason's code. `back_to`
     makes it a rewind: the earlier Call, by name, its chain continues from.
     `miss` is the cause of a cache miss. `retried` are the attempts at its
-    request that failed before the one it answered."""
+    request that failed before the one it answered. `carried` are its
+    Context Parts: on a Launch's first Call its system prompt, its tools and
+    its instruction files first, then a compaction's summary, one per
+    compaction since the Call before it, then what else was injected before
+    it, in the order its lines are written."""
 
     at: int
     tokens: Tokens

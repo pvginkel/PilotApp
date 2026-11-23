@@ -18,6 +18,8 @@ FOLDER = "-work-Loom"
 VERSION = "2.1.317"
 MANAGED = "/etc/claude-code/CLAUDE.md"
 START = datetime(2026, 11, 12, 9, 0, tzinfo=UTC)
+BODY = "Base directory for this skill: /loom/skills/weave\n\nWeave tight."
+"""A skill's body."""
 
 type Line = dict[str, Any]
 
@@ -387,6 +389,40 @@ def summary(seconds: float) -> Line:
     return user(seconds, "The loom so far: warped, not yet threaded.") | {
         "isCompactSummary": True
     }
+
+
+def attached(
+    seconds: float, kind: str, shown: str | None = None, **fields: Any
+) -> Line:
+    """An attachment of that type, with the text the model was `shown` where
+    it was shown any: an older version records none."""
+    line = chained("attachment", seconds, attachment={"type": kind, **fields})
+    return line if shown is None else line | {"rendered": [{"content": shown}]}
+
+
+def nested(seconds: float, path: str, content: str) -> Line:
+    """An instruction file loaded once a Launch was under way."""
+    loaded = {"path": path, "type": "Project", "content": content}
+    shown = f"Contents of {path}:\n\n{content}"
+    return attached(seconds, "nested_memory", shown, path=path, content=loaded)
+
+
+def invoked(seconds: float, *skills: tuple[str, str]) -> Line:
+    """The bodies of the skills invoked before a compaction, shown again:
+    each skill's name and body."""
+    shown = "The skills invoked before:\n" + "\n".join(body for _, body in skills)
+    held = [
+        {"name": name, "path": f"plugin:{name}", "content": body}
+        for name, body in skills
+    ]
+    return attached(seconds, "invoked_skills", shown, skills=held)
+
+
+def expanded(seconds: float, source: str | None = "toolu_01") -> Line:
+    """A skill's body as Claude Code expands it, for the `Skill` call
+    `source` names, where one does."""
+    line = user(seconds, [words(BODY)]) | {"isMeta": True}
+    return line if source is None else line | {"sourceToolUseID": source}
 
 
 def loaded(kind: str, content: str, path: str = MANAGED) -> dict[str, str]:

@@ -20,10 +20,11 @@ the transcript's first Call, the directory and the environment the file
 named first, the Launch open there and the latest Prompt it received, with
 the Hook Runs taken for that Prompt, what the lines before it record of the
 Context Parts of the boundary's Call where it is its Launch's first, the
-prompts waiting in the queue, and those a `remove` took out of it that no
-message taken in the middle of a run has claimed. No id of any other line
-before the boundary is held, and of no Call but the one the chain leads to;
-no request shape but those the boundary's Call's requests name.
+Context Parts injected before the boundary's Call, the prompts waiting in the
+queue, and those a `remove` took out of it that no message taken in the
+middle of a run has claimed. No id of any other line before the boundary is
+held, and of no Call but the one the chain leads to; no request shape but
+those the boundary's Call's requests name.
 
 **The bound.** The carries are kept up to a number of transcripts and a size,
 both settings. Past either, the transcript whose file changed longest ago is
@@ -75,6 +76,9 @@ _FILE = 120
 _SHAPE = 160
 """The bytes what a line records of a system prompt and its tools is
 counted at."""
+
+_PART = 320
+"""The bytes a Context Part injected is counted at beside its name."""
 
 
 def digest(content: bytes) -> bytes:
@@ -185,6 +189,17 @@ class Opening:
 
 
 @dataclass(frozen=True)
+class Part:
+    """A Context Part a line injected before a Call."""
+
+    kind: str
+    """The Context Part Kind's code."""
+    characters: int
+    name: str | None = None
+    """Which one of its kind: the file, the skill, the attachment's type."""
+
+
+@dataclass(frozen=True)
 class Occurred:
     """An Event: what occurred at one moment in the transcript that no other
     fact records."""
@@ -263,6 +278,10 @@ class Standing:
     """What the lines before it record of the Context Parts of the Launch
     open there's first Call, where that Call has not begun: on a sub-agent's
     thread, before its first Call."""
+    injected: tuple[Part, ...] = ()
+    """The Context Parts the lines before it injected since the last Call's
+    first line, or the start of the Launch open there, in the file's order:
+    the next Call carries them."""
     queue: tuple[tuple[bytes, datetime], ...] = ()
     """The prompts waiting in the process's queue there, in the order they
     arrived: a digest of each one's text and the time of its `enqueue`
@@ -316,6 +335,7 @@ class Carry:
             *(() if prompt is None else (prompt.source,)),
             *(run.command for run in runs),
             *(path for path, _ in files),
+            *(part.name for part in stands.injected),
         )
         return (
             _HELD
@@ -325,6 +345,7 @@ class Carry:
             + _RAN * len(runs)
             + (0 if opening is None else _OPENING)
             + _FILE * len(files)
+            + _PART * len(stands.injected)
             + _SHAPE * len(shapes)
             + _AWAITED * len(stands.awaited)
             + _REQUESTED * len(stands.requests)

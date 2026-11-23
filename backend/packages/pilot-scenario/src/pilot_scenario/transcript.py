@@ -16,6 +16,13 @@ process writes as it exits.
 - A process's first prompt is followed by an `attachment` line of type
   `instructions`, whose `files` list the instruction files it loaded, each
   its path and its content: the managed one opens `# Environment: <id>`.
+- What is injected before a request, its lines written before the request's:
+  an `attachment` line shown to the model, with the text the model was shown
+  as `rendered`: a reminder of its `type`, or a `nested_memory`, an
+  instruction file loaded once the process was under way, with its path and
+  content; and a skill's body, a `user` line marked `isMeta` whose text opens
+  `Base directory for this skill:`, the expansion of the `Skill` call its
+  `sourceToolUseID` names.
 - A response is one `assistant` line a block, all under its `message.id`.
   Each carries the response's `usage`; the lines before the last carry fewer
   output tokens and thinking tokens than it and no `stop_reason`. Each names
@@ -49,7 +56,8 @@ process writes as it exits.
   no line: its `logicalParentUuid` names the chain's last line before it, and
   its `compactMetadata` has the trigger, the tokens before and after it and
   how long it took. The summary follows it, a `user` line marked
-  `isCompactSummary` and timed before it, and the chain goes on from there.
+  `isCompactSummary` and timed before it, as long as the part of the Call
+  after it, and the chain goes on from there.
 - An attempt at a request that failed is its request line and a `system`
   line of subtype `api_error`, with the error's `status` and the attempt's
   number; the request is sent again, and the response names the last line.
@@ -71,6 +79,7 @@ from typing import Any
 
 from pilot_scenario.script import (
     Call,
+    Carried,
     Compaction,
     HookRun,
     Occurrence,
@@ -96,8 +105,8 @@ _BETWEEN = timedelta(milliseconds=40)
 _SUMMARISED = timedelta(milliseconds=300)
 """The time from a compaction's summary to its boundary's line."""
 
-_SUMMARY = 1_200
-"""The characters of a compaction's summary."""
+_SKILL_BODY = "Base directory for this skill:"
+"""What a skill's body opens with."""
 
 SYNTHETIC = "<synthetic>"
 """The model of an `assistant` line Claude Code wrote itself."""
@@ -367,9 +376,9 @@ class Lines:
             "attachment", at, attachment={"type": "instructions", "files": loaded}
         )
 
-    def compacted(self, compaction: Compaction, at: datetime) -> None:
+    def compacted(self, compaction: Compaction, at: datetime, summary: int) -> None:
         """The context is compacted: the boundary, written at `at`, and the
-        summary the chain goes on from."""
+        summary the chain goes on from, `summary` characters long."""
         made: dict[str, Any] = {
             "trigger": compaction.trigger,
             "preTokens": compaction.before,
@@ -394,8 +403,65 @@ class Lines:
             promptId=self._id("prompt"),
             isVisibleInTranscriptOnly=True,
             isCompactSummary=True,
-            message={"role": "user", "content": text(_SUMMARY)},
+            message={"role": "user", "content": text(summary)},
         )
+
+    def injected(self, part: Carried, at: datetime, skill: str | None) -> None:
+        """The line that injects `part` before the request to come, written
+        at `at`: a reminder's or an instruction file's attachment, or the
+        body of a skill the `Skill` call of the id `skill` asked for."""
+        if part.name is None:
+            raise ValueError(f"A part of the kind `{part.kind}` is named")
+        if part.kind == "reminder":
+            self._chained(
+                "attachment",
+                at,
+                attachment={"type": part.name},
+                rendered=[{"content": text(part.characters)}],
+                renderedRole="system",
+            )
+        elif part.kind == "instruction_file":
+            loaded = text(part.characters)
+            self._chained(
+                "attachment",
+                at,
+                attachment={
+                    "type": "nested_memory",
+                    "path": part.name,
+                    "content": {
+                        "path": part.name,
+                        "type": "Project",
+                        "content": loaded,
+                    },
+                },
+                rendered=[{"content": f"Contents of {part.name}:\n\n{loaded}"}],
+                renderedRole="system",
+            )
+        elif part.kind == "skill_body" and skill is not None:
+            head = f"{_SKILL_BODY} {SESSION_HOME}/skills/{part.name.split(':')[-1]}\n\n"
+            self._chained(
+                "user",
+                at,
+                promptId=self._id("prompt"),
+                isMeta=True,
+                sourceToolUseID=skill,
+                message={
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": head + text(part.characters - len(head)),
+                        }
+                    ],
+                },
+            )
+        elif part.kind == "skill_body":
+            raise ValueError(
+                "A skill's body is the expansion of a `Skill` call before it that"
+                f" asked for `{part.name}`"
+            )
+        else:
+            raise ValueError(f"No line is written for a part of the kind `{part.kind}`")
 
     def retried(
         self, call: Call, retry: Retry, attempt: int, sent: datetime, failed: datetime
@@ -782,6 +848,8 @@ def request(
             "new_string": text(40),
             "replace_all": False,
         }
+    elif use.tool == "Skill":
+        asked = {"skill": use.argument}
     elif use.tool == "Agent":
         asked = {
             "subagent_type": "general-purpose" if spawned is None else spawned.type,
@@ -811,6 +879,8 @@ def _result(use: ToolUse, saved: str | None) -> str:
         head = _REJECTED
     elif use.denied == "rule":
         head = f"Permission to use {use.tool} has been denied. "
+    elif use.tool == "Skill":
+        head = f"Launching skill: {use.argument}"
     elif saved is not None and use.saved is not None:
         path = f"{SESSION_HOME}/{saved}"
         if use.server is None:
@@ -877,6 +947,8 @@ def _record(
             "userModified": False,
             "replaceAll": False,
         }
+    if use.tool == "Skill":
+        return {"success": True, "commandName": use.argument}
     if use.tool == "Agent" and spawned is not None:
         return {
             "status": "completed",

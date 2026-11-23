@@ -20,6 +20,7 @@ from pilot_collector.carry import (
     Occurred,
     Open,
     Opening,
+    Part,
     Prompted,
     Ran,
     Requested,
@@ -37,10 +38,12 @@ from tests.support import (
     Line,
     answering,
     assistant,
+    attached,
     boundary,
     chained,
     cost,
     erred,
+    expanded,
     fallback,
     fell_back,
     filed,
@@ -591,6 +594,48 @@ class TestTheCarry:
         assert size(f"{DIRECTORY}/looms/CLAUDE.md") - size(
             f"{DIRECTORY}/CLAUDE.md"
         ) == len("/looms")
+
+    def test_it_holds_what_was_injected_before_the_boundarys_call(
+        self, tmp_path: Path
+    ) -> None:
+        """What was injected before an earlier Call is that one's."""
+        lines = [
+            typed(0),
+            attached(0.2, "date", "Today is a weaving day."),
+            requesting(4, "toolu_01", "Skill", {"skill": "loom:weave"}),
+            result(5, "toolu_01", "Launching skill: loom:weave"),
+            expanded(5.1),
+            attached(5.2, "total_tokens_reminder", "Plenty left."),
+            assistant(9, "msg_02"),
+        ]
+
+        held = read(filed(tmp_path, linked(lines)), SETTINGS).carry.stands
+        none = read(
+            filed(tmp_path, linked([*lines, assistant(14, "msg_03")])), SETTINGS
+        ).carry.stands
+
+        assert held.injected == (
+            Part("skill_body", len(support.BODY), "loom:weave"),
+            Part("reminder", len("Plenty left."), "total_tokens_reminder"),
+        )
+        assert none.injected == ()
+
+    def test_what_was_injected_counts_in_its_size_with_its_names(
+        self, tmp_path: Path
+    ) -> None:
+        def size(*kinds: str) -> int:
+            lines = [
+                typed(0),
+                assistant(4, "msg_01"),
+                *(attached(5, kind, "Plenty left.") for kind in kinds),
+                assistant(9, "msg_02"),
+            ]
+            return read(filed(tmp_path, linked(lines)), SETTINGS).carry.size
+
+        assert size("date") - size() > len("date")
+        assert size("total_tokens_reminder") - size("date") == len(
+            "total_tokens_reminder"
+        ) - len("date")
 
 
 class TestAFileThatGrew:
@@ -1346,6 +1391,75 @@ class TestAFileThatGrew:
             for call in grown.publication.calls
         ] == [["prompt"], ["system_prompt", "tool_schemas", "prompt"]]
 
+    @pytest.mark.parametrize(
+        "agent", [None, AGENT], ids=["a launch's", "a sub-agent's"]
+    )
+    def test_the_boundarys_call_carries_what_was_injected_before_its_first_line(
+        self, agent: str | None, tmp_path: Path
+    ) -> None:
+        before, grown = _grown(
+            tmp_path,
+            linked(
+                [
+                    typed(0) if agent is None else user(0, "Count the threads."),
+                    requesting(4, "toolu_01", "Skill", {"skill": "loom:weave"}),
+                    result(5, "toolu_01", "Launching skill: loom:weave"),
+                    expanded(5.1),
+                    attached(5.2, "date", "Today is a weaving day."),
+                    assistant(9, "msg_02", output=1),
+                ]
+            ),
+            _continuing(
+                "line-5",
+                [
+                    assistant(10, "msg_02", output=4),
+                    attached(11, "total_tokens_reminder", "Plenty left."),
+                    assistant(14, "msg_03"),
+                ],
+            ),
+            agent,
+        )
+
+        whole = read(filed_again(tmp_path, agent), SETTINGS)
+        assert [
+            [(part.kind, part.name) for part in call.context_parts]
+            for call in grown.publication.calls
+        ] == [
+            [("skill_body", "loom:weave"), ("reminder", "date")],
+            [("reminder", "total_tokens_reminder")],
+        ]
+        assert _held(before.publication, grown.publication) == whole.publication
+        assert grown.carry == whole.carry
+
+    def test_a_skills_body_from_the_boundary_on_names_the_boundarys_call(
+        self, tmp_path: Path
+    ) -> None:
+        before, grown = _grown(
+            tmp_path,
+            linked(
+                [typed(0), assistant(4, "msg_01")]
+                + [
+                    requesting(
+                        8, "toolu_01", "Skill", {"skill": "loom:weave"}, "msg_02"
+                    )
+                ]
+            ),
+            _continuing(
+                "line-3",
+                [
+                    result(9, "toolu_01", "Launching skill: loom:weave"),
+                    expanded(9.1),
+                    assistant(14, "msg_03"),
+                ],
+            ),
+        )
+
+        whole = read(filed_again(tmp_path), SETTINGS)
+        assert [part.name for part in grown.publication.calls[-1].context_parts] == [
+            "loom:weave"
+        ]
+        assert _held(before.publication, grown.publication) == whole.publication
+
     def test_a_sub_agents_thread_names_no_launch_and_no_prompt_before(
         self, tmp_path: Path
     ) -> None:
@@ -1517,6 +1631,30 @@ class TestAFileThatDoesNotContinueItsCarry:
             NotContinuedError, match="names a request no line from its boundary on"
         ):
             read(named, SETTINGS, carry)
+
+    def test_a_skills_body_that_names_a_call_behind_the_boundary_is_not_read_on(
+        self, tmp_path: Path
+    ) -> None:
+        named = filed(
+            tmp_path,
+            linked(
+                [
+                    typed(0),
+                    requesting(4, "toolu_01", "Skill", {"skill": "loom:weave"}),
+                    result(5, "toolu_01", "Launching skill: loom:weave"),
+                    assistant(9, "msg_02"),
+                ]
+            ),
+        )
+        carry = read(named, SETTINGS).carry
+        _added(named, [expanded(10) | {"uuid": "grown-1", "parentUuid": "line-4"}])
+
+        with pytest.raises(
+            NotContinuedError,
+            match="a skill's body names a request no line from its boundary on",
+        ):
+            read(named, SETTINGS, carry)
+        assert read(named, SETTINGS).publication.calls[-1].context_parts == []
 
     def test_a_launchs_first_request_naming_a_shape_behind_the_boundary_is_not_read_on(
         self, tmp_path: Path

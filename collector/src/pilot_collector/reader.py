@@ -139,9 +139,27 @@ its newline is written. The facts are read off the lines in the file's order:
     JSON;
   - each instruction file the `instructions` attachment before it lists,
     an `instruction_file` named by its path, of its content's characters;
+  - the parts injected before it, below;
   - each Prompt the Launch received before it, `prompt`, of the Prompt's
     characters: on a sub-agent's thread, its task, the `user` lines before
     its first Call that are no `isMeta` one.
+- **The Context Parts injected before a Call**, all of a later Call's, in
+  the file's order, from the last Call's first line, or the Launch's start,
+  to the Call's own:
+  - an attachment shown to the model, the line's `rendered` text (2.1.261
+    on): an instruction file loaded once the Launch was under way,
+    `nested_memory` or a later `instructions`, an `instruction_file` named
+    by its path, of its content's characters; each skill's body an
+    `invoked_skills` shows again, a `skill_body` named by its skill, of its
+    content's characters; else a `reminder` named by its type, of the
+    shown text's characters. A message taken in the middle of a run is no
+    part, and an attachment never shown none;
+  - a skill's body, the `isMeta` line opening with Claude Code's words for
+    one, a `skill_body` of its text's characters, named by the skill the
+    `Skill` call its `sourceToolUseID` names asked for: one expanded for a
+    typed command names no call, and no skill;
+  - a compaction's summary, the `isCompactSummary` line, a
+    `compact_summary` of its text's characters.
 
 **From the boundary on.** A reading leaves a carry (`carry.py`): where it
 stood before the file's last Call. Given that carry, a file that grew is read
@@ -157,18 +175,19 @@ carry names, with where the chain leads from it as the lines before that
 byte stand and what the Call it leads to left the next, the request lines
 before it written since the last one a Call named, the Events before it
 where no Call is, the latest Prompt before it where the Launch open there
-received it, with its Hook Runs, and what the lines before it record of the
-Context Parts of the boundary's Call where it is its Launch's first, so it
-stops, and the file is read whole, where:
+received it, with its Hook Runs, what the lines before it record of the
+Context Parts of the boundary's Call where it is its Launch's first, and the
+Context Parts injected before that Call, so it stops, and the file is read
+whole, where:
 
 - the file is no larger than the one the carry was built on, or its bytes
   from the boundary's to its old end are other than those read then
   (F152.17);
 - a line's `parentUuid`, or a compaction's `logicalParentUuid`, names a
   line that is neither the carry's nor one from the boundary's byte on, a
-  tool's result names a request no line from that byte on makes, or a
-  fallback's line one no Call from that byte on answered: each reaches
-  behind the boundary, or names a line written later;
+  tool's result or a skill's body names a request no line from that byte
+  on makes, or a fallback's line one no Call from that byte on answered:
+  each reaches behind the boundary, or names a line written later;
 - a request of a Launch's first Call names a shape no line from the
   boundary's byte on records: a resumed process names the shapes an earlier
   one's lines record;
@@ -199,6 +218,7 @@ from pilot_collector.carry import (
     Occurred,
     Open,
     Opening,
+    Part,
     Prompted,
     Ran,
     Requested,
@@ -233,6 +253,21 @@ a process started with, never shown to the model."""
 _SPLIT = "__SYSTEM_PROMPT_DYNAMIC_BOUNDARY__"
 """The marker a snapshot's system prompt holds where Claude Code splits it,
 which no request sends."""
+
+_NESTED = "nested_memory"
+"""The type of the attachment that loads an instruction file once a Launch
+is under way."""
+
+_INVOKED = "invoked_skills"
+"""The type of the attachment that shows again the bodies of the skills
+invoked before a compaction."""
+
+_SKILL = "Skill"
+"""The tool that loads a skill: Claude Code expands the skill its input
+names into the skill's body, a line of its own."""
+
+_SKILL_BODY = "Base directory for this skill:"
+"""What a skill's body opens with."""
 
 _FELL_BACK = "model_refusal_fallback"
 """The subtype of the `system` line that records a fallback: the model the
@@ -412,6 +447,8 @@ class _ToolCall:
     result_characters: int | None = None
     saved_characters: int | None = None
     denial_kind: str | None = None
+    skill: str | None = None
+    """The skill a `Skill` call asked for."""
 
 
 @dataclass(slots=True)
@@ -575,10 +612,13 @@ def _snapshot(attachment: dict[str, Any]) -> Shape:
     return Shape(system or None, _schemas(attachment.get("tools") or []))
 
 
-def _opened(opening: Opening, request: Requested | None) -> list[dict[str, Any]]:
+def _opened(
+    opening: Opening, request: Requested | None, injected: tuple[Part, ...]
+) -> list[dict[str, Any]]:
     """The Context Parts of a Launch's first Call, the lines before it
-    recording `opening`, its first line naming `request`: the system prompt
-    and the tools its request's shape sent, else those a snapshot records."""
+    recording `opening` and injecting `injected`, its first line naming
+    `request`: the system prompt and the tools its request's shape sent,
+    else those a snapshot records."""
     shown = None if request is None else request.sends
     if shown is None:
         shown = opening.snapshot
@@ -591,10 +631,33 @@ def _opened(opening: Opening, request: Requested | None) -> list[dict[str, Any]]
         {"kind": "instruction_file", "name": path, "characters": characters}
         for path, characters in opening.files
     ]
+    parts += [asdict(part) for part in injected]
     parts += [
         {"kind": "prompt", "characters": characters} for characters in opening.prompts
     ]
     return parts
+
+
+def _shown(attachment: dict[str, Any], rendered: list[Any]) -> tuple[Part, ...]:
+    """The Context Parts of an attachment shown to the model as `rendered`,
+    but for a Launch's instruction files and a message."""
+    kind = attachment["type"]
+    if kind == _NESTED:
+        loaded = attachment["content"]
+        return (Part("instruction_file", len(loaded["content"]), attachment["path"]),)
+    if kind == _INVOKED:
+        return tuple(
+            Part("skill_body", len(skill["content"]), skill["name"])
+            for skill in attachment["skills"]
+        )
+    characters = sum(len(shown["content"]) for shown in rendered)
+    return (Part("reminder", characters, kind),)
+
+
+def _skill(tool: str, given: dict[str, Any]) -> str | None:
+    """The skill a `Skill` call asked for; none for another tool."""
+    asked = given.get("skill") if tool == _SKILL else None
+    return asked if isinstance(asked, str) else None
 
 
 def _words(text: str) -> bytes:
@@ -755,6 +818,10 @@ class _Thread:
         """What the lines taken record of the Context Parts of the open
         Launch's first Call, none once it began: on a sub-agent's thread, of
         its first Call."""
+        self._injected = before.injected
+        """The Context Parts the lines taken injected since the last Call's
+        first line, or the open Launch's start, which the next Call
+        carries."""
         self._leads: dict[str, _Stop | None] = {}
         """The nearest stop at or up the chain from each line taken, by its
         `uuid`, and from the line the reading stands after."""
@@ -817,6 +884,7 @@ class _Thread:
                 self.launches.append(_Launch(at))
                 self._exited = False
                 self._opening = Opening()
+                self._injected = ()
             launch = self.launches[-1]
             if launch.version is None:
                 launch.version = line.get("version")
@@ -838,12 +906,16 @@ class _Thread:
                 )
             elif _interrupts(content):
                 self._occurred("interrupt", at)
+            elif line.get("isCompactSummary"):
+                self._injected += (Part("compact_summary", len(text_of(content))),)
+            elif line.get("isMeta") and text_of(content).startswith(_SKILL_BODY):
+                self._expanded(line.get("sourceToolUseID"), len(text_of(content)))
             elif self._main:
                 self._prompted(line, content, at)
             elif not line.get("isMeta"):
                 self._carries(len(text_of(content)))
         elif kind == "attachment":
-            self._attached(line["attachment"], at)
+            self._attached(line, at)
         elif not self._main:
             return
         elif kind == "queue-operation":
@@ -879,6 +951,7 @@ class _Thread:
             if not received or self._prompt is None
             else _prompted(self._prompt),
             opening=self._opening,
+            injected=self._injected,
             queue=self._queue,
             removed=self._removed,
         )
@@ -971,16 +1044,26 @@ class _Thread:
         self._queue, queued = _taken_out(self._queue, _words(text))
         return queued
 
-    def _attached(self, attachment: dict[str, Any], at: datetime) -> None:
-        if self._opening is not None and attachment["type"] == _SNAPSHOT:
-            if self._opening.snapshot is None:
+    def _attached(self, line: dict[str, Any], at: datetime) -> None:
+        attachment = line["attachment"]
+        if attachment["type"] == _SNAPSHOT:
+            if self._opening is not None and self._opening.snapshot is None:
                 self._opening = replace(self._opening, snapshot=_snapshot(attachment))
-        elif self._opening is not None and attachment["type"] == "instructions":
+        elif attachment["type"] == "instructions":
             loaded = tuple(
                 (instructions["path"], len(instructions["content"]))
                 for instructions in attachment["files"]
             )
-            self._opening = replace(self._opening, files=self._opening.files + loaded)
+            if self._opening is None:
+                self._injected += tuple(
+                    Part("instruction_file", characters, path)
+                    for path, characters in loaded
+                )
+            else:
+                files = self._opening.files + loaded
+                self._opening = replace(self._opening, files=files)
+        elif attachment["type"] != _MID_RUN and line.get("rendered"):
+            self._injected += _shown(attachment, line["rendered"])
         if not self._main:
             return
         if attachment["type"] == _MID_RUN:
@@ -1042,6 +1125,18 @@ class _Thread:
             prompts = self._opening.prompts + (characters,)
             self._opening = replace(self._opening, prompts=prompts)
 
+    def _expanded(self, source: str | None, characters: int) -> None:
+        """A skill's body of that length, expanded for the `Skill` call
+        `source` names. A reading from a boundary on stops at one that
+        names a call it took no line of, which may lie behind it."""
+        asked = None if source is None else self._requested.get(source)
+        if source is not None and asked is None and self._before.byte:
+            raise NotContinuedError(
+                "a skill's body names a request no line from its boundary on makes"
+            )
+        skill = None if asked is None else asked.skill
+        self._injected += (Part("skill_body", characters, skill),)
+
     def _hooked(self, line: dict[str, Any]) -> None:
         """A Stop hook's summary: a Hook Run of each command it names, on
         the latest Prompt. A reading from a boundary on stops at one that
@@ -1099,9 +1194,12 @@ class _Thread:
                 events=self._early,
             )
             self._early = []
-            if self._opening is not None:
-                call.parts = _opened(self._opening, call.request)
+            if self._opening is None:
+                call.parts = [asdict(part) for part in self._injected]
+            else:
+                call.parts = _opened(self._opening, call.request, self._injected)
                 self._opening = None
+            self._injected = ()
             self._latest = self.calls[message["id"]] = call
             answered = line.get("requestId")
             if answered is not None:
@@ -1121,7 +1219,8 @@ class _Thread:
                 call.fell_back = call.fell_back or block["from"]["model"]
             elif block["type"] == "tool_use" and block["id"] not in self._requested:
                 argument = _argument(block["name"], block["input"])
-                asked = _ToolCall(block["name"], argument, at)
+                skill = _skill(block["name"], block["input"])
+                asked = _ToolCall(block["name"], argument, at, skill=skill)
                 self._requested[block["id"]] = call.tool_calls[block["id"]] = asked
 
     def _fell_back(self, line: dict[str, Any]) -> None:

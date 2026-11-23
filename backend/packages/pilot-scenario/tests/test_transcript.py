@@ -3,8 +3,8 @@ Code's line shapes, in a home laid out as the fleet's is, and each
 publication what its file says: read back off the lines here, a thread's
 ids and place, its Launches, Prompts and their Hook Runs, its Calls and Tool
 Calls with their denials, its Compactions, each Call's place on the chain
-and when it was sent, the Events, and the context parts of a Launch's first
-Call are the publication's."""
+and when it was sent, the Events, and each Call's context parts are the
+publication's."""
 
 import json
 import re
@@ -93,8 +93,8 @@ TOOL_CALL_FACTS = (
     "result_characters",
     "saved_characters",
 )
-OPENING = ("system_prompt", "tool_schemas", "instruction_file", "prompt")
-"""The Context Part Kinds of a Launch's first Call that its lines say."""
+SUMMARY = "compact_summary"
+"""The Context Part Kind of a compaction's summary."""
 DENIALS = {"permission-rule": "rule", "user-rejected": "person"}
 """A Denial Kind by the `toolDenialKind` a result's line names."""
 
@@ -247,6 +247,16 @@ def _read(file: HomeFile, home: dict[str, HomeFile]) -> dict[str, Any]:
     opening: dict[str, list[Any]] | None = None if main else {"files": [], "tasks": []}
     """What the first Call of the Launch open, or of a sub-agent's thread,
     carries, as the lines so far say: none once it began."""
+    injected: list[dict[str, Any]] = []
+    """The parts the lines since the last Call's first line, or the Launch's
+    start, injected."""
+    skills = {
+        block["id"]: block["input"]["skill"]
+        for line in lines
+        for block in _blocks(line, "tool_use")
+        if block["name"] == "Skill"
+    }
+    """The skill each `Skill` call asked for, by its id."""
     launches: list[dict[str, Any]] = []
     calls: dict[str, dict[str, Any]] = {}
     exited, prompts, enqueued = True, 0, None
@@ -283,6 +293,7 @@ def _read(file: HomeFile, home: dict[str, HomeFile]) -> dict[str, Any]:
             )
             exited = False
             opening = {"files": [], "tasks": []}
+            injected = []
         if main and launches[-1]["components"] is None and "version" in line:
             launches[-1]["components"] = [
                 {"component": "claude-code", "version": line["version"]}
@@ -297,7 +308,30 @@ def _read(file: HomeFile, home: dict[str, HomeFile]) -> dict[str, Any]:
                     attached["command"]
                 )
                 continue
-            assert attached["type"] == "instructions" and opening is not None
+            if attached["type"] == "nested_memory":
+                loaded = attached["content"]["content"]
+                assert line["rendered"] == [
+                    {"content": f"Contents of {attached['path']}:\n\n{loaded}"}
+                ]
+                injected.append(
+                    {
+                        "kind": "instruction_file",
+                        "name": attached["path"],
+                        "characters": len(loaded),
+                    }
+                )
+                continue
+            if attached["type"] != "instructions":
+                (shown,) = line["rendered"]
+                injected.append(
+                    {
+                        "kind": "reminder",
+                        "name": attached["type"],
+                        "characters": len(shown["content"]),
+                    }
+                )
+                continue
+            assert opening is not None
             opening["files"] += [
                 {
                     "kind": "instruction_file",
@@ -328,6 +362,19 @@ def _read(file: HomeFile, home: dict[str, HomeFile]) -> dict[str, Any]:
             occurred("api_error", True, line, line["apiErrorStatus"])
         elif [block["text"] for block in _blocks(line, "text")] == [INTERRUPTION]:
             occurred("interrupt", False, line, None)
+        elif line["type"] == "user" and line.get("isCompactSummary"):
+            said = line["message"]["content"]
+            injected.append({"kind": "compact_summary", "characters": len(said)})
+        elif line["type"] == "user" and line.get("isMeta"):
+            (said,) = _blocks(line, "text")
+            assert said["text"].startswith("Base directory for this skill: ")
+            injected.append(
+                {
+                    "kind": "skill_body",
+                    "name": skills[line["sourceToolUseID"]],
+                    "characters": len(said["text"]),
+                }
+            )
         elif line["type"] == "user" and main and "promptSource" in line:
             said = line["message"]["content"]
             if enqueued is not None:
@@ -377,19 +424,22 @@ def _read(file: HomeFile, home: dict[str, HomeFile]) -> dict[str, Any]:
                     call["prompt"] = prompts
                 if early:
                     call["events"], early = early, []
+                parts = injected
                 if opening is not None:
                     parts = (
                         _shaped(shapes[requests[line["requestRef"]]["shapeHash"]])
                         if "requestRef" in line
                         else []
                     )
-                    parts += opening["files"] + [
+                    parts += opening["files"] + injected
+                    parts += [
                         {"kind": "prompt", "characters": characters}
                         for characters in opening["tasks"]
                     ]
-                    if parts:
-                        call["context_parts"] = parts
                     opening = None
+                if parts:
+                    call["context_parts"] = parts
+                injected = []
                 calls[message["id"]] = call
             call = calls[message["id"]]
             spent = message["usage"]
@@ -461,11 +511,8 @@ def _facts(publication: dict[str, Any]) -> dict[str, Any]:
             {name: asked[name] for name in TOOL_CALL_FACTS if name in asked}
             for asked in call.get("tool_calls", [])
         ]
-        parts = [
-            part for part in call.get("context_parts", []) if part["kind"] in OPENING
-        ]
-        if parts:
-            facts["context_parts"] = parts
+        if "context_parts" in call:
+            facts["context_parts"] = call["context_parts"]
         cut["calls"].append(facts)
     return cut
 
@@ -534,7 +581,11 @@ def _resumed() -> Scenario:
                                         ),
                                     ),
                                     Compaction(at=52, trigger="manual", before=900),
-                                    Call(at=55, tokens=Tokens(input=6, output=1)),
+                                    Call(
+                                        at=55,
+                                        tokens=Tokens(input=6, output=1),
+                                        carried=(Carried("compact_summary", 640),),
+                                    ),
                                 ),
                             ),
                         ),
@@ -550,9 +601,9 @@ class TestTheHome:
         assert [file.path for file in Builder(SCENARIO, UNTIL).files()] == [
             f"projects/-work-RecipeBox/{HALVING}.jsonl",
             f"projects/-work-RecipeBox/{HALVING}/tool-results"
-            "/mcp-pantry-list_recipes-toolu_0003.txt",
+            "/mcp-pantry-list_recipes-toolu_0004.txt",
             f"projects/-work-RecipeBox/{HALVING}/subagents/agent-{COUNTING}.jsonl",
-            f"projects/-work-RecipeBox/{HALVING}/tool-results/toolu_0007.txt",
+            f"projects/-work-RecipeBox/{HALVING}/tool-results/toolu_0008.txt",
             f"projects/-work-BikeLog/{GEARS}.jsonl",
         ]
 
@@ -687,9 +738,9 @@ class TestAPublicationIsWhatItsFileSays:
         home = {file.path: file for file in Builder(SCENARIO, UNTIL).files()}
         stated = f"projects/-work-RecipeBox/{HALVING}/tool-results"
 
-        assert len(home[f"{stated}/toolu_0007.txt"].content) == 33_180
+        assert len(home[f"{stated}/toolu_0008.txt"].content) == 33_180
         assert (
-            len(home[f"{stated}/mcp-pantry-list_recipes-toolu_0003.txt"].content)
+            len(home[f"{stated}/mcp-pantry-list_recipes-toolu_0004.txt"].content)
             == 48_300
         )
 
@@ -745,6 +796,7 @@ class TestTheLines:
         assert summary["timestamp"] == stamp(
             builder.when(150) - timedelta(milliseconds=300)
         )
+        assert len(summary["message"]["content"]) == 8_400
         assert asked["type"] == "api-request"
         assert (after["type"], after["parentUuid"]) == ("assistant", summary["uuid"])
         assert {made["version"], summary["version"]} == {"2.1.317"}
@@ -908,6 +960,140 @@ class TestTheLines:
         with pytest.raises(ValueError, match=refused):
             Builder(scenario, UNTIL).files()
 
+    def test_what_a_later_call_carries_is_written_before_its_first_request(
+        self,
+    ) -> None:
+        """A skill's body is the expansion of the `Skill` call that asked
+        for it, a reminder an attachment shown to the model, and an
+        instruction file loaded later a `nested_memory` one, each as long as
+        the script has it."""
+        halving, _, gears = _transcripts(Builder(SCENARIO, UNTIL))
+        lines = _lines(halving)
+        asked = [
+            place for place, line in enumerate(lines) if line["type"] == "api-request"
+        ]
+        (loading,) = [
+            (line, block)
+            for line in lines
+            for block in _blocks(line, "tool_use")
+            if block["name"] == "Skill"
+        ]
+        (body,) = [place for place, line in enumerate(lines) if line.get("isMeta")]
+        (said,) = _blocks(lines[body], "text")
+        (launched,) = [
+            line
+            for line in lines
+            for block in _blocks(line, "tool_result")
+            if block["tool_use_id"] == loading[1]["id"]
+        ]
+        (noted,) = [
+            place
+            for place, line in enumerate(lines)
+            if line["type"] == "attachment"
+            and line["attachment"]["type"] == "bash_output_audience_note"
+        ]
+
+        assert loading[1]["input"] == {"skill": "pantry:scaling"}
+        assert launched["message"]["content"][0]["content"] == (
+            "Launching skill: pantry:scaling"
+        )
+        assert (lines[body]["type"], lines[body]["sourceToolUseID"]) == (
+            "user",
+            loading[1]["id"],
+        )
+        assert said["text"].startswith("Base directory for this skill: ")
+        assert len(said["text"]) == 4_300
+        assert asked[1] < body < asked[2]
+        assert lines[noted]["rendered"] == [{"content": text(186)}]
+        assert asked[2] < noted < asked[3]
+        assert lines[asked[3]]["timestamp"] == lines[noted]["timestamp"]
+        (nested,) = [
+            line
+            for line in _lines(gears)
+            if line["type"] == "attachment"
+            and line["attachment"]["type"] == "nested_memory"
+        ]
+        assert nested["attachment"]["path"] == "/work/BikeLog/rides/CLAUDE.md"
+        assert len(nested["attachment"]["content"]["content"]) == 620
+
+    @pytest.mark.parametrize(
+        ("steps", "refused"),
+        [
+            (
+                (
+                    Compaction(at=4, trigger="manual", before=900),
+                    Call(at=9, tokens=Tokens(output=1)),
+                ),
+                "a part of the next Call of its Launch",
+            ),
+            (
+                (Call(at=9, tokens=Tokens(output=1), carried=(Carried(SUMMARY, 40),)),),
+                "the summary of each compaction since the Call before it",
+            ),
+            (
+                (
+                    Compaction(at=4, trigger="manual", before=900),
+                    Call(
+                        at=9,
+                        tokens=Tokens(output=1),
+                        carried=(Carried("reminder", 40, "date"), Carried(SUMMARY, 40)),
+                    ),
+                ),
+                "listed as its lines are written",
+            ),
+            (
+                (
+                    Call(
+                        at=9,
+                        tokens=Tokens(output=1),
+                        carried=(Carried("reminder", 40),),
+                    ),
+                ),
+                "of the kind `reminder` is named",
+            ),
+            (
+                (
+                    Call(
+                        at=9,
+                        tokens=Tokens(output=1),
+                        carried=(Carried("digest_section", 40, "Phase P1"),),
+                    ),
+                ),
+                "No line is written for a part of the kind `digest_section`",
+            ),
+            (
+                (
+                    Call(
+                        at=9,
+                        tokens=Tokens(output=1),
+                        tools=(ToolUse("Skill", "loom:weave", took=1, characters=27),),
+                        carried=(Carried("skill_body", 900, "loom:weave"),),
+                    ),
+                ),
+                "expansion of a `Skill` call before it",
+            ),
+        ],
+        ids=[
+            "a compaction the Call after carries no summary of",
+            "a summary with no compaction",
+            "a summary after what else was injected",
+            "a reminder of no type",
+            "a part no line says",
+            "a skill's body its own Call asked for",
+        ],
+    )
+    def test_a_later_part_no_line_can_say_is_refused(
+        self, steps: tuple[Call | Compaction, ...], refused: str
+    ) -> None:
+        session = _resumed().sessions[0]
+        opened = Call(at=2, tokens=Tokens(input=10))
+        prompt = Prompt(at=0, source="typed", characters=20, steps=(opened, *steps))
+        launch = Launch(versions=(("claude-code", "2.1.317"),), prompts=(prompt,))
+        scenario = replace(_resumed(), sessions=(replace(session, launches=(launch,)),))
+
+        with pytest.raises(ValueError, match=refused):
+            Builder(scenario, UNTIL).files()
+
     def test_a_request_keeps_what_the_last_one_sent_that_its_chain_still_holds(
         self,
     ) -> None:
@@ -927,20 +1113,20 @@ class TestTheLines:
         assert [
             (request["keep"], len(request["tail"])) for request in sent(halving)
         ] == [
-            (0, 2),
-            (2, 2),
+            (0, 4),
             (4, 2),
-            (6, 2),
-            (8, 0),
+            (6, 3),
+            (9, 3),
+            (12, 0),
             (0, 1),
             (1, 2),
         ]
         assert [(request["keep"], len(request["tail"])) for request in sent(gears)] == [
-            (0, 2),
-            (2, 2),
-            (4, 2),
-            (5, 1),
-            (6, 3),
+            (0, 3),
+            (3, 3),
+            (6, 2),
+            (7, 1),
+            (8, 3),
         ]
 
     def test_an_attempt_that_failed_is_its_request_and_the_error_it_met(
@@ -1283,11 +1469,16 @@ class TestTheLines:
 
     def test_a_hooks_error_is_no_message_a_request_sends(self) -> None:
         lines = _lines(_transcripts(Builder(SCENARIO, UNTIL))[2])
-        (error,) = [line for line in lines if line["type"] == "attachment"][1:]
+        (error,) = [
+            line
+            for line in lines
+            if line["type"] == "attachment"
+            and line["attachment"]["type"] == "hook_non_blocking_error"
+        ]
         asked = [line for line in lines if line["type"] == "api-request"]
 
-        assert error["attachment"]["type"] == "hook_non_blocking_error"
-        assert (asked[2]["keep"], len(asked[2]["tail"])) == (4, 2)
+        assert lines.index(error) < lines.index(asked[2])
+        assert (asked[2]["keep"], len(asked[2]["tail"])) == (6, 2)
 
     def test_hooks_that_differ_on_keeping_the_run_from_ending_are_refused(
         self,

@@ -13,6 +13,7 @@ from pilot_collector.carry import (
     Occurred,
     Open,
     Opening,
+    Part,
     Prompted,
     Ran,
     Requested,
@@ -33,6 +34,7 @@ def _carry(
     occurred: int = 0,
     ran: int = 0,
     loaded: int = 0,
+    injected: int = 0,
 ) -> Carry:
     """A carry no other shares a word or a time with."""
     return Carry(
@@ -109,6 +111,10 @@ def _carry(
                 ),
                 (1_000 + place,),
             ),
+            injected=tuple(
+                Part("reminder", 400 + named, f"total_tokens_reminder-{place}-{named}")
+                for named in range(injected)
+            ),
             queue=tuple(
                 (
                     digest(f"{place} {waiting}".encode()),
@@ -134,14 +140,15 @@ def _path(name: str) -> Path:
 
 class TestACarrysSize:
     def test_it_is_counted_at_no_less_than_the_memory_it_takes(self) -> None:
-        for queued, awaited, requested, occurred, ran, loaded in (
-            (0, 0, 0, 0, 0, 0),
-            (40, 0, 0, 0, 0, 0),
-            (0, 3, 0, 0, 0, 0),
-            (0, 0, 7, 0, 0, 0),
-            (0, 0, 0, 9, 0, 0),
-            (0, 0, 0, 0, 6, 0),
-            (0, 0, 0, 0, 0, 8),
+        for queued, awaited, requested, occurred, ran, loaded, injected in (
+            (0, 0, 0, 0, 0, 0, 0),
+            (40, 0, 0, 0, 0, 0, 0),
+            (0, 3, 0, 0, 0, 0, 0),
+            (0, 0, 7, 0, 0, 0, 0),
+            (0, 0, 0, 9, 0, 0, 0),
+            (0, 0, 0, 0, 6, 0, 0),
+            (0, 0, 0, 0, 0, 8, 0),
+            (0, 0, 0, 0, 0, 0, 12),
         ):
             tracemalloc.start()
             before, _ = tracemalloc.get_traced_memory()
@@ -154,6 +161,7 @@ class TestACarrysSize:
                     occurred=occurred,
                     ran=ran,
                     loaded=loaded,
+                    injected=injected,
                 )
                 for place in range(1_000, 1_400)
             ]
@@ -180,6 +188,9 @@ class TestACarrysSize:
 
     def test_an_instruction_file_the_boundarys_call_carries_counts(self) -> None:
         assert _carry(loaded=2).size > _carry(loaded=1).size > _carry().size
+
+    def test_a_part_injected_before_the_boundarys_call_counts(self) -> None:
+        assert _carry(injected=2).size > _carry(injected=1).size > _carry().size
 
     def test_what_the_boundarys_call_carries_counts(self) -> None:
         carry = _carry()

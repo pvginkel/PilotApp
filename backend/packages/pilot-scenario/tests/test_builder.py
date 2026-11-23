@@ -15,6 +15,7 @@ import pilot_scenario
 from pilot_scenario import COLLECTOR, SCENARIO, Builder, Scenario, SentTurn
 from pilot_scenario.script import (
     Call,
+    Carried,
     Compaction,
     Launch,
     Occurrence,
@@ -210,7 +211,7 @@ class TestAMainThread:
             },
             "tool_calls": [
                 {
-                    "tool_use_id": "toolu_0003",
+                    "tool_use_id": "toolu_0004",
                     "tool": "mcp__pantry__list_recipes",
                     "mcp_server": "pantry",
                     "first_argument": "stew",
@@ -222,7 +223,7 @@ class TestAMainThread:
                     "saved_characters": 48_300,
                 },
                 {
-                    "tool_use_id": "toolu_0004",
+                    "tool_use_id": "toolu_0005",
                     "tool": "Bash",
                     "first_argument": "python scale.py stew 0.5",
                     "requested_at": _at(92),
@@ -244,8 +245,9 @@ class TestAMainThread:
     def test_a_launchs_first_call_carries_the_prompts_received_before_it(
         self,
     ) -> None:
-        """Beside its system prompt, its tools and its instruction files, as
-        the script has them; no later Call carries a Prompt."""
+        """Beside its system prompt, its tools, its instruction files and
+        what was injected before it, as the script has them; no later Call
+        carries a Prompt."""
         first, *later = _built()["halving"]["calls"]
         waited = Prompt(at=0, source="typed", characters=20)
         answered = Prompt(
@@ -274,6 +276,8 @@ class TestAMainThread:
                 "name": "/work/RecipeBox/CLAUDE.md",
                 "characters": 3_750,
             },
+            {"kind": "reminder", "name": "skill_listing", "characters": 2_870},
+            {"kind": "reminder", "name": "date", "characters": 96},
             {"kind": "prompt", "characters": 412},
         ]
         assert not any(
@@ -411,8 +415,8 @@ class TestAMainThread:
             for asked in call.get("tool_calls", [])
             if "denial_kind" in asked
         ] == [
-            ("toolu_0009", "hook", True),
-            ("toolu_0010", "rule", True),
+            ("toolu_0010", "hook", True),
+            ("toolu_0011", "rule", True),
             ("toolu_0003", "person", True),
         ]
 
@@ -552,7 +556,11 @@ class TestAMainThread:
                                     characters=12,
                                     steps=(
                                         Compaction(at=44, trigger="manual", before=900),
-                                        Call(at=50, tokens=Tokens(output=3)),
+                                        Call(
+                                            at=50,
+                                            tokens=Tokens(output=3),
+                                            carried=(Carried("compact_summary", 640),),
+                                        ),
                                     ),
                                 ),
                             ),

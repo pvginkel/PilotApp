@@ -161,8 +161,8 @@ class TestTheScenario:
 
     def test_a_line_says_who_wrote_it(self, tmp_path: Path) -> None:
         """Pilot's brief and a person's typing on a main thread, with a
-        notice for each compaction's summary, and the parent agent's task on
-        a sub-agent's."""
+        notice for each compaction's summary and each skill's body, and the
+        parent agent's task on a sub-agent's."""
         threads = _scenario(tmp_path)
         sources = {
             prompt["source"]
@@ -187,7 +187,13 @@ class TestTheScenario:
                 for launch in publication["launches"]
                 for prompt in launch["prompts"]
             ]
-            assert writers.count("notice") == len(publication.get("compactions", []))
+            expanded = [
+                part
+                for call in publication["calls"]
+                for part in call.get("context_parts", [])
+                if part["kind"] in ("compact_summary", "skill_body")
+            ]
+            assert writers.count("notice") == len(expanded)
         assert any("compactions" in publication for publication, _ in threads)
 
 

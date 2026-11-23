@@ -2,18 +2,19 @@
 and `ben`, the projects `recipe-box` and `bike-log`.
 
 Pilot is sent to halve the stew in the recipe box, an errand's first leg. Its
-session reads the recipe, has a sub-agent count the servings, meets a
-failing command and an API error its request is sent again after, and
-carries on past a compaction, missing the cache, a Stop hook tidying up at
-its end; two of its tools' outputs are too large and are saved to disk. The
-sub-agent asks for Opus once and Haiku answers in its place, while a hook
-keeps it from the pantry's token and a permission rule from the pantry's
-stock, and its last answer runs out of tokens. Ada, by hand, looks at the
-bike log's gear table, one of her two Stop hooks failing, stops the command
-her second question started, takes that question back and turns down the
-edit Claude then asks for, and comes back after the cache has lapsed, each
-time missing it: one of the first rides' conversations, a group of work
-done before Pilot ran any.
+session reads the recipe, has a sub-agent count the servings while it loads
+the pantry's scaling skill, meets a failing command and an API error its
+request is sent again after, and carries on past a compaction, missing the
+cache, a Stop hook tidying up at its end; two of its tools' outputs are too
+large and are saved to disk. The sub-agent asks for Opus once and Haiku
+answers in its place, while a hook keeps it from the pantry's token and a
+permission rule from the pantry's stock, and its last answer runs out of
+tokens. Ada, by hand, looks at the bike log's gear table, which loads the
+rides' own instruction file, one of her two Stop hooks failing, stops the
+command her second question started, takes that question back and turns
+down the edit Claude then asks for, and comes back after the cache has
+lapsed, each time missing it: one of the first rides' conversations, a group
+of work done before Pilot ran any.
 
 The model names are the public ones. Everything else is invented.
 """
@@ -142,6 +143,8 @@ HALVING = Session(
                                     3_750,
                                     "/work/RecipeBox/CLAUDE.md",
                                 ),
+                                Carried("reminder", 2_870, "skill_listing"),
+                                Carried("reminder", 96, "date"),
                             ),
                             tools=(
                                 ToolUse(
@@ -166,6 +169,9 @@ HALVING = Session(
                                     took=45,
                                     characters=1_900,
                                     spawns="counting",
+                                ),
+                                ToolUse(
+                                    "Skill", "pantry:scaling", took=1, characters=31
                                 ),
                             ),
                         ),
@@ -206,6 +212,9 @@ HALVING = Session(
                             sent=102,
                             retried=(Retry(sent=96, failed=101, status=529),),
                             effort="high",
+                            carried=(
+                                Carried("reminder", 186, "bash_output_audience_note"),
+                            ),
                             tokens=Tokens(
                                 input=14,
                                 cache_write_1h=1_150,
@@ -296,6 +305,7 @@ GEARS = Session(
                                 Carried(
                                     "instruction_file", 1_480, "/work/BikeLog/CLAUDE.md"
                                 ),
+                                Carried("reminder", 412, "environment"),
                             ),
                             tools=(
                                 ToolUse(
@@ -307,6 +317,13 @@ GEARS = Session(
                             at=326,
                             sent=313,
                             name="the ratios",
+                            carried=(
+                                Carried(
+                                    "instruction_file",
+                                    620,
+                                    "/work/BikeLog/rides/CLAUDE.md",
+                                ),
+                            ),
                             tokens=Tokens(
                                 input=8,
                                 cache_write_5m=1_700,

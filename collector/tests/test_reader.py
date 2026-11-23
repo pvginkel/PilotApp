@@ -20,6 +20,7 @@ from pilot_collector.reader import UnreadableError, read
 from tests import support
 from tests.support import (
     AGENT,
+    BODY,
     DIRECTORY,
     FOLDER,
     MANAGED,
@@ -27,12 +28,14 @@ from tests.support import (
     Line,
     answering,
     assistant,
+    attached,
     beside,
     boundary,
     chained,
     cost,
     denied,
     erred,
+    expanded,
     fallback,
     fell_back,
     filed,
@@ -41,9 +44,11 @@ from tests.support import (
     hooked,
     instructions,
     interruption,
+    invoked,
     linked,
     loaded,
     moment,
+    nested,
     over_the_tokens,
     queue,
     request,
@@ -121,10 +126,11 @@ CALL = (
     "tokens",
     "tool_calls",
     "events",
+    "context_parts",
 )
 OPENING = ("system_prompt", "tool_schemas", "instruction_file", "prompt")
-"""The Context Part Kinds a Launch's first Call carries that the reader
-reads."""
+"""The Context Part Kinds a Launch's first Call carries that no later Call
+does."""
 
 
 def _resumed() -> Scenario:
@@ -188,13 +194,6 @@ def _cut(publication: dict[str, Any]) -> dict[str, Any]:
     cut["compactions"] = publication.get("compactions", [])
     cut["calls"] = [
         {name: call[name] for name in CALL if name in call}
-        | {
-            "context_parts": [
-                part
-                for part in call.get("context_parts", [])
-                if part["kind"] in OPENING
-            ]
-        }
         for call in publication["calls"]
     ]
     return cut
@@ -378,12 +377,24 @@ class TestTheScenario:
         assert any(len(ran) > 1 for ran in runs)
         for publication in publications:
             first, *later = publication["calls"]
-            assert {part["kind"] for part in first["context_parts"]} == set(OPENING)
+            assert {part["kind"] for part in first["context_parts"]} >= set(OPENING)
             assert not any(
-                part["kind"] in OPENING
+                part["kind"] in ("system_prompt", "tool_schemas", "prompt")
                 for call in later
                 for part in call.get("context_parts", [])
             )
+        assert {
+            (later > 0, part["kind"])
+            for publication in publications
+            for later, call in enumerate(publication["calls"])
+            for part in call.get("context_parts", [])
+        } >= {
+            (False, "reminder"),
+            (True, "reminder"),
+            (True, "instruction_file"),
+            (True, "skill_body"),
+            (True, "compact_summary"),
+        }
         assert [
             [part["kind"] for part in call.get("context_parts", [])]
             for call in resumed[0]["calls"]
@@ -2398,7 +2409,7 @@ class TestContextParts:
         lines = linked(
             [
                 user(0, "Count the threads."),
-                user(0.1, "Base directory for this skill: /loom/skills/count")
+                user(0.1, "Caveat: the loom's own commands ran below.")
                 | {"isMeta": True},
                 instructions(
                     0.2, loaded("Project", "# Looms", f"{DIRECTORY}/CLAUDE.md")
@@ -2421,6 +2432,286 @@ class TestContextParts:
                 ("prompt", None, len("Count the threads.")),
             ],
             [],
+        ]
+
+
+LOOMS = f"{DIRECTORY}/looms/CLAUDE.md"
+"""An instruction file of a folder below the working directory."""
+
+
+class TestInjectedParts:
+    def test_a_later_call_carries_what_was_injected_before_its_first_line(
+        self, tmp_path: Path
+    ) -> None:
+        """A skill's body, a reminder and an instruction file loaded under
+        way, in the file's order; a later Prompt is none."""
+        publication = _read(
+            tmp_path,
+            linked(
+                [
+                    typed(0),
+                    requesting(4, "toolu_01", "Skill", {"skill": "loom:weave"}),
+                    result(5, "toolu_01", "Launching skill: loom:weave"),
+                    expanded(5.1),
+                    attached(5.2, "date", "Today is a weaving day."),
+                    nested(5.3, LOOMS, "# Looms\n\nWarp first."),
+                    assistant(9, "msg_02"),
+                    attached(9.5, "total_tokens_reminder", "Plenty left."),
+                    typed(10, "Weft now."),
+                    assistant(14, "msg_03"),
+                ]
+            ),
+        )
+
+        assert _parts(publication) == [
+            [("prompt", None, len("Warp the loom."))],
+            [
+                ("skill_body", "loom:weave", len(BODY)),
+                ("reminder", "date", len("Today is a weaving day.")),
+                ("instruction_file", LOOMS, len("# Looms\n\nWarp first.")),
+            ],
+            [("reminder", "total_tokens_reminder", len("Plenty left."))],
+        ]
+        assert len(_sources(publication)) == 2
+
+    def test_a_launchs_first_call_carries_the_attachments_shown_before_it(
+        self, tmp_path: Path
+    ) -> None:
+        """After its instruction files and before its Prompts: the
+        attachment that lists the files is no reminder."""
+        publication = _read(
+            tmp_path,
+            linked(
+                [
+                    typed(0),
+                    instructions(
+                        0.1, loaded("Project", "# Looms", f"{DIRECTORY}/CLAUDE.md")
+                    ),
+                    attached(0.2, "skill_listing", "- loom:weave: Weave a row."),
+                    attached(0.3, "date", "Today is a weaving day."),
+                    assistant(4, "msg_01"),
+                ]
+            ),
+        )
+
+        assert _parts(publication) == [
+            [
+                ("instruction_file", f"{DIRECTORY}/CLAUDE.md", 7),
+                ("reminder", "skill_listing", len("- loom:weave: Weave a row.")),
+                ("reminder", "date", len("Today is a weaving day.")),
+                ("prompt", None, len("Warp the loom.")),
+            ]
+        ]
+
+    def test_a_reminder_is_as_long_as_all_the_text_it_was_shown(
+        self, tmp_path: Path
+    ) -> None:
+        shown = attached(0.2, "file", "Called Read.") | {
+            "rendered": [{"content": "Called Read."}, {"content": "Warp first."}]
+        }
+
+        publication = _read(tmp_path, linked([typed(0), shown, assistant(4)]))
+
+        assert _parts(publication)[0][0] == ("reminder", "file", 23)
+
+    @pytest.mark.parametrize(
+        "line",
+        [
+            attached(5, "date"),
+            attached(5, "deferred_tools_record", tools=["Weave"]),
+            attached(5, "date", "Today is a weaving day.") | {"rendered": []},
+            hook_failed(5, "guard.sh"),
+            taken(5, "And the weft.") | {"rendered": [{"content": "And the weft."}]},
+        ],
+        ids=[
+            "an older version's",
+            "one never shown",
+            "one shown nothing",
+            "a hook's error",
+            "a message taken mid-run",
+        ],
+    )
+    def test_an_attachment_shown_nothing_or_a_message_is_no_part(
+        self, line: Line, tmp_path: Path
+    ) -> None:
+        publication = _read(
+            tmp_path,
+            linked([typed(0), assistant(4, "msg_01"), line, assistant(9, "msg_02")]),
+        )
+
+        assert _parts(publication)[1] == []
+
+    def test_each_skill_shown_again_is_a_body_of_its_own(self, tmp_path: Path) -> None:
+        publication = _read(
+            tmp_path,
+            linked(
+                [
+                    typed(0),
+                    assistant(4, "msg_01"),
+                    boundary(5),
+                    summary(4.7),
+                    invoked(5.1, ("loom:weave", "Weave tight."), ("loom:dye", "Dye.")),
+                    assistant(9, "msg_02"),
+                ]
+            ),
+        )
+
+        assert _parts(publication)[1] == [
+            (
+                "compact_summary",
+                None,
+                len("The loom so far: warped, not yet threaded."),
+            ),
+            ("skill_body", "loom:weave", len("Weave tight.")),
+            ("skill_body", "loom:dye", len("Dye.")),
+        ]
+
+    @pytest.mark.parametrize(
+        ("source", "skill"),
+        [
+            ("toolu_01", "loom:weave"),
+            (None, None),
+            ("toolu_99", None),
+            ("toolu_02", None),
+        ],
+        ids=[
+            "its Skill call's",
+            "a typed command's",
+            "a call of no line",
+            "another tool's call",
+        ],
+    )
+    def test_a_skills_body_is_named_by_the_skill_its_call_asked_for(
+        self, source: str | None, skill: str | None, tmp_path: Path
+    ) -> None:
+        asked = requesting(4, "toolu_01", "Skill", {"skill": "loom:weave"})
+        asked["message"]["content"].append(
+            {"type": "tool_use", "id": "toolu_02", "name": "Bash", "input": {}}
+        )
+        publication = _read(
+            tmp_path,
+            linked(
+                [
+                    typed(0),
+                    asked,
+                    result(5, "toolu_01", "Launching skill: loom:weave"),
+                    result(5, "toolu_02"),
+                    expanded(5.1, source),
+                    assistant(9, "msg_02"),
+                ]
+            ),
+        )
+
+        assert _parts(publication)[1] == [("skill_body", skill, len(BODY))]
+
+    def test_a_meta_line_that_is_no_skills_body_is_no_part(
+        self, tmp_path: Path
+    ) -> None:
+        caveat = user(5, "Caveat: the loom's own commands ran below.") | {
+            "isMeta": True
+        }
+
+        publication = _read(
+            tmp_path,
+            linked([typed(0), assistant(4, "msg_01"), caveat, assistant(9, "msg_02")]),
+        )
+
+        assert _parts(publication)[1] == []
+
+    def test_a_compactions_summary_is_the_next_calls(self, tmp_path: Path) -> None:
+        publication = _read(
+            tmp_path,
+            linked(
+                [typed(0), assistant(4, "msg_01"), boundary(30), summary(29.7)]
+                + [assistant(40, "msg_02")]
+            ),
+        )
+
+        assert _parts(publication)[1] == [
+            ("compact_summary", None, len("The loom so far: warped, not yet threaded."))
+        ]
+
+    def test_a_later_instructions_attachment_is_its_files(self, tmp_path: Path) -> None:
+        publication = _read(
+            tmp_path,
+            linked(
+                [
+                    typed(0),
+                    assistant(4, "msg_01"),
+                    instructions(5, loaded("Project", "# Looms", LOOMS)),
+                    assistant(9, "msg_02"),
+                ]
+            ),
+        )
+
+        assert _parts(publication)[1] == [("instruction_file", LOOMS, 7)]
+
+    def test_what_was_injected_between_a_calls_lines_is_the_next_calls(
+        self, tmp_path: Path
+    ) -> None:
+        publication = _read(
+            tmp_path,
+            linked(
+                [
+                    typed(0),
+                    assistant(4, "msg_01", output=1),
+                    attached(4.5, "date", "Today is a weaving day."),
+                    assistant(5, "msg_01", output=3),
+                    assistant(9, "msg_02"),
+                ]
+            ),
+        )
+
+        assert _parts(publication) == [
+            [("prompt", None, len("Warp the loom."))],
+            [("reminder", "date", len("Today is a weaving day."))],
+        ]
+
+    def test_what_was_injected_before_a_launch_is_no_part_of_it(
+        self, tmp_path: Path
+    ) -> None:
+        """A process that exits sends no request after its last Call."""
+        publication = _read(
+            tmp_path,
+            linked(
+                [
+                    typed(0),
+                    assistant(4, "msg_01"),
+                    attached(5, "date", "Today is a weaving day."),
+                    cost(),
+                    typed(20, "Weft now."),
+                    assistant(24, "msg_02"),
+                ]
+            ),
+        )
+
+        assert _parts(publication) == [
+            [("prompt", None, len("Warp the loom."))],
+            [("prompt", None, len("Weft now."))],
+        ]
+
+    def test_a_sub_agents_injected_parts_are_read_as_a_main_threads(
+        self, tmp_path: Path
+    ) -> None:
+        lines = linked(
+            [
+                user(0, "Count the threads."),
+                attached(0.2, "date", "Today is a weaving day."),
+                requesting(4, "toolu_01", "Skill", {"skill": "loom:weave"}),
+                result(5, "toolu_01", "Launching skill: loom:weave"),
+                expanded(5.1),
+                assistant(9, "msg_02"),
+            ]
+        )
+
+        publication = read(filed(tmp_path, lines, AGENT), SETTINGS).publication
+
+        assert _parts(publication) == [
+            [
+                ("reminder", "date", len("Today is a weaving day.")),
+                ("prompt", None, len("Count the threads.")),
+            ],
+            [("skill_body", "loom:weave", len(BODY))],
         ]
 
 
