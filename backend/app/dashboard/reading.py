@@ -73,6 +73,7 @@ from app.dashboard.state import (
     Weeks,
     WrittenRatio,
     dec,
+    enc,
     instant,
     measure_key,
     write_value,
@@ -1156,11 +1157,11 @@ class _Reader:
             if text is None:
                 continue
             if text == Others.WRITTEN:
-                lit[written] = OTHERS
+                lit[enc(Others.WRITTEN)] = OTHERS
             elif color == TOKEN_KIND:
                 kinds = self.token_kinds()
                 if text in kinds:
-                    lit[written] = text
+                    lit[write_value(text)] = text
                 else:
                     self.fault(
                         part,

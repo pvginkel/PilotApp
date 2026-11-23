@@ -905,6 +905,20 @@ class TestLook:
             "output",
         )
 
+    @pytest.mark.parametrize(
+        ("written", "normal"),
+        [
+            ("col=source&lit=work,\u2026", "lit=%E2%80%A6,work"),
+            ("col=token_kind&lit=input,inpu%74", "lit=input"),
+        ],
+    )
+    def test_the_values_lit_read_back_as_written(
+        self, reads: Reads, written: str, normal: str
+    ) -> None:
+        once = write(_state(reads, written))
+        assert once.endswith(normal)
+        assert write(_state(reads, once)) == once
+
     def test_the_events_drawn_by_their_kinds(self, reads: Reads) -> None:
         assert _state(reads, "ev=hook_error,-cache_miss").events == (
             ("cache_miss", False),
