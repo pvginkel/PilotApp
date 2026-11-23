@@ -62,6 +62,7 @@ FACTS = {
 """What a publication says of its thread that its file's name, size, time
 and lines say."""
 
+LAUNCH_FACTS = ("started_at", "ended_at", "components", "prompts")
 CALL_FACTS = (
     "message_id",
     "prompt",
@@ -258,6 +259,11 @@ def _read(file: HomeFile, home: dict[str, HomeFile]) -> dict[str, Any]:
     }
     """The skill each `Skill` call asked for, by its id."""
     launches: list[dict[str, Any]] = []
+    timed: list[list[tuple[str, str | None]]] = []
+    """Each Launch's lines that carry a time: the time, and Claude Code's
+    version where the line names one."""
+    plugged: list[dict[str, str]] = []
+    """The version of each plugin a skill's body of each Launch's names."""
     calls: dict[str, dict[str, Any]] = {}
     exited, prompts, enqueued = True, 0, None
     early: list[dict[str, Any]] = []
@@ -279,25 +285,27 @@ def _read(file: HomeFile, home: dict[str, HomeFile]) -> dict[str, Any]:
             exited = True
         if "timestamp" not in line:
             continue
+        if main and not exited:
+            own = next((named for _, named in timed[-1] if named), None)
+            if own is not None and line.get("version") not in (None, own):
+                unnamed = 0
+                while timed[-1][-1 - unnamed][1] is None:
+                    unnamed += 1
+                timed.append(timed[-1][len(timed[-1]) - unnamed :])
+                del timed[-2][len(timed[-2]) - unnamed :]
+                launches.append({"prompts": []})
+                plugged.append({})
+                opening = {"files": [], "tasks": []}
+                injected = []
         if main and exited:
-            launches.append(
-                {
-                    "started_at": _time(line),
-                    "components": [
-                        {"component": "claude-code", "version": line["version"]}
-                    ]
-                    if "version" in line
-                    else None,
-                    "prompts": [],
-                }
-            )
+            launches.append({"prompts": []})
+            timed.append([])
+            plugged.append({})
             exited = False
             opening = {"files": [], "tasks": []}
             injected = []
-        if main and launches[-1]["components"] is None and "version" in line:
-            launches[-1]["components"] = [
-                {"component": "claude-code", "version": line["version"]}
-            ]
+        if main:
+            timed[-1].append((_time(line), line.get("version")))
         if line["type"] == "queue-operation" and line["operation"] == "enqueue":
             enqueued = line
         elif line["type"] == "attachment":
@@ -368,6 +376,14 @@ def _read(file: HomeFile, home: dict[str, HomeFile]) -> dict[str, Any]:
         elif line["type"] == "user" and line.get("isMeta"):
             (said,) = _blocks(line, "text")
             assert said["text"].startswith("Base directory for this skill: ")
+            base = (
+                said["text"]
+                .split("\n")[0]
+                .removeprefix("Base directory for this skill: ")
+            )
+            if main and "/plugins/cache/" in base:
+                _, plugin, version, *_ = base.split("/plugins/cache/")[1].split("/")
+                plugged[-1].setdefault(plugin, version)
             injected.append(
                 {
                     "kind": "skill_body",
@@ -479,8 +495,22 @@ def _read(file: HomeFile, home: dict[str, HomeFile]) -> dict[str, Any]:
                 _tool_call(asked, line, results.get(asked["id"]), home)
                 for asked in _blocks(line, "tool_use")
             ]
+    for launch, written, plugins in zip(launches, timed, plugged, strict=True):
+        launch["started_at"], launch["ended_at"] = written[0][0], written[-1][0]
+        launch["components"] = [
+            {
+                "component": "claude-code",
+                "version": next(named for _, named in written if named),
+            },
+            *(
+                {"component": f"plugin:{plugin}", "version": version}
+                for plugin, version in plugins.items()
+            ),
+        ]
     if main:
-        read["launches"] = launches
+        read["launches"] = [
+            {name: launch[name] for name in LAUNCH_FACTS} for launch in launches
+        ]
     read["calls"] = list(calls.values())
     return read
 
@@ -489,21 +519,7 @@ def _facts(publication: dict[str, Any]) -> dict[str, Any]:
     """A publication cut to the facts its file's lines carry."""
     cut = {name: fact for name, fact in publication.items() if name in FACTS}
     if "launches" in publication:
-        cut["launches"] = [
-            {
-                "started_at": launch["started_at"],
-                "components": launch["components"][:1],
-                "prompts": [
-                    {
-                        name: prompt[name]
-                        for name in ("received_at", "source", "characters", "hook_runs")
-                        if name in prompt
-                    }
-                    for prompt in launch["prompts"]
-                ],
-            }
-            for launch in publication["launches"]
-        ]
+        cut["launches"] = publication["launches"]
     cut["calls"] = []
     for call in publication["calls"]:
         facts = {name: call[name] for name in CALL_FACTS if name in call}
@@ -645,9 +661,20 @@ class TestTheHome:
             assert all(isinstance(line, dict) for line in _lines(file))
 
 
+def _killed() -> Scenario:
+    """The resumed thread, its first process killed."""
+    scenario = _resumed()
+    session = scenario.sessions[0]
+    first, later = session.launches
+    killed = (replace(first, killed=True), later)
+    return replace(scenario, sessions=(replace(session, launches=killed),))
+
+
 class TestAPublicationIsWhatItsFileSays:
     @pytest.mark.parametrize(
-        "scenario", [SCENARIO, _resumed()], ids=["the scenario", "a resumed thread"]
+        "scenario",
+        [SCENARIO, _resumed(), _killed()],
+        ids=["the scenario", "a resumed thread", "a killed process's thread"],
     )
     def test_each_thread_read_off_its_lines_is_its_publication(
         self, scenario: Scenario
@@ -1001,7 +1028,10 @@ class TestTheLines:
             "user",
             loading[1]["id"],
         )
-        assert said["text"].startswith("Base directory for this skill: ")
+        assert said["text"].startswith(
+            "Base directory for this skill: /home/ubuntu/.claude/plugins/cache"
+            "/larder/pantry/0.3.1/skills/scaling\n\n"
+        )
         assert len(said["text"]) == 4_300
         assert asked[1] < body < asked[2]
         assert lines[noted]["rendered"] == [{"content": text(186)}]
@@ -1305,6 +1335,56 @@ class TestTheLines:
         assert {line["version"] for line in lines[: ends[0]] if "version" in line} == {
             "2.1.317"
         }
+
+    def test_a_killed_process_writes_no_closing_line_and_the_next_another_version(
+        self,
+    ) -> None:
+        lines = _lines(Builder(_killed(), UNTIL).files()[0])
+        (end,) = [
+            place for place, line in enumerate(lines) if line["type"] == "cost-state"
+        ]
+        (started,) = [
+            place
+            for place, line in enumerate(lines)
+            if line.get("version") == "2.1.318"
+        ][:1]
+
+        assert end == len(lines) - 1
+        assert [line["type"] for line in lines[started - 3 : started + 1]] == [
+            "permission-mode",
+            "queue-operation",
+            "queue-operation",
+            "user",
+        ]
+        assert {line["version"] for line in lines[:started] if "version" in line} == {
+            "2.1.317"
+        }
+
+    def test_a_skill_of_no_plugin_lies_under_the_homes_skills(self) -> None:
+        session = _resumed().sessions[0]
+        loading = Call(
+            at=2,
+            tokens=Tokens(input=10),
+            tools=(ToolUse("Skill", "notes", took=1, characters=22),),
+        )
+        loaded = Call(
+            at=9,
+            tokens=Tokens(output=1),
+            carried=(Carried("skill_body", 400, "notes"),),
+        )
+        prompt = Prompt(at=0, source="typed", characters=20, steps=(loading, loaded))
+        launch = Launch(versions=(("claude-code", "2.1.317"),), prompts=(prompt,))
+        scenario = replace(_resumed(), sessions=(replace(session, launches=(launch,)),))
+
+        (body,) = [
+            line
+            for line in _lines(Builder(scenario, UNTIL).files()[0])
+            if line.get("isMeta")
+        ]
+
+        assert body["message"]["content"][0]["text"].startswith(
+            "Base directory for this skill: /home/ubuntu/.claude/skills/notes\n\n"
+        )
 
     def test_a_rewinds_prompt_follows_the_call_it_went_back_to(self) -> None:
         lines = _lines(Builder(_resumed(), UNTIL).files()[0])

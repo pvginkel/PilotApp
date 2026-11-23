@@ -17,12 +17,14 @@ where the chain leads from that line, with what the Call it leads to left
 the next, the lines named before it that the file holds no line of there,
 the request lines written since the last one a Call named, the Events before
 the transcript's first Call, the directory and the environment the file
-named first, the Launch open there and the latest Prompt it received, with
-the Hook Runs taken for that Prompt, what the lines before it record of the
-Context Parts of the boundary's Call where it is its Launch's first, the
-Context Parts injected before the boundary's Call, the prompts waiting in the
-queue, and those a `remove` took out of it that no message taken in the
-middle of a run has claimed. No id of any other line before the boundary is
+named first, the Launch open there, with its end so far, where the lines
+with a time since its last that named a version began, and the plugins it
+named, and the latest Prompt it received, with the Hook Runs taken for that
+Prompt, what the lines before it record of the Context Parts of the
+boundary's Call where it is its Launch's first, the Context Parts injected
+before the boundary's Call, the prompts waiting in the queue, and those a
+`remove` took out of it that no message taken in the middle of a run has
+claimed. No id of any other line before the boundary is
 held, and of no Call but the one the chain leads to; no request shape but
 those the boundary's Call's requests name.
 
@@ -39,7 +41,7 @@ from pathlib import Path
 _DIGEST = 16
 """The bytes of a digest."""
 
-_HELD = 1_280
+_HELD = 1_440
 """The bytes a carry is counted at beside its words and its queue."""
 
 _LEFT = 560
@@ -80,6 +82,10 @@ counted at."""
 _PART = 320
 """The bytes a Context Part injected is counted at beside its name."""
 
+_PLUGIN = 120
+"""The bytes a plugin the Launch open named is counted at beside its name
+and its version."""
+
 
 def digest(content: bytes) -> bytes:
     """What the collector remembers of bytes it read, to tell them from
@@ -97,6 +103,16 @@ class Open:
     does."""
     received: int
     """How many Prompts it received so far."""
+    ended_at: datetime
+    """The time of its last line so far that carries one."""
+    unnamed: tuple[datetime, datetime] | None = None
+    """Where its lines with a time since its last that named a version
+    began: its end before them and the first one's time; none where its
+    last such line names one, or none of its lines does. A line that names
+    another version starts a Launch from there."""
+    plugins: tuple[tuple[str, str], ...] = ()
+    """Each plugin its process loaded so far and its version, in the order
+    its lines first named them."""
 
 
 @dataclass(frozen=True)
@@ -311,6 +327,7 @@ class Carry:
         """The bytes of memory the carry is counted at."""
         stands = self.stands
         left = stands.leads.left
+        plugins = () if stands.launch is None else stands.launch.plugins
         prompt = stands.prompt
         runs = () if prompt is None else prompt.runs
         opening = stands.opening
@@ -332,6 +349,7 @@ class Carry:
                 if left is None
                 else (left.model, left.effort, left.version, left.shape)
             ),
+            *(word for plugin in plugins for word in plugin),
             *(() if prompt is None else (prompt.source,)),
             *(run.command for run in runs),
             *(path for path, _ in files),
@@ -346,6 +364,7 @@ class Carry:
             + (0 if opening is None else _OPENING)
             + _FILE * len(files)
             + _PART * len(stands.injected)
+            + _PLUGIN * len(plugins)
             + _SHAPE * len(shapes)
             + _AWAITED * len(stands.awaited)
             + _REQUESTED * len(stands.requests)

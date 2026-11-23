@@ -179,7 +179,7 @@ class TestTheCarry:
             ),
             directory=DIRECTORY,
             environment=None,
-            launch=Open(moment(0), support.VERSION, 1),
+            launch=Open(moment(0), support.VERSION, 1, moment(6)),
             prompt=Prompted(moment(0), "typed", len("Warp the loom.")),
             queue=(),
         )
@@ -210,19 +210,20 @@ class TestTheCarry:
     def test_it_counts_the_launches_that_exited_and_names_the_one_open(
         self, tmp_path: Path
     ) -> None:
+        later = {"version": "2.1.318"}
         lines = [
             typed(0),
             assistant(4, "msg_01"),
             cost(),
-            typed(60) | {"version": "2.1.318"},
-            typed(61),
-            assistant(64, "msg_02"),
+            typed(60) | later,
+            typed(61) | later,
+            assistant(64, "msg_02") | later,
         ]
 
         stands = read(filed(tmp_path, lines), SETTINGS).carry.stands
 
         assert (stands.launches, stands.prompts) == (1, 3)
-        assert stands.launch == Open(moment(60), "2.1.318", 2)
+        assert stands.launch == Open(moment(60), "2.1.318", 2, moment(61))
 
     def test_no_launch_is_open_where_the_last_call_starts_one(
         self, tmp_path: Path
@@ -247,8 +248,62 @@ class TestTheCarry:
 
         assert (stands.launches, stands.launch) == (
             0,
-            Open(moment(60), support.VERSION, 1),
+            Open(moment(60), support.VERSION, 1, moment(60)),
         )
+
+    def test_it_holds_the_open_launchs_end_and_the_plugins_it_named(
+        self, tmp_path: Path
+    ) -> None:
+        lines = linked(
+            [
+                typed(0),
+                expanded(1, None, support.plugin_body("dev", "0.10.92")),
+                assistant(4, "msg_01"),
+                assistant(9, "msg_02"),
+                assistant(10, "msg_02"),
+            ]
+        )
+
+        stands = read(filed(tmp_path, lines), SETTINGS).carry.stands
+
+        assert stands.launch == Open(
+            moment(0), support.VERSION, 1, moment(4), None, (("dev", "0.10.92"),)
+        )
+
+    def test_it_holds_where_the_lines_since_one_named_a_version_began(
+        self, tmp_path: Path
+    ) -> None:
+        """A line from the boundary on that names another version starts a
+        Launch from there."""
+        lines = [
+            typed(0),
+            assistant(4, "msg_01"),
+            queue("enqueue", 60, "Thread the heddles."),
+            queue("dequeue", 60.2),
+            assistant(64, "msg_02"),
+        ]
+
+        stands = read(filed(tmp_path, lines), SETTINGS).carry.stands
+
+        assert stands.launch == Open(
+            moment(0), support.VERSION, 1, moment(60.2), (moment(4), moment(60))
+        )
+
+    def test_the_plugins_the_launch_open_named_count_in_its_size(
+        self, tmp_path: Path
+    ) -> None:
+        def size(*plugins: str) -> int:
+            lines = [
+                typed(0),
+                *(
+                    expanded(1, None, support.plugin_body(plugin, "0.3.1"))
+                    for plugin in plugins
+                ),
+                assistant(4, "msg_01"),
+            ]
+            return read(filed(tmp_path, linked(lines)), SETTINGS).carry.size
+
+        assert size("dev", "kubecoder") > size("dev") > size()
 
     def test_it_holds_the_prompts_waiting_in_the_queue(self, tmp_path: Path) -> None:
         lines = [
@@ -660,12 +715,12 @@ class TestAFileThatGrew:
         assert [call.message_id for call in publication.calls] == ["msg_02", "msg_03"]
 
     @pytest.mark.parametrize(
-        ("scenario", "read_whole"),
-        [(SCENARIO, 3), (_resumed(), 0)],
+        ("scenario", "read_whole", "read_on"),
+        [(SCENARIO, 3, 81), (_resumed(), 0, 9)],
         ids=["the scenario", "a resumed thread"],
     )
     def test_a_scenarios_file_grown_a_line_at_a_time_reads_as_its_whole(
-        self, scenario: Scenario, read_whole: int, tmp_path: Path
+        self, scenario: Scenario, read_whole: int, read_on: int, tmp_path: Path
     ) -> None:
         """At every step the appended publication, on what Pilot held, is
         the whole one of the file as it then stands, and the carry it leaves
@@ -708,8 +763,7 @@ class TestAFileThatGrew:
                         assert taken.carry == whole.carry
                         appended += 1
                 held = whole
-        assert whole_instead == read_whole
-        assert appended >= 10
+        assert (whole_instead, appended) == (read_whole, read_on)
 
     def test_a_file_with_lines_written_early_grown_a_line_at_a_time_reads_as_its_whole(
         self, tmp_path: Path
@@ -1205,7 +1259,9 @@ class TestAFileThatGrew:
         assert launch.started_at == before.publication.launches[0].started_at
         assert [prompt.received_at for prompt in launch.prompts] == [moment(10)]
         assert [call.prompt for call in publication.calls] == [1, 2]
-        assert grown.carry.stands.launch == Open(moment(0), support.VERSION, 2)
+        assert grown.carry.stands.launch == Open(
+            moment(0), support.VERSION, 2, moment(10)
+        )
 
     def test_a_resumed_process_is_a_launch_at_the_next_place(
         self, tmp_path: Path
@@ -1217,7 +1273,7 @@ class TestAFileThatGrew:
                 [
                     cost(),
                     typed(60) | {"version": "2.1.318"},
-                    assistant(64, "msg_02"),
+                    assistant(64, "msg_02") | {"version": "2.1.318"},
                     cost(),
                     assistant(90, "msg_03"),
                 ],
@@ -1236,6 +1292,79 @@ class TestAFileThatGrew:
             (moment(90), support.VERSION, 0),
         ]
         assert _places(_again(tmp_path, grown)) == (3, 3, 3, 1)
+
+    def test_the_launch_open_at_the_boundary_ends_at_its_last_line_from_there_on(
+        self, tmp_path: Path
+    ) -> None:
+        before, grown = _grown(
+            tmp_path,
+            linked([typed(0), assistant(4, "msg_01"), assistant(9, "msg_02")]),
+            _continuing("line-3", [typed(12), queue("enqueue", 20, "Beat the weft.")]),
+        )
+
+        (launch,) = grown.publication.launches
+        assert (launch.started_at, launch.ended_at) == (moment(0), moment(20))
+        assert before.publication.launches[0].ended_at == moment(9)
+
+    def test_the_launch_open_at_the_boundary_names_the_plugins_named_before_it(
+        self, tmp_path: Path
+    ) -> None:
+        before, grown = _grown(
+            tmp_path,
+            linked(
+                [
+                    typed(0),
+                    expanded(1, None, support.plugin_body("dev", "0.10.92")),
+                    assistant(4, "msg_01"),
+                    assistant(9, "msg_02"),
+                ]
+            ),
+            _continuing(
+                "line-3",
+                [
+                    expanded(10, None, support.plugin_body("kubecoder", "0.15.4")),
+                    expanded(11, None, support.plugin_body("dev", "0.10.93")),
+                    assistant(14, "msg_03"),
+                ],
+            ),
+        )
+
+        whole = read(filed_again(tmp_path), SETTINGS)
+        (launch,) = grown.publication.launches
+        assert [(used.component, used.version) for used in launch.components] == [
+            ("claude-code", support.VERSION),
+            ("plugin:dev", "0.10.92"),
+            ("plugin:kubecoder", "0.15.4"),
+        ]
+        assert _held(before.publication, grown.publication) == whole.publication
+        assert grown.carry == whole.carry
+
+    def test_a_line_from_the_boundary_on_naming_another_version_starts_a_launch(
+        self, tmp_path: Path
+    ) -> None:
+        """From the queue's lines since the last line that named the earlier
+        version, which lie before the boundary."""
+        later = {"version": "2.1.318"}
+        before, grown = _grown(
+            tmp_path,
+            [
+                typed(0),
+                assistant(4, "msg_01"),
+                queue("enqueue", 60, "Thread the heddles."),
+                assistant(64, "msg_02") | later,
+            ],
+            [user(64.5, "Thread the heddles.", promptSource="queued") | later],
+        )
+
+        whole = read(filed_again(tmp_path), SETTINGS)
+        assert _places(grown.publication) == (2, 1, 2, 1)
+        assert [
+            (launch.started_at, launch.ended_at, len(launch.prompts))
+            for launch in grown.publication.launches
+        ] == [(moment(0), moment(4), 0), (moment(60), moment(64.5), 1)]
+        assert grown.publication.launches[1].prompts[0].received_at == moment(60)
+        assert _held(before.publication, grown.publication) == whole.publication
+        assert grown.carry == whole.carry
 
     def test_a_launch_names_its_version_once_a_line_from_the_boundary_on_does(
         self, tmp_path: Path

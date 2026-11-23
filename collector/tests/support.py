@@ -20,6 +20,8 @@ MANAGED = "/etc/claude-code/CLAUDE.md"
 START = datetime(2026, 11, 12, 9, 0, tzinfo=UTC)
 BODY = "Base directory for this skill: /loom/skills/weave\n\nWeave tight."
 """A skill's body."""
+CACHE = "/home/ubuntu/.claude/plugins/cache/looms"
+"""The folder of the home's cache a marketplace's plugins lie under."""
 
 type Line = dict[str, Any]
 
@@ -418,11 +420,20 @@ def invoked(seconds: float, *skills: tuple[str, str]) -> Line:
     return attached(seconds, "invoked_skills", shown, skills=held)
 
 
-def expanded(seconds: float, source: str | None = "toolu_01") -> Line:
+def expanded(seconds: float, source: str | None = "toolu_01", body: str = BODY) -> Line:
     """A skill's body as Claude Code expands it, for the `Skill` call
     `source` names, where one does."""
-    line = user(seconds, [words(BODY)]) | {"isMeta": True}
+    line = user(seconds, [words(body)]) | {"isMeta": True}
     return line if source is None else line | {"sourceToolUseID": source}
+
+
+def plugin_body(plugin: str, version: str, skill: str = "weave") -> str:
+    """The body of a plugin's skill, loaded at that version of the plugin:
+    its base directory under the plugin's cache."""
+    return (
+        f"Base directory for this skill: {CACHE}/{plugin}/{version}/skills/{skill}"
+        "\n\nWeave tight."
+    )
 
 
 def loaded(kind: str, content: str, path: str = MANAGED) -> dict[str, str]:

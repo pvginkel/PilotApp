@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any
 
 import pilot_scenario
+import pytest
 from pilot_scenario import COLLECTOR, SCENARIO, Builder, Scenario, SentTurn
 from pilot_scenario.script import (
     Call,
@@ -513,6 +514,177 @@ class TestAMainThread:
         }
         assert "group" not in built["halving"]
         assert "group" not in built["counting"]
+
+    def test_a_launch_ends_at_its_last_lines_time_whatever_came_before(
+        self,
+    ) -> None:
+        """A tool that took longer returns before one requested after it
+        that took less, whose result is the last line."""
+        call = Call(
+            at=5,
+            tokens=Tokens(input=10),
+            tools=(
+                ToolUse("Bash", "sleep 6", took=6, characters=40),
+                ToolUse("Read", "rides/gears.md", took=1, characters=40),
+            ),
+        )
+
+        (publication,) = Builder(_one(call), UNTIL).publications()
+
+        def at(moment: int) -> str:
+            return (UNTIL - timedelta(seconds=11 - moment)).isoformat()
+
+        (launch,) = publication["launches"]
+        assert (launch["started_at"], launch["ended_at"]) == (at(0), at(6))
+
+    def test_a_launch_names_each_plugin_a_skill_of_it_loaded_after_claude_code(
+        self,
+    ) -> None:
+        scaling = Call(
+            at=5,
+            tokens=Tokens(input=10),
+            tools=(
+                ToolUse("Skill", "pantry:scaling", took=1, characters=31),
+                ToolUse("Skill", "notes", took=1, characters=22),
+            ),
+        )
+        loaded = Call(
+            at=9,
+            tokens=Tokens(input=4),
+            carried=(
+                Carried("skill_body", 400, "notes"),
+                Carried("skill_body", 400, "pantry:scaling"),
+            ),
+        )
+        scenario = _one(scaling, loaded)
+        session = scenario.sessions[0]
+        (launch,) = session.launches
+        runs = (("plugin:pantry", "0.3.1"), *launch.versions)
+        scenario = replace(
+            scenario,
+            sessions=(replace(session, launches=(replace(launch, versions=runs),)),),
+        )
+
+        (publication,) = Builder(scenario, UNTIL).publications()
+
+        assert publication["launches"][0]["components"] == [
+            {"component": "claude-code", "version": "2.1.317"},
+            {"component": "plugin:pantry", "version": "0.3.1"},
+        ]
+
+    @pytest.mark.parametrize(
+        ("versions", "refused"),
+        [
+            (
+                (("claude-code", "2.1.317"),),
+                "its Launch names `plugin:pantry`",
+            ),
+            (
+                (
+                    ("claude-code", "2.1.317"),
+                    ("plugin:pantry", "0.3.1"),
+                    ("plugin:notes", "1.0.0"),
+                ),
+                "no line names `plugin:notes`",
+            ),
+            (
+                (("claude-code", "2.1.317"), ("plugin:pantry", "0.3.1"), ("cli", "1")),
+                "no line names `cli`",
+            ),
+        ],
+        ids=[
+            "a plugin's skill its Launch runs no version of",
+            "a plugin no skill of is loaded",
+            "a component no line names",
+        ],
+    )
+    def test_a_component_its_lines_do_not_name_is_refused(
+        self, versions: tuple[tuple[str, str], ...], refused: str
+    ) -> None:
+        call = Call(
+            at=5,
+            tokens=Tokens(input=10),
+            tools=(ToolUse("Skill", "pantry:scaling", took=1, characters=31),),
+        )
+        loaded = Call(
+            at=9,
+            tokens=Tokens(input=4),
+            carried=(Carried("skill_body", 400, "pantry:scaling"),),
+        )
+        scenario = _one(call, loaded)
+        session = scenario.sessions[0]
+        (launch,) = session.launches
+        scenario = replace(
+            scenario,
+            sessions=(
+                replace(session, launches=(replace(launch, versions=versions),)),
+            ),
+        )
+
+        with pytest.raises(ValueError, match=refused):
+            Builder(scenario, UNTIL).publications()
+
+    def test_a_killed_process_ends_at_its_last_line_and_the_next_starts_a_launch(
+        self,
+    ) -> None:
+        first = Launch(
+            versions=(("claude-code", "2.1.317"),),
+            prompts=(
+                Prompt(
+                    at=0,
+                    source="typed",
+                    characters=20,
+                    steps=(Call(at=5, tokens=Tokens(input=10)),),
+                ),
+            ),
+            killed=True,
+        )
+        later = Launch(
+            versions=(("claude-code", "2.1.318"),),
+            prompts=(
+                Prompt(
+                    at=40,
+                    source="sdk",
+                    characters=12,
+                    steps=(Call(at=44, tokens=Tokens(input=4)),),
+                ),
+            ),
+        )
+        scenario = _one()
+        session = scenario.sessions[0]
+        scenario = replace(
+            scenario, sessions=(replace(session, launches=(first, later)),)
+        )
+
+        (publication,) = Builder(scenario, UNTIL).publications()
+
+        def at(moment: int) -> str:
+            return (UNTIL - timedelta(seconds=44 - moment)).isoformat()
+
+        assert [
+            (launch["started_at"], launch["ended_at"], launch["components"])
+            for launch in publication["launches"]
+        ] == [
+            (at(0), at(5), [{"component": "claude-code", "version": "2.1.317"}]),
+            (at(40), at(44), [{"component": "claude-code", "version": "2.1.318"}]),
+        ]
+
+    def test_a_process_after_a_killed_one_under_its_version_is_refused(
+        self,
+    ) -> None:
+        """The two are one Launch in the file."""
+        prompt = Prompt(at=0, source="typed", characters=20)
+        scenario = _one()
+        session = scenario.sessions[0]
+        (launch,) = session.launches
+        killed = replace(launch, prompts=(prompt,), killed=True)
+        later = replace(launch, prompts=(replace(prompt, at=40),))
+        scenario = replace(
+            scenario, sessions=(replace(session, launches=(killed, later)),)
+        )
+
+        with pytest.raises(ValueError, match="joins its Launch"):
+            Builder(scenario, UNTIL).publications()
 
     def test_prompts_are_counted_through_the_launches(self) -> None:
         """A thread a process resumed: its second Launch's Prompt is the

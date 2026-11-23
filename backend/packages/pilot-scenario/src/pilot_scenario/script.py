@@ -151,12 +151,15 @@ class Prompt:
 @dataclass(frozen=True)
 class Launch:
     """A start of a Claude Code process, under a version of each component
-    it ran with, by `(component, version)`, `claude-code` among them. It
-    starts as its first Prompt arrives, its file's first line with a time,
-    and ends with the last moment of what it received."""
+    it ran with, by `(component, version)`: `claude-code`, and each plugin,
+    `plugin:<name>`, a skill of which it loads. It starts as its first
+    Prompt arrives, its file's first line with a time, and ends with the
+    last line it writes that carries one. One `killed` writes no closing
+    line, and the next process runs another version of Claude Code."""
 
     versions: tuple[tuple[str, str], ...]
     prompts: tuple[Prompt, ...]
+    killed: bool = False
 
 
 @dataclass(frozen=True)

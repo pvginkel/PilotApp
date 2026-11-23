@@ -135,8 +135,9 @@ does."""
 
 def _resumed() -> Scenario:
     """A thread two processes wrote, in a directory under no checkout,
-    hosted by no environment: the second took a queued prompt and went back
-    to the first's Call."""
+    hosted by no environment: the first was killed, and the second, under a
+    later version, took a queued prompt and went back to the first's
+    Call."""
     first = Prompt(
         at=0,
         source="typed",
@@ -164,7 +165,11 @@ def _resumed() -> Scenario:
                 directory="/tmp/looms",
                 person="cleo",
                 launches=(
-                    Launch(versions=(("claude-code", "2.1.317"),), prompts=(first,)),
+                    Launch(
+                        versions=(("claude-code", "2.1.317"),),
+                        prompts=(first,),
+                        killed=True,
+                    ),
                     Launch(versions=(("claude-code", "2.1.318"),), prompts=(second,)),
                 ),
             ),
@@ -176,21 +181,7 @@ def _cut(publication: dict[str, Any]) -> dict[str, Any]:
     """A publication of the builder's cut to the facts the reader reads."""
     cut = {name: publication[name] for name in THREAD if name in publication}
     if "launches" in publication:
-        cut["launches"] = [
-            {
-                "started_at": launch["started_at"],
-                "components": [
-                    used
-                    for used in launch["components"]
-                    if used["component"] == "claude-code"
-                ],
-                "prompts": [
-                    {name: prompt[name] for name in PROMPT if name in prompt}
-                    for prompt in launch["prompts"]
-                ],
-            }
-            for launch in publication["launches"]
-        ]
+        cut["launches"] = publication["launches"]
     cut["compactions"] = publication.get("compactions", [])
     cut["calls"] = [
         {name: call[name] for name in CALL if name in call}
@@ -327,6 +318,13 @@ class TestTheScenario:
             for call in publication["calls"]
         )
         assert len(resumed[0]["launches"]) == 2
+        assert _resumed().sessions[0].launches[0].killed
+        assert {
+            used["component"]
+            for publication in publications
+            for launch in publication.get("launches", [])
+            for used in launch["components"]
+        } == {"claude-code", "plugin:pantry"}
         assert "environment" not in resumed[0] and "repository" not in resumed[0]
         (compaction,) = [
             compaction
@@ -627,7 +625,7 @@ class TestLaunches:
             launch.started_at for launch in _read(tmp_path, first + second).launches
         ] == [moment(1), moment(60)]
 
-    def test_a_process_that_follows_a_killed_one_joins_its_launch(
+    def test_a_process_picked_up_under_the_same_version_joins_the_launch_before(
         self, tmp_path: Path
     ) -> None:
         publication = _read(
@@ -636,16 +634,90 @@ class TestLaunches:
                 typed(1),
                 assistant(4, "msg_01", output=3),
                 beside("permission-mode", permissionMode="default"),
-                typed(600) | {"version": "2.1.318"},
-                assistant(604, "msg_02", output=3) | {"version": "2.1.318"},
+                typed(600),
+                assistant(604, "msg_02", output=3),
             ],
         )
 
         (launch,) = publication.launches
-        assert launch.started_at == moment(1)
+        assert (launch.started_at, launch.ended_at) == (moment(1), moment(604))
         assert len(launch.prompts) == 2
 
-    def test_a_launch_ran_the_version_its_lines_name_first(
+    def test_a_line_that_names_another_version_starts_a_launch(
+        self, tmp_path: Path
+    ) -> None:
+        """A process that follows a killed one under another version, which
+        writes no line before its prompt's that carries a time."""
+        later = {"version": "2.1.318"}
+        publication = _read(
+            tmp_path,
+            [
+                typed(1),
+                assistant(4, "msg_01", output=3),
+                beside("permission-mode", permissionMode="default"),
+                typed(600) | later,
+                assistant(604, "msg_02", output=3) | later,
+            ],
+        )
+
+        assert [
+            (
+                launch.started_at,
+                launch.ended_at,
+                [(used.component, used.version) for used in launch.components],
+                len(launch.prompts),
+            )
+            for launch in publication.launches
+        ] == [
+            (moment(1), moment(4), [("claude-code", "2.1.317")], 1),
+            (moment(600), moment(604), [("claude-code", "2.1.318")], 1),
+        ]
+        assert [call.prompt for call in publication.calls] == [1, 2]
+
+    def test_the_queues_lines_before_a_line_naming_another_version_start_its_launch(
+        self, tmp_path: Path
+    ) -> None:
+        """They name no version: the process that wrote them is told by the
+        line that does."""
+        later = {"version": "2.1.318"}
+        publication = _read(
+            tmp_path,
+            [
+                typed(1),
+                assistant(4, "msg_01", output=3),
+                queue("enqueue", 600, "Thread the heddles."),
+                queue("dequeue", 600.1),
+                user(600.2, "Thread the heddles.", promptSource="queued") | later,
+                assistant(604, "msg_02", output=3) | later,
+            ],
+        )
+
+        assert [
+            (launch.started_at, launch.ended_at) for launch in publication.launches
+        ] == [(moment(1), moment(4)), (moment(600), moment(604))]
+        assert publication.launches[1].prompts[0].received_at == moment(600)
+
+    def test_the_queues_lines_a_line_of_its_own_version_follows_stay_the_launchs(
+        self, tmp_path: Path
+    ) -> None:
+        publication = _read(
+            tmp_path,
+            [
+                typed(1),
+                assistant(4, "msg_01", output=3),
+                queue("enqueue", 5, "Thread the heddles."),
+                user(6, "Thread the heddles.", promptSource="queued"),
+                assistant(8, "msg_02", output=3),
+                queue("enqueue", 9, "Beat the weft."),
+                typed(600) | {"version": "2.1.318"},
+            ],
+        )
+
+        assert [
+            (launch.started_at, launch.ended_at) for launch in publication.launches
+        ] == [(moment(1), moment(8)), (moment(9), moment(600))]
+
+    def test_a_launch_ran_the_version_its_first_line_naming_one_names(
         self, tmp_path: Path
     ) -> None:
         publication = _read(
@@ -653,8 +725,9 @@ class TestLaunches:
             [
                 queue("enqueue", 0, "Warp the loom."),
                 typed(1) | {"version": "2.1.317"},
-                assistant(4, "msg_01", output=3) | {"version": "2.1.318"},
+                assistant(4, "msg_01", output=3) | {"version": "2.1.317"},
                 cost(),
+                queue("enqueue", 59, "Beat the weft."),
                 typed(60) | {"version": "2.1.320"},
             ],
         )
@@ -663,7 +736,72 @@ class TestLaunches:
             [(used.component, used.version) for used in launch.components]
             for launch in publication.launches
         ] == [[("claude-code", "2.1.317")], [("claude-code", "2.1.320")]]
-        assert publication.launches[0].started_at == moment(0)
+        assert [launch.started_at for launch in publication.launches] == [
+            moment(0),
+            moment(59),
+        ]
+
+    def test_a_launch_ends_at_its_last_line_with_a_time(self, tmp_path: Path) -> None:
+        """The open Launch's last so far: no line tells a running process
+        from a killed one."""
+        publication = _read(
+            tmp_path,
+            linked(
+                [
+                    typed(1),
+                    requesting(4, "toolu_01", message_id="msg_01"),
+                    result(7, "toolu_01"),
+                    beside("last-prompt", lastPrompt="Warp the loom."),
+                    cost(),
+                    typed(60),
+                    assistant(64, "msg_02", output=3),
+                    queue("enqueue", 70, "Beat the weft."),
+                ]
+            ),
+        )
+
+        assert [launch.ended_at for launch in publication.launches] == [
+            moment(7),
+            moment(70),
+        ]
+
+    def test_a_launch_starts_at_its_first_line_and_ends_at_its_last_whatever_their_times(
+        self, tmp_path: Path
+    ) -> None:
+        """A history copied in as a session is picked up carries the times it
+        was first written at."""
+        publication = _read(
+            tmp_path,
+            [
+                queue("enqueue", 3_600, "Warp the loom."),
+                typed(10),
+                assistant(14, "msg_01", output=3),
+            ],
+        )
+
+        (launch,) = publication.launches
+        assert (launch.started_at, launch.ended_at) == (moment(3_600), moment(14))
+
+    def test_no_time_is_read_off_a_cost_line(self, tmp_path: Path) -> None:
+        """A `--resume` carries the process before's start over in its own
+        cost line."""
+        began = (moment(-7_200) - datetime.fromtimestamp(0, UTC)).total_seconds()
+        cost_line = cost() | {"startTime": int(began * 1_000)}
+        publication = _read(
+            tmp_path,
+            [
+                typed(1),
+                assistant(4, "msg_01", output=3),
+                cost_line,
+                typed(60),
+                assistant(64, "msg_02", output=3),
+                cost_line,
+            ],
+        )
+
+        assert [
+            (launch.started_at, launch.ended_at) for launch in publication.launches
+        ] == [(moment(1), moment(4)), (moment(60), moment(64))]
 
     def test_a_launch_whose_lines_name_no_version_is_not_published(
         self, tmp_path: Path
@@ -719,6 +857,208 @@ class TestLaunches:
 
         assert publication.launches == []
         assert [call.prompt for call in publication.calls] == [None]
+
+
+def _components(publication: PublicationSchema) -> list[list[tuple[str, str]]]:
+    """Each Launch's components and their versions."""
+    return [
+        [(used.component, used.version) for used in launch.components]
+        for launch in publication.launches
+    ]
+
+
+AGENT_PROMPT = (
+    "You write one phase. Read"
+    f" {support.CACHE}/dev/0.10.92/docs/close-out.md before you hand back."
+)
+"""The system prompt of a session started as a plugin's agent."""
+
+
+class TestComponents:
+    def test_a_plugins_skill_names_the_version_its_process_loaded(
+        self, tmp_path: Path
+    ) -> None:
+        publication = _read(
+            tmp_path,
+            linked(
+                [
+                    typed(0),
+                    expanded(1, None, support.plugin_body("dev", "0.10.92", "writing")),
+                    assistant(4, "msg_01", output=3),
+                ]
+            ),
+        )
+
+        (launch,) = publication.launches
+        assert _components(publication) == [
+            [("claude-code", support.VERSION), ("plugin:dev", "0.10.92")]
+        ]
+        assert [used.released_at for used in launch.components] == [None, None]
+
+    def test_the_skills_an_invoked_skills_attachment_shows_again_name_theirs(
+        self, tmp_path: Path
+    ) -> None:
+        publication = _read(
+            tmp_path,
+            linked(
+                [
+                    typed(0),
+                    invoked(
+                        1,
+                        ("kubecoder:usage", support.plugin_body("kubecoder", "0.15.4")),
+                        ("weave", BODY),
+                    ),
+                    assistant(4, "msg_01", output=3),
+                ]
+            ),
+        )
+
+        assert _components(publication) == [
+            [("claude-code", support.VERSION), ("plugin:kubecoder", "0.15.4")]
+        ]
+
+    @pytest.mark.parametrize(
+        "recorded",
+        [
+            [
+                shaped(0.5, system=(AGENT_PROMPT,)),
+                request(1, shapeHash="shape-1"),
+                sent(assistant(4, "msg_01", output=3)),
+            ],
+            [snapshot(0.5, AGENT_PROMPT), assistant(4, "msg_01", output=3)],
+        ],
+        ids=["the shape its request sent", "a snapshot"],
+    )
+    def test_a_plugins_agents_system_prompt_names_its_version(
+        self, recorded: list[Line], tmp_path: Path
+    ) -> None:
+        publication = _read(tmp_path, linked([typed(0), *recorded]))
+
+        assert _components(publication) == [
+            [("claude-code", support.VERSION), ("plugin:dev", "0.10.92")]
+        ]
+
+    def test_a_later_launchs_first_request_names_its_shapes_plugins_again(
+        self, tmp_path: Path
+    ) -> None:
+        """A process picked up names the shapes an earlier one's lines
+        record."""
+        publication = _read(
+            tmp_path,
+            linked(
+                [
+                    typed(0),
+                    shaped(0.5, system=(AGENT_PROMPT,)),
+                    request(1, shapeHash="shape-1"),
+                    sent(assistant(4, "msg_01", output=3)),
+                    cost(),
+                    typed(60),
+                    request(61, "request-2", shapeHash="shape-1"),
+                    sent(assistant(64, "msg_02", output=3), "request-2"),
+                ]
+            ),
+        )
+
+        assert (
+            _components(publication)
+            == [[("claude-code", support.VERSION), ("plugin:dev", "0.10.92")]] * 2
+        )
+
+    def test_the_shape_a_later_calls_request_names_names_no_plugin(
+        self, tmp_path: Path
+    ) -> None:
+        publication = _read(
+            tmp_path,
+            linked(
+                [
+                    typed(0),
+                    shaped(0.5),
+                    request(1, shapeHash="shape-1"),
+                    sent(assistant(4, "msg_01", output=3)),
+                    shaped(5, "shape-2", system=(AGENT_PROMPT,)),
+                    request(6, "request-2", shapeHash="shape-2"),
+                    sent(assistant(9, "msg_02", output=3), "request-2"),
+                ]
+            ),
+        )
+
+        assert _components(publication) == [[("claude-code", support.VERSION)]]
+
+    def test_a_path_quoted_names_no_version(self, tmp_path: Path) -> None:
+        """By a prompt, a tool's result, the model, or a skill's body past
+        its base directory."""
+        quoted = f"Read {support.CACHE}/dev/0.9.13/skills/writing/SKILL.md first."
+        said = answering(
+            4,
+            "msg_01",
+            {"type": "text", "text": quoted},
+            {"type": "tool_use", "id": "toolu_01", "name": "Read", "input": {}},
+        )
+        publication = _read(
+            tmp_path,
+            linked(
+                [
+                    typed(0, quoted),
+                    said,
+                    result(6, "toolu_01", quoted),
+                    expanded(7, None, f"{BODY}\n{quoted}"),
+                    assistant(9, "msg_02", output=3),
+                ]
+            ),
+        )
+
+        assert _components(publication) == [[("claude-code", support.VERSION)]]
+
+    def test_a_plugin_keeps_the_version_first_named(self, tmp_path: Path) -> None:
+        """A Launch names one version of each Component, which Pilot refuses
+        two of."""
+        publication = _read(
+            tmp_path,
+            linked(
+                [
+                    typed(0),
+                    expanded(1, None, support.plugin_body("dev", "0.9.13")),
+                    expanded(2, None, support.plugin_body("kubecoder", "0.15.4")),
+                    expanded(3, None, support.plugin_body("dev", "0.9.20")),
+                    assistant(4, "msg_01", output=3),
+                ]
+            ),
+        )
+
+        assert _components(publication) == [
+            [
+                ("claude-code", support.VERSION),
+                ("plugin:dev", "0.9.13"),
+                ("plugin:kubecoder", "0.15.4"),
+            ]
+        ]
+
+    def test_each_launch_names_the_plugins_its_own_lines_name(
+        self, tmp_path: Path
+    ) -> None:
+        publication = _read(
+            tmp_path,
+            linked(
+                [
+                    typed(0),
+                    expanded(1, None, support.plugin_body("dev", "0.9.13")),
+                    assistant(4, "msg_01", output=3),
+                    cost(),
+                    typed(60),
+                    assistant(64, "msg_02", output=3),
+                    cost(),
+                    typed(90),
+                    expanded(91, None, support.plugin_body("dev", "0.9.20")),
+                    assistant(94, "msg_03", output=3),
+                ]
+            ),
+        )
+
+        assert _components(publication) == [
+            [("claude-code", support.VERSION), ("plugin:dev", "0.9.13")],
+            [("claude-code", support.VERSION)],
+            [("claude-code", support.VERSION), ("plugin:dev", "0.9.20")],
+        ]
 
 
 class TestPrompts:

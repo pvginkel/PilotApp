@@ -22,7 +22,9 @@ process writes as it exits.
   instruction file loaded once the process was under way, with its path and
   content; and a skill's body, a `user` line marked `isMeta` whose text opens
   `Base directory for this skill:`, the expansion of the `Skill` call its
-  `sourceToolUseID` names.
+  `sourceToolUseID` names. A plugin's skill, `<plugin>:<skill>`, lies under
+  the plugin's cache at the version its process runs,
+  `plugins/cache/<marketplace>/<plugin>/<version>/skills/<skill>`.
 - A response is one `assistant` line a block, all under its `message.id`.
   Each carries the response's `usage`; the lines before the last carry fewer
   output tokens and thinking tokens than it and no `stop_reason`. Each names
@@ -37,7 +39,8 @@ process writes as it exits.
   those it adds, its `tail`; and as `shapeHash` the shape it sent, the
   system prompt and the tools, whose `api-request-shape` line, written once
   in the file before the first request that names it, holds them: the
-  system prompt's text blocks and the tools' schemas.
+  system prompt's text blocks and the tools' schemas. A process under
+  another version of Claude Code sends a shape of its own.
 - A tool's result is a `user` line holding one `tool_result` block that names
   its request's id, with `toolUseResult`, the tool's own record of it. A
   denied call's result is an error in Claude Code's words for its denial,
@@ -61,6 +64,8 @@ process writes as it exits.
 - An attempt at a request that failed is its request line and a `system`
   line of subtype `api_error`, with the error's `status` and the attempt's
   number; the request is sent again, and the response names the last line.
+- A process killed writes no closing line: its last line is the last of
+  its run, and the next process's lines name another version.
 - A request that failed for good is an `assistant` line Claude Code wrote
   itself, of the model `<synthetic>`, marked `isApiErrorMessage` with its
   `apiErrorStatus`; no request sends it. A response the person interrupted
@@ -107,6 +112,9 @@ _SUMMARISED = timedelta(milliseconds=300)
 
 _SKILL_BODY = "Base directory for this skill:"
 """What a skill's body opens with."""
+
+_MARKETPLACE = "larder"
+"""The marketplace whose folder of the cache holds the plugins."""
 
 SYNTHETIC = "<synthetic>"
 """The model of an `assistant` line Claude Code wrote itself."""
@@ -228,6 +236,13 @@ class Lines:
     ) -> None:
         self.version = ""
         """Claude Code's version the lines are written under."""
+        self.plugins: dict[str, str] = {}
+        """The version of each plugin the process runs, by its name."""
+        self.loaded: list[str] = []
+        """The plugins a line of the process names the version of, in the
+        order they were first named."""
+        self.ended: datetime | None = None
+        """The time of the last line written that carries one."""
         self.leaf: str | None = None
         """The chain's last line, which the next one follows."""
         self.saved: list[HomeFile] = []
@@ -251,8 +266,8 @@ class Lines:
         """What the requests are sent for, in Claude Code's words."""
         self._shape: tuple[int | None, int | None] = (None, None)
         """The characters of the system prompt and of the tools' schemas the
-        thread's requests send: those the latest Call that carries either
-        carried."""
+        thread's requests send: those the latest Call of the process that
+        carries either carried."""
         self._shaped: set[str] = set()
         """The shapes whose line is written, by their digest."""
 
@@ -299,6 +314,7 @@ class Lines:
             message = None if kind == "system" or not shown else self.leaf
             self._follows[self.leaf] = (line["parentUuid"], message)
         line |= fields
+        self.ended = at
         line |= {
             "type": kind,
             "uuid": self.leaf,
@@ -313,10 +329,14 @@ class Lines:
         self._lines.append(line)
         return self.leaf
 
-    def launched(self, version: str) -> None:
-        """A process of that version of Claude Code starts."""
+    def launched(self, version: str, plugins: dict[str, str]) -> None:
+        """A process of that version of Claude Code starts, running those
+        versions of the plugins, by their names."""
         self.version = version
+        self.plugins = plugins
+        self.loaded = []
         self._asked = None
+        self._shape = (None, None)
         mode = "default" if self._entrypoint == "cli" else "bypassPermissions"
         self._beside("permission-mode", permissionMode=mode)
 
@@ -324,6 +344,7 @@ class Lines:
         """A prompt of that source and length arrives."""
         prompt = text(characters)
         if source in _QUEUED:
+            self.ended = at
             self._beside(
                 "queue-operation",
                 operation="enqueue",
@@ -438,7 +459,7 @@ class Lines:
                 renderedRole="system",
             )
         elif part.kind == "skill_body" and skill is not None:
-            head = f"{_SKILL_BODY} {SESSION_HOME}/skills/{part.name.split(':')[-1]}\n\n"
+            head = f"{_SKILL_BODY} {self._based(part.name)}\n\n"
             self._chained(
                 "user",
                 at,
@@ -462,6 +483,22 @@ class Lines:
             )
         else:
             raise ValueError(f"No line is written for a part of the kind `{part.kind}`")
+
+    def _based(self, skill: str) -> str:
+        """The folder of the skill a body is of: a plugin's under the
+        plugin's cache, at the version the process runs."""
+        plugin, _, named = skill.rpartition(":")
+        if not plugin:
+            return f"{SESSION_HOME}/skills/{named}"
+        if plugin not in self.plugins:
+            raise ValueError(
+                f"A skill of the plugin `{plugin}` is loaded at the version its"
+                f" process runs: its Launch names `plugin:{plugin}`"
+            )
+        if plugin not in self.loaded:
+            self.loaded.append(plugin)
+        version = self.plugins[plugin]
+        return f"{SESSION_HOME}/plugins/cache/{_MARKETPLACE}/{plugin}/{version}/skills/{named}"
 
     def retried(
         self, call: Call, retry: Retry, attempt: int, sent: datetime, failed: datetime
@@ -549,7 +586,12 @@ class Lines:
             self._shape = (carried.get("system_prompt"), carried.get("tool_schemas"))
         system, tools = self._shape
         shape = _digest(
-            self._conversation, self._agent or "", "shape", str(system), str(tools)
+            self._conversation,
+            self._agent or "",
+            "shape",
+            self.version,
+            str(system),
+            str(tools),
         )
         if shape in self._shaped:
             return shape
@@ -560,6 +602,7 @@ class Lines:
         }
         if self._agent is not None:
             line["agentId"] = self._agent
+        self.ended = at
         line |= {
             "shapeHash": shape,
             "timestamp": stamp(at),
@@ -589,6 +632,7 @@ class Lines:
         }
         if call.effort is not None:
             params["output_config"] = {"effort": call.effort}
+        self.ended = at
         line |= {
             "id": named,
             "timestamp": stamp(at),

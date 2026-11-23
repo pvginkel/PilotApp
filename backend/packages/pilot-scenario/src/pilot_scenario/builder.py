@@ -9,8 +9,9 @@ side holds before a collector reads the transcript.
 
 A publication is what its thread's file says: the file's size and time, and
 each fact as the lines carry it. The files hold the lines these facts are
-read off: a thread's ids and where it ran, its Launches, Prompts, Calls and
-Tool Calls, a denied call's denial among them, its Compactions, each Call's
+read off: a thread's ids and where it ran, its Launches, each to its last
+line with a time and with the plugins whose skills it loaded, its Prompts,
+Calls and Tool Calls, a denied call's denial among them, its Compactions, each Call's
 place on the chain, the request it answered and those that failed before
 it, what Claude Code records of its choices, the Events, the Stop hooks
 run at a Prompt's end, and each Call's context parts: on a Launch's first
@@ -52,6 +53,9 @@ COLLECTOR = "1.4.0"
 CLAUDE_CODE = "claude-code"
 """The component whose version a Launch's lines carry."""
 
+_PLUGIN = "plugin:"
+"""What a plugin's component's code opens with, before the plugin's name."""
+
 _IDS = uuid.UUID("6c1f0e9a-3b5d-4c7e-8f2a-9d4b1e6a7c30")
 """The namespace the conversations' ids are drawn in."""
 
@@ -81,11 +85,13 @@ class SentTurn:
 @dataclass(frozen=True)
 class _Spawning:
     """The tool call that started a sub-agent: as it is published, the
-    moment it was requested at and Claude Code's version its process ran."""
+    moment it was requested at, and Claude Code's version and the plugins'
+    its process ran."""
 
     tool_call: dict[str, Any]
     at: int
     version: str
+    plugins: dict[str, str]
 
 
 @dataclass(frozen=True)
@@ -379,7 +385,9 @@ class _Thread:
             saved_characters=use.saved,
         )
         if use.spawns is not None:
-            self.spawned[use.spawns] = _Spawning(tool_call, call.at, self.lines.version)
+            self.spawned[use.spawns] = _Spawning(
+                tool_call, call.at, self.lines.version, dict(self.lines.plugins)
+            )
         if use.tool == "Skill" and use.argument is not None:
             self._skills[use.argument] = tool_call["tool_use_id"]
         return tool_call
@@ -543,10 +551,24 @@ class Builder:
         thread = _Thread(self, _Ids(), lines, self._agents(session))
         launches: list[dict[str, Any]] = []
         place = 0
+        killed: str | None = None
         for launch in session.launches:
             steps = [step for prompt in launch.prompts for step in prompt.steps]
             taken = 0
-            lines.launched(dict(launch.versions)[CLAUDE_CODE])
+            versions = dict(launch.versions)
+            if versions[CLAUDE_CODE] == killed:
+                raise ValueError(
+                    "A process picked up under the version of Claude Code a killed"
+                    " one ran joins its Launch: it runs another version"
+                )
+            lines.launched(
+                versions[CLAUDE_CODE],
+                {
+                    code.removeprefix(_PLUGIN): version
+                    for code, version in launch.versions
+                    if code.startswith(_PLUGIN)
+                },
+            )
             thread.opening = []
             loaded = _instruction_files(
                 step for prompt in launch.prompts for step in prompt.steps
@@ -590,24 +612,45 @@ class Builder:
                 if prompt.hooks:
                     last = max((prompt.at, *_moments(prompt.steps)))
                     lines.hooked(prompt.hooks, self.when(last))
-            started, ended = launch.prompts[0].at, max(_launch_moments(launch))
-            lines.exited(
-                self.when(started),
-                self.when(ended),
-                [
-                    step
-                    for prompt in launch.prompts
-                    for step in prompt.steps
-                    if isinstance(step, Call)
-                ],
-            )
+            unread = [
+                code
+                for code in versions
+                if code != CLAUDE_CODE
+                and code.removeprefix(_PLUGIN) not in lines.loaded
+            ]
+            if unread:
+                raise ValueError(
+                    "A Launch's components are read off its lines: Claude Code's"
+                    " version, and each plugin's a skill of it loaded names; no line"
+                    f" names `{unread[0]}`"
+                )
+            started, ended = launch.prompts[0].at, lines.ended
+            assert ended is not None
+            killed = versions[CLAUDE_CODE] if launch.killed else None
+            if not launch.killed:
+                lines.exited(
+                    self.when(started),
+                    self.when(max(_launch_moments(launch))),
+                    [
+                        step
+                        for prompt in launch.prompts
+                        for step in prompt.steps
+                        if isinstance(step, Call)
+                    ],
+                )
             launches.append(
                 _given(
                     started_at=self.time(started),
-                    ended_at=self.time(ended),
+                    ended_at=ended.isoformat(),
                     components=[
-                        {"component": component, "version": version}
-                        for component, version in launch.versions
+                        {"component": CLAUDE_CODE, "version": versions[CLAUDE_CODE]},
+                        *(
+                            {
+                                "component": f"{_PLUGIN}{plugin}",
+                                "version": lines.plugins[plugin],
+                            }
+                            for plugin in lines.loaded
+                        ),
                     ],
                     prompts=prompts,
                 )
@@ -628,6 +671,7 @@ class Builder:
         spawning = main.spawned[agent.name]
         lines = self._lines(session, agent)
         lines.version = spawning.version
+        lines.plugins = spawning.plugins
         lines.tasked(_TASK, self.when(spawning.at))
         lines.instructed(
             _instruction_files(iter(agent.steps)),

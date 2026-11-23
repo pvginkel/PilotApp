@@ -17,7 +17,24 @@ its newline is written. The facts are read off the lines in the file's order:
   and at the first such line after a cost line, the line a process writes as
   it exits (DB 586). It ran the version of Claude Code its lines name, the
   first that names one; a Launch none of whose lines names a version is not
-  published.
+  published. A line that names another version is a later process's, one
+  that follows a killed one: it starts a Launch, which opens with the lines
+  with a time since the last that named the earlier version, where there
+  are any, since they name none, as the queue's lines a process writes
+  before its first prompt do. A process picked up under the same version
+  joins the Launch before it.
+- **A Launch's end** is the time of its last line that carries one, the
+  open Launch's the last so far, whatever the times of the lines before.
+  The cost line's start and totals are not read.
+- **A Launch's components**: Claude Code at its version, and each plugin
+  its process loaded, `plugin:<name>`, at the version the first of these
+  lines names, a plugin's files lying under its cache's
+  `plugins/cache/<marketplace>/<name>/<version>/`: a skill's body, or the
+  body an `invoked_skills` attachment shows again, by its base directory;
+  the system prompt a snapshot records, or the shape the requests of a
+  Launch's first Call name, which a session started as a plugin's agent
+  has. A path a tool's result, the model or a prompt quotes is not read.
+  No line says when a version was released.
 - **A Prompt** is a main thread's `user` line whose source Claude Code names:
   `promptSource`, or on a line with none that is no `isMeta` one, the older
   `turnOrigin` or `origin.kind`, read in the newer word where it means the
@@ -166,8 +183,9 @@ its newline is written. The facts are read off the lines in the file's order:
 stood before the file's last Call. Given that carry, a file that grew is read
 from the boundary's byte on, and its publication is an appended one: the
 Calls from the boundary's on, the Launches that wrote a line from there on,
-the first with its Prompts from there on, the Compactions made from there
-on, and the four places the boundary names. A Stop hook's summary follows
+the first with its Prompts from there on and with the components it named
+before the boundary too, the Compactions made from there on, and the four
+places the boundary names. A Stop hook's summary follows
 its run's last Call, so its Prompt was received before the boundary: where
 one from there on lies on that Prompt, the first Launch's Prompts open with
 it, published again with its Hook Runs, and the boundary names its place.
@@ -235,6 +253,15 @@ CLAUDE_CODE = "claude-code"
 
 _COST = "cost-state"
 """The type of the line a process writes as it exits."""
+
+_PLUGIN = "plugin:"
+"""What a plugin's Component's code opens with, before the plugin's name."""
+
+_PLUGIN_FOLDER = re.compile(
+    r"/plugins/cache/[^/\s]+/(?P<plugin>[^/\s]+)/(?P<version>[^/\s]+)/"
+)
+"""Where a plugin's files lie at a version: under its marketplace's folder
+of the home's cache, a folder per version."""
 
 _COMPACTED = "compact_boundary"
 """The subtype of the `system` line a compaction's boundary is."""
@@ -431,10 +458,19 @@ class Read:
 @dataclass
 class _Launch:
     started_at: datetime
+    ended_at: datetime
+    """The time of its last line taken that carries one."""
     version: str | None = None
     prompts: list[dict[str, Any]] = field(default_factory=list)
     kept: int = 0
     """The Prompts it received before the reading's first line."""
+    unnamed: tuple[datetime, datetime] | None = None
+    """Where its lines with a time since its last that named a version
+    began: its end before them and the first one's time; none where its
+    last such line names one, or none of its lines does."""
+    plugins: dict[str, str] = field(default_factory=dict)
+    """The version of each plugin its process loaded, by the plugin's
+    name, in the order its lines first named them."""
 
 
 @dataclass
@@ -592,6 +628,23 @@ def _prompted(prompt: dict[str, Any]) -> Prompted:
         prompt["characters"],
         tuple(Ran(**run) for run in prompt["hook_runs"]),
     )
+
+
+def _plugins(said: str) -> list[tuple[str, str]]:
+    """Each plugin and version the text names a folder of under the cache,
+    in its order."""
+    return [
+        (named["plugin"], named["version"]) for named in _PLUGIN_FOLDER.finditer(said)
+    ]
+
+
+def _based(body: str) -> list[tuple[str, str]]:
+    """The plugin and version a skill's body names as its base directory,
+    where its skill lies under a plugin's cache: none for a body that opens
+    otherwise."""
+    if not body.startswith(_SKILL_BODY):
+        return []
+    return _plugins(body.removeprefix(_SKILL_BODY).split("\n", 1)[0] + "/")[:1]
 
 
 def _schemas(tools: list[Any]) -> int | None:
@@ -782,7 +835,14 @@ class _Thread:
         if before.launch is not None:
             opened = before.launch
             self.launches.append(
-                _Launch(opened.started_at, opened.version, kept=opened.received)
+                _Launch(
+                    opened.started_at,
+                    opened.ended_at,
+                    opened.version,
+                    kept=opened.received,
+                    unnamed=opened.unnamed,
+                    plugins=dict(opened.plugins),
+                )
             )
         self._published = before.launches
         """The Launches that exited and are published."""
@@ -824,6 +884,10 @@ class _Thread:
         self._shapes: dict[str, Shape] = {}
         """What each request shape's line taken records, by its
         `shapeHash`."""
+        self._agents: dict[str, list[tuple[str, str]]] = {}
+        """The plugins and versions each request shape's system prompt
+        names under the cache, by its `shapeHash`: a plugin's agent's, where
+        the session was started as one."""
         self._opening = before.opening if before.byte or main else Opening()
         """What the lines taken record of the Context Parts of the open
         Launch's first Call, none once it began: on a sub-agent's thread, of
@@ -886,18 +950,13 @@ class _Thread:
             self._queue = ()
             self._removed = ()
         elif kind == _SHAPE:
-            self._shapes[line["shapeHash"]] = _shape(line["shape"])
+            shape = line["shape"]
+            self._shapes[line["shapeHash"]] = _shape(shape)
+            self._agents[line["shapeHash"]] = _plugins(text_of(shape["system"]))
         if at is None:
             return
         if self._main:
-            if self._exited:
-                self.launches.append(_Launch(at))
-                self._exited = False
-                self._opening = Opening()
-                self._injected = ()
-            launch = self.launches[-1]
-            if launch.version is None:
-                launch.version = line.get("version")
+            self._timed(line.get("version"), at)
         if kind == "assistant":
             if line.get("isApiErrorMessage"):
                 self._occurred("api_error", at, _status(line.get("apiErrorStatus")))
@@ -919,7 +978,9 @@ class _Thread:
             elif line.get("isCompactSummary"):
                 self._injected += (Part("compact_summary", len(text_of(content))),)
             elif line.get("isMeta") and _expands(line, content):
-                self._expanded(line.get("sourceToolUseID"), len(text_of(content)))
+                said = text_of(content)
+                self._expanded(line.get("sourceToolUseID"), len(said))
+                self._loaded(_based(said))
             elif self._main:
                 self._prompted(line, content, at)
             elif not line.get("isMeta"):
@@ -932,6 +993,40 @@ class _Thread:
             self._queued(line, at)
         elif kind == "system" and line.get("subtype") == _HOOKED:
             self._hooked(line)
+
+    def _timed(self, version: str | None, at: datetime) -> None:
+        """A main thread's line written `at`, naming that version of Claude
+        Code where it names one: of the Launch open, else the first of one
+        it starts. A line that names another version than the open Launch's
+        starts one, which opens with the lines since the last that named the
+        earlier version, where there are any."""
+        launch = None if self._exited else self.launches[-1]
+        started = at
+        if launch is not None and _changed(launch.version, version):
+            if launch.unnamed is not None:
+                launch.ended_at, started = launch.unnamed
+            self._published += 1
+            launch = None
+        if launch is None:
+            launch = _Launch(started, started)
+            self.launches.append(launch)
+            self._exited = False
+            self._opening = Opening()
+            self._injected = ()
+        if version is not None:
+            launch.unnamed = None
+            launch.version = launch.version or version
+        elif launch.version is not None and launch.unnamed is None:
+            launch.unnamed = (launch.ended_at, at)
+        launch.ended_at = at
+
+    def _loaded(self, plugins: list[tuple[str, str]]) -> None:
+        """The plugins the open Launch's process loaded, at those versions:
+        each its Launch's at the first version named."""
+        if self._main:
+            named = self.launches[-1].plugins
+            for plugin, version in plugins:
+                named.setdefault(plugin, version)
 
     def _standing(self, byte: int) -> Standing:
         """Where the reading stands before the line that starts at `byte`,
@@ -956,7 +1051,14 @@ class _Thread:
             environment=self.environment,
             launch=None
             if opened is None
-            else Open(opened.started_at, opened.version, received),
+            else Open(
+                opened.started_at,
+                opened.version,
+                received,
+                opened.ended_at,
+                opened.unnamed,
+                tuple(opened.plugins.items()),
+            ),
             prompt=None
             if not received or self._prompt is None
             else _prompted(self._prompt),
@@ -1057,6 +1159,8 @@ class _Thread:
     def _attached(self, line: dict[str, Any], at: datetime) -> None:
         attachment = line["attachment"]
         if attachment["type"] == _SNAPSHOT:
+            for said in attachment["systemPrompt"]:
+                self._loaded(_plugins(said))
             if self._opening is not None and self._opening.snapshot is None:
                 self._opening = replace(self._opening, snapshot=_snapshot(attachment))
         elif attachment["type"] == "instructions":
@@ -1076,6 +1180,9 @@ class _Thread:
             self._main and attachment["type"] == _MID_RUN
         ):
             self._injected += _shown(attachment, line["rendered"])
+        if attachment["type"] == _INVOKED:
+            for skill in attachment["skills"]:
+                self._loaded(_based(skill["content"]))
         if not self._main:
             return
         if attachment["type"] == _MID_RUN:
@@ -1261,6 +1368,7 @@ class _Thread:
                     "a launch's first request names a shape no line from its"
                     " boundary on records"
                 )
+            self._loaded(self._agents.get(shape, []))
         kept = line.get("keep")
         return Requested(
             line["id"],
@@ -1418,7 +1526,14 @@ def _launches(thread: _Thread) -> list[dict[str, Any]]:
         launches.append(
             {
                 "started_at": launch.started_at,
-                "components": [{"component": CLAUDE_CODE, "version": launch.version}],
+                "ended_at": launch.ended_at,
+                "components": [
+                    {"component": CLAUDE_CODE, "version": launch.version},
+                    *(
+                        {"component": f"{_PLUGIN}{plugin}", "version": version}
+                        for plugin, version in launch.plugins.items()
+                    ),
+                ],
                 "prompts": launch.prompts,
             }
         )
