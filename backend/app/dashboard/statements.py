@@ -61,7 +61,7 @@ it ignores the row.
 from __future__ import annotations
 
 import uuid
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, replace
 from datetime import datetime
 from typing import Any
@@ -287,41 +287,45 @@ class _Builder:
             _in_window(self.row, self.plan.window),
             *(self.kept(condition) for condition in self.plan.scope),
         ]
-        if self.plan.rows is not None:
-            scoped.append(_among(self.by().path(self.row), self.plan.rows))
+        rows = self.plan.rows
+        if rows is not None:
+            scoped.append(self.holds(self.plan.by, lambda path: _among(path, rows)))
         return scoped
 
     def kept(self, condition: Kept | Filter) -> ColumnElement[bool]:
-        """Whether the row passes `condition`: on its own dimension where
-        the fact has it, else through the conversations of the first fact
-        that has it, among that fact's rows in the window."""
+        """Whether the row passes `condition`."""
         if isinstance(condition, OnItems):
             return self.each(condition)
-        key = condition.dimension
+        values = condition.values
+        matched = self.holds(condition.dimension, lambda path: _matches(path, values))
+        return not_(matched) if condition.negated else matched
+
+    def holds(
+        self, key: str, matching: Callable[[ColumnElement[Any]], ColumnElement[bool]]
+    ) -> ColumnElement[bool]:
+        """Whether the row's value of the dimension `key` passes `matching`:
+        its own where the fact has it, else through the conversations of the
+        first fact that has it, among that fact's rows in the window."""
         dimension = self.catalogue.dimension(key)
         offered = self.catalogue.offered(key)
         if self.row.fact.key in offered:
-            matched = _matches(dimension.path(self.row), condition.values)
-        elif offered:
-            self.through[key] = offered[0]
-            home = self.catalogue.row(self.catalogue.fact(offered[0]))
-            where = [
-                home["transcript_id"].is_not(None),
-                _matches(dimension.path(home), condition.values),
-                _in_window(home, self.plan.window),
-            ]
-            conversations = (
-                select(home["transcript_id"])
-                .select_from(home.source())
-                .where(*where)
-                .correlate(None)
-            )
-            matched = func.coalesce(
-                self.row["transcript_id"].in_(conversations), false()
-            )
-        else:
-            matched = false()
-        return not_(matched) if condition.negated else matched
+            return matching(dimension.path(self.row))
+        if not offered:
+            return false()
+        self.through[key] = offered[0]
+        home = self.catalogue.row(self.catalogue.fact(offered[0]))
+        where = [
+            home["transcript_id"].is_not(None),
+            matching(dimension.path(home)),
+            _in_window(home, self.plan.window),
+        ]
+        conversations = (
+            select(home["transcript_id"])
+            .select_from(home.source())
+            .where(*where)
+            .correlate(None)
+        )
+        return func.coalesce(self.row["transcript_id"].in_(conversations), false())
 
     def each(self, chip: OnItems) -> ColumnElement[bool]:
         """Whether the row passes a condition on each item: its own figure,

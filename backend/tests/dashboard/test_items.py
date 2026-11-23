@@ -274,6 +274,38 @@ class TestItems:
             None,
         ]
 
+    def test_under_a_threshold_by_a_dimension_the_listing_fact_lacks(
+        self, service: ItemsService, session: DbSession, worked: Record
+    ) -> None:
+        # The Event fact alone has the event's kind: the items are the
+        # conversations that hold an event of a kind kept, so the loose
+        # thread, whose one event is of the one kind dropped, is not one.
+        by_hand = worked.calls[4]
+        session.add(
+            models.Event(
+                call_id=by_hand.id, kind_code="api_error", at=by_hand.completed_at
+            )
+        )
+        session.flush()
+
+        found = _items(
+            service, "t=all&by=event_kind&m=events.count&c=@rows,lt,2,events.count"
+        )
+
+        assert [item.key for item in found.items] == [worked.thread.id]
+
+    def test_under_a_threshold_the_figures_of_a_fact_that_lacks_the_by(
+        self, service: ItemsService, worked: Record
+    ) -> None:
+        # The Turn fact has no model: its figures are those of the
+        # conversations that hold a Call of a model kept.
+        found = _items(service, "t=all&by=model&ig=pturn&c=@rows,gt,1,cost.sum")
+
+        assert [(item.key, item.values[-3:]) for item in found.items] == [
+            (worked.work_turn.id, (600.0, 2.5, 0.0)),
+            (None, (None, None, None)),
+        ]
+
     @pytest.mark.usefixtures("worked")
     def test_under_a_marking_threshold_every_rows_items(
         self, service: ItemsService
