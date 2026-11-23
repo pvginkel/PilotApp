@@ -71,7 +71,11 @@ _RAN = 200
 
 _OPENING = 160
 """The bytes what a Launch's first Call carries is counted at beside its
-instruction files and its snapshot."""
+instruction files, its Prompts and its snapshot."""
+
+_RECEIVED = 40
+"""The bytes each Prompt's characters are counted at among what a Launch's
+first Call carries."""
 
 _FILE = 120
 """The bytes an instruction file loaded is counted at beside its path."""
@@ -357,6 +361,7 @@ class Carry:
         runs = () if prompt is None else prompt.runs
         opening = stands.opening
         files = () if opening is None else opening.files
+        received = () if opening is None else opening.prompts
         fork = stands.fork
         shapes = [asked.sends for asked in stands.requests if asked.sends is not None]
         if opening is not None and opening.snapshot is not None:
@@ -390,6 +395,7 @@ class Carry:
             + _RAN * len(runs)
             + (0 if opening is None else _OPENING)
             + _FILE * len(files)
+            + _RECEIVED * len(received)
             + _PART * len(stands.injected)
             + _PLUGIN * len(plugins)
             + (0 if fork is None else _FORK)

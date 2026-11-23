@@ -37,6 +37,7 @@ def _carry(
     loaded: int = 0,
     injected: int = 0,
     plugged: int = 0,
+    prompted: int = 1,
 ) -> Carry:
     """A carry no other shares a word or a time with."""
     return Carry(
@@ -124,7 +125,7 @@ def _carry(
                     (f"/work/Loom{place}/looms/{named}/CLAUDE.md", 3_000 + named)
                     for named in range(loaded)
                 ),
-                (1_000 + place,),
+                tuple(1_000 + place + named for named in range(prompted)),
             ),
             injected=tuple(
                 Part("reminder", 400 + named, f"total_tokens_reminder-{place}-{named}")
@@ -160,16 +161,27 @@ def _path(name: str) -> Path:
 
 class TestACarrysSize:
     def test_it_is_counted_at_no_less_than_the_memory_it_takes(self) -> None:
-        for queued, awaited, requested, occurred, ran, loaded, injected, plugged in (
-            (0, 0, 0, 0, 0, 0, 0, 0),
-            (40, 0, 0, 0, 0, 0, 0, 0),
-            (0, 3, 0, 0, 0, 0, 0, 0),
-            (0, 0, 7, 0, 0, 0, 0, 0),
-            (0, 0, 0, 9, 0, 0, 0, 0),
-            (0, 0, 0, 0, 6, 0, 0, 0),
-            (0, 0, 0, 0, 0, 8, 0, 0),
-            (0, 0, 0, 0, 0, 0, 12, 0),
-            (0, 0, 0, 0, 0, 0, 0, 5),
+        for (
+            queued,
+            awaited,
+            requested,
+            occurred,
+            ran,
+            loaded,
+            injected,
+            plugged,
+            prompted,
+        ) in (
+            (0, 0, 0, 0, 0, 0, 0, 0, 1),
+            (40, 0, 0, 0, 0, 0, 0, 0, 1),
+            (0, 3, 0, 0, 0, 0, 0, 0, 1),
+            (0, 0, 7, 0, 0, 0, 0, 0, 1),
+            (0, 0, 0, 9, 0, 0, 0, 0, 1),
+            (0, 0, 0, 0, 6, 0, 0, 0, 1),
+            (0, 0, 0, 0, 0, 8, 0, 0, 1),
+            (0, 0, 0, 0, 0, 0, 12, 0, 1),
+            (0, 0, 0, 0, 0, 0, 0, 5, 1),
+            (0, 0, 0, 0, 0, 0, 0, 0, 40),
         ):
             tracemalloc.start()
             before, _ = tracemalloc.get_traced_memory()
@@ -184,6 +196,7 @@ class TestACarrysSize:
                     loaded=loaded,
                     injected=injected,
                     plugged=plugged,
+                    prompted=prompted,
                 )
                 for place in range(1_000, 1_400)
             ]
@@ -213,6 +226,11 @@ class TestACarrysSize:
 
     def test_a_part_injected_before_the_boundarys_call_counts(self) -> None:
         assert _carry(injected=2).size > _carry(injected=1).size > _carry().size
+
+    def test_a_prompt_the_boundarys_call_carries_counts(self) -> None:
+        assert (
+            _carry(prompted=2).size > _carry(prompted=1).size > _carry(prompted=0).size
+        )
 
     def test_a_plugin_the_launch_open_named_counts(self) -> None:
         assert _carry(plugged=2).size > _carry(plugged=1).size > _carry().size
