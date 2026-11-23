@@ -125,6 +125,27 @@ class TestTheUpgrade:
             (cut, datetime(2026, 11, 10, 8, 30, tzinfo=UTC)),
         ]
 
+    def test_a_reset_within_the_running_week_moves_its_end(
+        self, session: DbSession
+    ) -> None:
+        """A reset whose seven days open no later than the running week
+        moves that week's end, and writes no week."""
+        run_revision(session, "0052", "downgrade")
+        _reading(
+            session,
+            datetime(2026, 10, 23, 12, tzinfo=UTC),
+            datetime(2026, 10, 29, 9, tzinfo=UTC),
+        )
+
+        run_revision(session, "0052", "upgrade")
+
+        weeks = _weeks(session)
+        assert _fixed(weeks[:-1])
+        assert weeks[-1] == (
+            datetime(2026, 10, 22, 10, tzinfo=UTC),
+            datetime(2026, 10, 29, 9, tzinfo=UTC),
+        )
+
     def test_readings_missed_for_weeks_leave_no_gap(self, session: DbSession) -> None:
         run_revision(session, "0052", "downgrade")
         first = datetime(2026, 10, 20, 12, tzinfo=UTC)
