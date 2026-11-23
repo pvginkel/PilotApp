@@ -160,11 +160,8 @@ def assemble(db: Session, zone: str, sitting_gap: timedelta) -> Catalogue:
     a sitting ended by a gap of `sitting_gap`."""
     own = _own(db, zone, sitting_gap)
     weeks = quota_weeks(db)
-    return replace(
-        own,
-        ratios=own.ratios + _ratios(db, own, weeks),
-        quick_filters=_quick_filters(db, own, weeks),
-    )
+    with_ratios = replace(own, ratios=own.ratios + _ratios(db, own, weeks))
+    return replace(with_ratios, quick_filters=_quick_filters(db, with_ratios, weeks))
 
 
 def _own(db: Session, zone: str, sitting_gap: timedelta) -> Catalogue:

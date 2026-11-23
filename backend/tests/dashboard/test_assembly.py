@@ -303,6 +303,24 @@ class TestTheStoredConfiguration:
         assert catalogue.ratios == RATIOS
 
     @pytest.mark.parametrize(
+        ("origin", "key"),
+        [(Origin.PERSON, "person_misses"), (Origin.WORKFLOW, "per_crate")],
+        ids=["a persons", "a loaded one"],
+    )
+    def test_a_quick_filter_on_a_stored_ratio_is_offered_and_named_by_a_state(
+        self, session: DbSession, origin: Origin, key: str
+    ) -> None:
+        _ratio(session, origin, key, "miss_cost.sum", "cost.sum")
+        _quick_filter(session, "missed", f"@rows,gt,0.1,r:{key}")
+
+        catalogue = assemble(session, ZONE, GAP)
+        checked = read("by=psession&b=missed", catalogue, quota_weeks(session))
+
+        assert "missed" in {quick.key for quick in catalogue.quick_filters}
+        assert checked.state.quick_filters == ("missed",)
+        assert checked.notes == ()
+
+    @pytest.mark.parametrize(
         ("condition", "amount"),
         [("weekday:9", None), ("@crates", None), ("weekday:6", "crate_cost")],
         ids=["a value it lacks", "no chip", "an amount no figure is"],
