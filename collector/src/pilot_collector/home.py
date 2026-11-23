@@ -8,6 +8,9 @@ started lies deeper, under `subagents/workflows/<workflow>/`. Nothing else
 under `projects` is a transcript: a workflow's `journal.jsonl`, a sub-agent's
 `.meta.json` and the outputs saved under `tool-results/` among them.
 
+A sub-agent's record lies beside its file, `agent-<agent_id>.meta.json`:
+what Claude Code keeps of how the sub-agent was started.
+
 An output too large for its result is saved as
 `<folder>/<session_id>/tool-results/<name>`, beside the conversation's
 sub-agents, and the result names it by its path as the session's own process
@@ -39,6 +42,7 @@ _SUFFIX = ".jsonl"
 _SUB_AGENTS = "subagents"
 _AGENT = "agent-"
 _SAVED = "tool-results"
+_RECORD = ".meta.json"
 
 
 @dataclass(frozen=True)
@@ -219,6 +223,14 @@ def _sub_agent(
             return None
         return Listed(found, status.st_size, modified_at(status))
     return None
+
+
+def record_of(transcript: Transcript) -> Path | None:
+    """Where a sub-agent's record lies, beside its file; none for a main
+    thread, which has none."""
+    if transcript.agent_id is None:
+        return None
+    return transcript.path.with_name(f"{_AGENT}{transcript.agent_id}{_RECORD}")
 
 
 def saved_output(projects: Path, named: str) -> Path | None:

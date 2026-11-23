@@ -10,6 +10,7 @@ from pilot_collector.home import (
     Listed,
     Transcript,
     find,
+    record_of,
     saved_output,
     transcript,
     transcripts,
@@ -61,6 +62,19 @@ class TestATranscriptsPlace:
 
         assert Transcript(PROJECTS, path, SESSION).name == SESSION
         assert Transcript(PROJECTS, path, SESSION, AGENT).name == f"{SESSION}/{AGENT}"
+
+
+class TestASubAgentsRecordsPlace:
+    def test_it_lies_beside_the_sub_agents_file(self) -> None:
+        folder = PROJECTS / FOLDER / SESSION / "subagents" / "workflows" / "wf_7c21"
+        named = Transcript(PROJECTS, folder / f"agent-{AGENT}.jsonl", SESSION, AGENT)
+
+        assert record_of(named) == folder / f"agent-{AGENT}.meta.json"
+
+    def test_a_main_thread_has_none(self) -> None:
+        named = Transcript(PROJECTS, PROJECTS / FOLDER / f"{SESSION}.jsonl", SESSION)
+
+        assert record_of(named) is None
 
 
 class TestASavedOutputsPlace:

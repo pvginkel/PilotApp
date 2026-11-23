@@ -13,6 +13,18 @@ its newline is written. The facts are read off the lines in the file's order:
   thread's alone: the id the managed instruction file opens with, in the
   `instructions` attachment that lists the files a process loaded, the first
   where the file names two.
+- **A sub-agent's record**, the file beside its own: its type, the
+  description its spawning call gave its task and that call's id, the
+  record's `agentType`, `description` and `toolUseId`, each none where the
+  record or the key is missing. A workflow's agent's names no call, nor
+  does one older than Claude Code 2.1.144.
+- **A fork's copies.** A fork, a sub-agent whose record's type is `fork`,
+  opens its file with copies of its parent's lines, the message that holds
+  the call that started it among them. The lines of that message, and every
+  line timed at or before the one of them that holds the call, are its
+  parent's: no line follows them, and of them the place alone is read, the
+  directory the fork runs in as its parent does. A fork whose file holds no
+  line of that call copies none.
 - **A Launch**, on a main thread, starts at the file's first line with a time
   and at the first such line after a cost line, the line a process writes as
   it exits (DB 586). It ran the version of Claude Code its lines name, the
@@ -195,9 +207,11 @@ byte stand and what the Call it leads to left the next, the request lines
 before it written since the last one a Call named, the Events before it
 where no Call is, the latest Prompt before it where the Launch open there
 received it, with its Hook Runs, what the lines before it record of the
-Context Parts of the boundary's Call where it is its Launch's first, and the
-Context Parts injected before that Call, so it stops, and the file is read
-whole, where:
+Context Parts of the boundary's Call where it is its Launch's first, the
+Context Parts injected before that Call, and on a fork's thread the call
+that started it, with the message that holds it and that line's time where
+a line before the boundary does, so it stops, and the file is read whole,
+where:
 
 - the file is no larger than the one the carry was built on, or its bytes
   from the boundary's to its old end are other than those read then
@@ -214,7 +228,12 @@ whole, where:
   the file held no line of there: a chain before the boundary goes on
   through it;
 - a Stop hook's summary lies on a Prompt received before the Launch open at
-  the boundary.
+  the boundary;
+- the record names another fork's call than the one the carry was read
+  with, or the thread is no fork's where the carry was read as one, or one
+  where it was not;
+- a fork's line from the boundary's byte on holds the call that started it,
+  where the carry was read with no line of it.
 """
 
 import json
@@ -232,6 +251,7 @@ from pilot_collector import VERSION
 from pilot_collector.carry import (
     ROOT,
     Carry,
+    Fork,
     Lead,
     Left,
     Occurred,
@@ -245,7 +265,7 @@ from pilot_collector.carry import (
     Standing,
     digest,
 )
-from pilot_collector.home import Transcript, modified_at, saved_output
+from pilot_collector.home import Transcript, modified_at, record_of, saved_output
 from pilot_collector.settings import Settings
 
 CLAUDE_CODE = "claude-code"
@@ -338,6 +358,10 @@ _HOOK = "hook"
 _STOPPED = "interrupted"
 """The `toolDenialKind` of a tool call the person interrupted."""
 
+_FORK = "fork"
+"""The type a sub-agent's record names a fork by: a sub-agent started with
+a copy of its parent's context."""
+
 _HOUR = timedelta(hours=1)
 """How long what a Call wrote to the cache that lasts an hour lasts."""
 
@@ -425,6 +449,9 @@ reading takes began later."""
 
 _CACHED = ("cache_write_5m", "cache_write_1h", "cache_read")
 """The Token Kinds of what a Call wrote to the cache and read from it."""
+
+_MALFORMED = (ValueError, KeyError, TypeError, AttributeError)
+"""What reading a line the collector does not read raises."""
 
 _USAGE: dict[CallTokenKind, tuple[str, ...]] = {
     "input": ("input_tokens",),
@@ -815,7 +842,12 @@ class _Thread:
     the line a reading stands before."""
 
     def __init__(
-        self, main: bool, projects: Path, settings: Settings, before: Standing
+        self,
+        main: bool,
+        projects: Path,
+        settings: Settings,
+        before: Standing,
+        fork: Fork | None = None,
     ) -> None:
         self.directory = before.directory
         self.environment = before.environment
@@ -825,8 +857,11 @@ class _Thread:
         self.calls: dict[str, _Call] = {}
         self.compactions: list[dict[str, Any]] = []
         """The Compactions whose boundary was taken."""
-        self.stands = before
+        self.stands = replace(before, fork=fork)
         """Where the reading stood before the last Call's first line."""
+        self._fork = fork
+        """On a fork's thread, the call that started it: which lines are
+        its parent's copies."""
         self._main = main
         self._projects = projects
         self._settings = settings
@@ -918,6 +953,13 @@ class _Thread:
             raise NotContinuedError(
                 "a line before its boundary follows one written from it on"
             )
+        if self.directory is None and "cwd" in line:
+            self.directory = line["cwd"]
+        if self._copied(line, kind, at):
+            if named is not None:
+                self._leads[named] = None
+                self._awaited.pop(named, None)
+            return
         chain = self._above(
             line.get("parentUuid"),
             "a line follows one before its boundary that is not the last there",
@@ -941,8 +983,6 @@ class _Thread:
             awaited = self._awaited.pop(named, None)
             if awaited is not None:
                 awaited.above = stop
-        if self.directory is None and "cwd" in line:
-            self.directory = line["cwd"]
         if kind == _COST:
             if not self._exited and self.launches[-1].version is not None:
                 self._published += 1
@@ -993,6 +1033,17 @@ class _Thread:
             self._queued(line, at)
         elif kind == "system" and line.get("subtype") == _HOOKED:
             self._hooked(line)
+
+    def _copied(self, line: dict[str, Any], kind: str, at: datetime | None) -> bool:
+        """Whether the line, of that kind and written `at`, is a copy of its
+        parent's on a fork's thread: a line of the message that holds the
+        call that started it, or one timed at or before that call's line."""
+        fork = self._fork
+        if fork is None or fork.message is None:
+            return False
+        if kind == "assistant" and line["message"]["id"] == fork.message:
+            return True
+        return at is not None and fork.at is not None and at <= fork.at
 
     def _timed(self, version: str | None, at: datetime) -> None:
         """A main thread's line written `at`, naming that version of Claude
@@ -1066,6 +1117,7 @@ class _Thread:
             injected=self._injected,
             queue=self._queue,
             removed=self._removed,
+            fork=self._fork,
         )
 
     def _placed(self, message_id: str) -> int:
@@ -1596,6 +1648,54 @@ def _lines(content: bytes) -> list[bytes]:
     return content.split(b"\n")[:-1]
 
 
+def _unreadable(number: int, error: Exception) -> UnreadableError:
+    return UnreadableError(
+        f"line {number} is not a line the collector reads:"
+        f" {type(error).__name__}: {error}"
+    )
+
+
+def _recorded(transcript: Transcript) -> dict[str, Any]:
+    """What a sub-agent's record says of how it was started: nothing on a
+    main thread, nor where the record is missing.
+
+    Raises:
+        UnreadableError: The record is no JSON object.
+    """
+    path = record_of(transcript)
+    if path is None:
+        return {}
+    try:
+        recorded = json.loads(path.read_bytes())
+    except FileNotFoundError:
+        return {}
+    except ValueError as error:
+        raise UnreadableError(f"its record is no JSON: {error}") from error
+    if not isinstance(recorded, dict):
+        raise UnreadableError("its record is no JSON object")
+    return recorded
+
+
+def _spawning(content: bytes, spawned_by: str) -> tuple[str, datetime | None] | None:
+    """The message whose line among the file's holds the call of that id,
+    and that line's time: the first such line's; none where no line holds
+    it."""
+    named = spawned_by.encode()
+    for number, raw in enumerate(_lines(content), start=1):
+        if named not in raw:
+            continue
+        try:
+            line = json.loads(raw)
+            if line["type"] == "assistant" and any(
+                block["type"] == "tool_use" and block["id"] == spawned_by
+                for block in line["message"]["content"]
+            ):
+                return line["message"]["id"], written_at(line)
+        except _MALFORMED as error:
+            raise _unreadable(number, error) from error
+    return None
+
+
 def read(
     transcript: Transcript, settings: Settings, carry: Carry | None = None
 ) -> Read:
@@ -1622,7 +1722,28 @@ def read(
         and digest(content[: carry.file_size - before.byte]) != carry.end
     ):
         raise NotContinuedError("its file has other bytes before its old end")
-    thread = _Thread(transcript.agent_id is None, transcript.projects, settings, before)
+    recorded = _recorded(transcript)
+    spawned_by = recorded.get("toolUseId")
+    forked = (
+        spawned_by
+        if recorded.get("agentType") == _FORK and isinstance(spawned_by, str)
+        else None
+    )
+    fork = before.fork
+    if carry is not None and (None if fork is None else fork.spawned_by) != forked:
+        raise NotContinuedError(
+            "its record names another fork's call than the one it was read with"
+        )
+    if forked is not None and (fork is None or fork.message is None):
+        spawning = _spawning(content, forked)
+        if spawning is not None and before.byte:
+            raise NotContinuedError(
+                "a fork's line from its boundary on holds the call that started it"
+            )
+        fork = Fork(forked, *(spawning or (None, None)))
+    thread = _Thread(
+        transcript.agent_id is None, transcript.projects, settings, before, fork
+    )
     byte = before.byte
     for number, raw in enumerate(_lines(content), start=1):
         try:
@@ -1630,11 +1751,8 @@ def read(
             if not isinstance(line, dict):
                 raise TypeError("the line is no object")
             thread.take(line, byte)
-        except (ValueError, KeyError, TypeError, AttributeError) as error:
-            raise UnreadableError(
-                f"line {number} is not a line the collector reads:"
-                f" {type(error).__name__}: {error}"
-            ) from error
+        except _MALFORMED as error:
+            raise _unreadable(number, error) from error
         byte += len(raw) + 1
     if thread.directory is None:
         raise UnreadableError("no line names a working directory")
@@ -1647,6 +1765,9 @@ def read(
         "working_directory": thread.directory,
         "repository": _repository(thread.directory, settings),
         "environment": thread.environment,
+        "agent_type": recorded.get("agentType"),
+        "description": recorded.get("description"),
+        "spawned_by": spawned_by,
         "launches": _launches(thread),
         "compactions": thread.compactions,
         "calls": _calls(thread),

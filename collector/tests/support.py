@@ -491,6 +491,15 @@ def filed(
     return Transcript(projects, path, SESSION, agent)
 
 
+def recorded(projects: Path, agent: str = AGENT, **record: Any) -> Path:
+    """The record beside a sub-agent's file, holding `record`: how Claude
+    Code started it."""
+    path = projects / FOLDER / SESSION / "subagents" / f"agent-{agent}.meta.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(record))
+    return path
+
+
 def saved(projects: Path, name: str, content: bytes, session: str = SESSION) -> str:
     """An output saved to disk under that conversation's folder; its path as
     a result names it, on the session's own home."""

@@ -18,7 +18,8 @@ run at a Prompt's end, and each Call's context parts: on a Launch's first
 Call the system prompt and the tools its request's shape sent, the
 instruction files and the Prompts received before it, a sub-agent's task,
 and on any Call what was injected before it, a compaction's summary among
-it.
+it. Beside a sub-agent's file lies its record: its type, its description and
+the call that started it, a main thread's or another sub-agent's.
 
 A conversation's ids are the scenario's own, the same in every build, so
 that a scenario published again is the same conversations again. A build's
@@ -85,13 +86,16 @@ class SentTurn:
 @dataclass(frozen=True)
 class _Spawning:
     """The tool call that started a sub-agent: as it is published, the
-    moment it was requested at, and Claude Code's version and the plugins'
-    its process ran."""
+    moment it was requested at, Claude Code's version and the plugins' its
+    process ran, and the thread it is of, by its sub-agent's id, none for
+    the main thread, at its depth, the main thread's 0."""
 
     tool_call: dict[str, Any]
     at: int
     version: str
     plugins: dict[str, str]
+    agent: str | None
+    depth: int
 
 
 @dataclass(frozen=True)
@@ -221,7 +225,8 @@ class _Thread:
     file's order, each named and placed as a collector names and places
     them, and its file's lines as they are written; its ids counted on with
     `ids`, the conversation's. `agents` are the session's sub-agents as a
-    tool call names the one it started, by name."""
+    tool call names the one it started, by name; `agent` is the thread's own
+    sub-agent's id, none for the main thread, at its `depth`."""
 
     def __init__(
         self,
@@ -229,6 +234,8 @@ class _Thread:
         ids: _Ids,
         lines: Lines,
         agents: Mapping[str, Spawned],
+        agent: str | None = None,
+        depth: int = 0,
     ) -> None:
         self.calls: list[dict[str, Any]] = []
         self.compactions: list[dict[str, Any]] = []
@@ -239,6 +246,8 @@ class _Thread:
         self._builder = builder
         self.ids = ids
         self._agents = agents
+        self._agent = agent
+        self._depth = depth
         self._named: dict[str, str] = {}
         self._leaves: dict[str, str | None] = {}
         """The chain's last line once each named Call was written, with its
@@ -386,7 +395,12 @@ class _Thread:
         )
         if use.spawns is not None:
             self.spawned[use.spawns] = _Spawning(
-                tool_call, call.at, self.lines.version, dict(self.lines.plugins)
+                tool_call,
+                call.at,
+                self.lines.version,
+                dict(self.lines.plugins),
+                self._agent,
+                self._depth,
             )
         if use.tool == "Skill" and use.argument is not None:
             self._skills[use.argument] = tool_call["tool_use_id"]
@@ -508,9 +522,18 @@ class Builder:
         for session in self.scenario.sessions:
             main, thread = self._main(session)
             built.append(main)
-            built.extend(
-                self._sub_agent(session, agent, thread) for agent in session.sub_agents
-            )
+            spawned = dict(thread.spawned)
+            for agent in session.sub_agents:
+                if agent.name not in spawned:
+                    raise ValueError(
+                        "A sub-agent is started by a call of its main thread or of a"
+                        f" sub-agent before it: none starts `{agent.name}`"
+                    )
+                sub_agent, started = self._sub_agent(
+                    session, agent, spawned[agent.name], thread.ids
+                )
+                built.append(sub_agent)
+                spawned |= started.spawned
         return built
 
     def _lines(self, session: Session, agent: SubAgent | None = None) -> Lines:
@@ -665,10 +688,11 @@ class Builder:
         )
         return _Built(publication, files), thread
 
-    def _sub_agent(self, session: Session, agent: SubAgent, main: _Thread) -> _Built:
-        """The sub-agent's thread, named for the tool call of the main
-        thread that started it."""
-        spawning = main.spawned[agent.name]
+    def _sub_agent(
+        self, session: Session, agent: SubAgent, spawning: _Spawning, ids: _Ids
+    ) -> tuple[_Built, _Thread]:
+        """The sub-agent's thread, named for the tool call that started it,
+        and its record; its ids counted on with `ids`, the conversation's."""
         lines = self._lines(session, agent)
         lines.version = spawning.version
         lines.plugins = spawning.plugins
@@ -678,18 +702,32 @@ class Builder:
             session.environment,
             self.when(spawning.at),
         )
-        thread = _Thread(self, main.ids, lines, {})
+        named = self.agent(session, agent)
+        thread = _Thread(
+            self, ids, lines, self._agents(session), named, spawning.depth + 1
+        )
         thread.opening = [len(_TASK)]
         for taken, step in enumerate(agent.steps, start=1):
             thread.back(step)
             thread.read(step, None, agent.steps[taken:])
-        publication, files = self._thread(session, lines, _moments(agent.steps))
+        publication, (transcript, *saved) = self._thread(
+            session, lines, _moments(agent.steps)
+        )
+        description = spawning.tool_call.get("first_argument")
+        record = lines.recorded(
+            agent.type,
+            description,
+            spawning.tool_call["tool_use_id"],
+            spawning.agent,
+            spawning.depth + 1,
+            self.when(spawning.at),
+        )
         publication |= _given(
-            agent_id=self.agent(session, agent),
+            agent_id=named,
             agent_type=agent.type,
-            description=spawning.tool_call.get("first_argument"),
+            description=description,
             spawned_by=spawning.tool_call["tool_use_id"],
             compactions=thread.compactions,
             calls=thread.calls,
         )
-        return _Built(publication, files)
+        return _Built(publication, [transcript, record, *saved]), thread

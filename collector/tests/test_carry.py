@@ -8,6 +8,7 @@ from pathlib import Path
 from pilot_collector.carry import (
     Carries,
     Carry,
+    Fork,
     Lead,
     Left,
     Occurred,
@@ -143,6 +144,11 @@ def _carry(
                 )
                 for held in range(removed)
             ),
+            fork=Fork(
+                f"toolu_01{place:022}",
+                f"msg_01{place:022}",
+                STOOD + timedelta(hours=place, seconds=9),
+            ),
         ),
         end=digest(str(place).encode()),
     )
@@ -210,6 +216,12 @@ class TestACarrysSize:
 
     def test_a_plugin_the_launch_open_named_counts(self) -> None:
         assert _carry(plugged=2).size > _carry(plugged=1).size > _carry().size
+
+    def test_a_forks_spawning_call_counts(self) -> None:
+        carry = _carry()
+        no_fork = replace(carry, stands=replace(carry.stands, fork=None))
+
+        assert carry.size > no_fork.size
 
     def test_what_the_boundarys_call_carries_counts(self) -> None:
         carry = _carry()

@@ -55,6 +55,10 @@ process writes as it exits.
   Stop event, which names its command and that `toolUseID`.
 - A sub-agent's file opens with the task its spawning call gave it, and every
   line of its chain is a `isSidechain` one that carries its `agentId`.
+  Beside it lies its record, `agent-<id>.meta.json`: its `agentType`, the
+  `description` its spawning call gave it and that call's id, `toolUseId`,
+  a nested one's parent, `parentAgentId`, and how deep it was started,
+  `spawnDepth`.
 - A compaction is a `system` line of subtype `compact_boundary` that follows
   no line: its `logicalParentUuid` names the chain's last line before it, and
   its `compactMetadata` has the trigger, the tokens before and after it and
@@ -328,6 +332,28 @@ class Lines:
         }
         self._lines.append(line)
         return self.leaf
+
+    def recorded(
+        self,
+        agent_type: str,
+        description: str | None,
+        tool_use_id: str,
+        parent: str | None,
+        depth: int,
+        at: datetime,
+    ) -> HomeFile:
+        """The record beside a sub-agent's file, written `at`: its type, the
+        description its spawning call gave it, that call's id, a nested
+        one's parent's id and how deep it was started."""
+        record: dict[str, Any] = {"agentType": agent_type}
+        if description is not None:
+            record["description"] = description
+        record["toolUseId"] = tool_use_id
+        if parent is not None:
+            record["parentAgentId"] = parent
+        record["spawnDepth"] = depth
+        path = self.path.removesuffix(".jsonl") + ".meta.json"
+        return HomeFile(path, json.dumps(record).encode(), at)
 
     def launched(self, version: str, plugins: dict[str, str]) -> None:
         """A process of that version of Claude Code starts, running those

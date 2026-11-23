@@ -12,7 +12,15 @@ from typing import Any
 import pytest
 from pilot_collection.publication import PublicationSchema, PublishedToolCallSchema
 from pilot_scenario import COLLECTOR, SCENARIO, Builder, Scenario
-from pilot_scenario.script import Call, Launch, Prompt, Session, Tokens
+from pilot_scenario.script import (
+    Call,
+    Launch,
+    Prompt,
+    Session,
+    SubAgent,
+    Tokens,
+    ToolUse,
+)
 
 from pilot_collector import VERSION
 from pilot_collector.home import transcript
@@ -51,6 +59,7 @@ from tests.support import (
     nested,
     over_the_tokens,
     queue,
+    recorded,
     request,
     requesting,
     result,
@@ -65,6 +74,7 @@ from tests.support import (
     too_large,
     typed,
     user,
+    words,
 )
 
 UNTIL = datetime(2026, 11, 12, 9, 30, 0, 250_000, tzinfo=UTC)
@@ -93,17 +103,6 @@ SCHEMAS = len(json.dumps([LOOM], separators=(",", ":")))
 SPLIT = "__SYSTEM_PROMPT_DYNAMIC_BOUNDARY__"
 """The marker a snapshot's system prompt holds where Claude Code splits it."""
 
-THREAD = (
-    "session_id",
-    "agent_id",
-    "file_size",
-    "file_modified_at",
-    "collector",
-    "working_directory",
-    "repository",
-    "environment",
-)
-PROMPT = ("received_at", "source", "characters", "hook_runs")
 CHOICES = (
     "requested_model",
     "effort",
@@ -113,21 +112,6 @@ CHOICES = (
     "attributed_plugin",
 )
 """What Claude Code records of a Call's own choices."""
-CALL = (
-    "message_id",
-    "prompt",
-    "predecessor",
-    "compaction",
-    "sent_at",
-    "completed_at",
-    "model",
-    *CHOICES,
-    "miss_cause",
-    "tokens",
-    "tool_calls",
-    "events",
-    "context_parts",
-)
 OPENING = ("system_prompt", "tool_schemas", "instruction_file", "prompt")
 """The Context Part Kinds a Launch's first Call carries that no later Call
 does."""
@@ -177,17 +161,70 @@ def _resumed() -> Scenario:
     )
 
 
+def _nested() -> Scenario:
+    """A thread whose sub-agent starts one of its own: the main thread's
+    call starts `tracing`, and a call of `tracing`'s starts `counting`."""
+    agent = ToolUse(
+        "Agent", "Trace the warp", took=30, characters=200, spawns="tracing"
+    )
+    tracing = SubAgent(
+        name="tracing",
+        type="general-purpose",
+        steps=(
+            Call(
+                at=8,
+                tokens=Tokens(input=40, output=6),
+                tools=(
+                    ToolUse(
+                        "Agent",
+                        "Count the heddles",
+                        took=10,
+                        characters=90,
+                        spawns="counting",
+                    ),
+                ),
+            ),
+            Call(at=22, tokens=Tokens(cache_read=40, output=3)),
+        ),
+    )
+    counting = SubAgent(
+        name="counting",
+        type="Explore",
+        steps=(Call(at=12, tokens=Tokens(input=30, output=2)),),
+    )
+    first = Prompt(
+        at=0,
+        source="typed",
+        characters=30,
+        steps=(
+            Call(at=4, tokens=Tokens(input=20, output=5), tools=(agent,)),
+            Call(at=40, tokens=Tokens(cache_read=20, output=3)),
+        ),
+    )
+    return Scenario(
+        name="a nested sub-agent",
+        people=("cleo",),
+        projects=(),
+        kinds=(),
+        units=(),
+        sessions=(
+            Session(
+                name="nested",
+                directory="/tmp/looms",
+                person="cleo",
+                launches=(
+                    Launch(versions=(("claude-code", "2.1.317"),), prompts=(first,)),
+                ),
+                sub_agents=(tracing, counting),
+            ),
+        ),
+    )
+
+
 def _cut(publication: dict[str, Any]) -> dict[str, Any]:
-    """A publication of the builder's cut to the facts the reader reads."""
-    cut = {name: publication[name] for name in THREAD if name in publication}
-    if "launches" in publication:
-        cut["launches"] = publication["launches"]
-    cut["compactions"] = publication.get("compactions", [])
-    cut["calls"] = [
-        {name: call[name] for name in CALL if name in call}
-        for call in publication["calls"]
-    ]
-    return cut
+    """A publication of the builder's but for the labeller's `group`, which
+    the reader reads none of."""
+    return {name: fact for name, fact in publication.items() if name != "group"}
 
 
 def _read(projects: Path, lines: list[Line] | bytes) -> PublicationSchema:
@@ -255,7 +292,9 @@ def _events(
 
 class TestTheScenario:
     @pytest.mark.parametrize(
-        "scenario", [SCENARIO, _resumed()], ids=["the scenario", "a resumed thread"]
+        "scenario",
+        [SCENARIO, _resumed(), _nested()],
+        ids=["the scenario", "a resumed thread", "a nested sub-agent"],
     )
     def test_each_file_reads_as_the_builders_publication(
         self, scenario: Scenario, tmp_path: Path
@@ -292,6 +331,21 @@ class TestTheScenario:
         }
 
         assert any("agent_id" in publication for publication in publications)
+        for publication in publications:
+            if "agent_id" in publication:
+                assert {"agent_type", "description", "spawned_by"} <= set(publication)
+        nested = Builder(_nested(), UNTIL).publications()
+        holders = {
+            asked["tool_use_id"]: publication.get("agent_id")
+            for publication in nested
+            for call in publication["calls"]
+            for asked in call.get("tool_calls", [])
+        }
+        assert [
+            holders[publication["spawned_by"]] is None
+            for publication in nested
+            if "agent_id" in publication
+        ] == [True, False]
         assert {prompt["source"] for prompt in prompts} >= {"sdk", "typed"}
         assert tokens == {
             "input",
@@ -581,6 +635,195 @@ class TestThePlace:
             is None
         )
         assert _read(tmp_path, lines).environment == "cleo-loom-7a41d9"
+
+
+def _sub_agent(projects: Path, lines: list[Line], **record: Any) -> PublicationSchema:
+    """The publication of a sub-agent's file holding `lines`, its record
+    holding `record` where it has any."""
+    named = filed(projects, lines, AGENT)
+    if record:
+        recorded(projects, **record)
+    return read(named, SETTINGS).publication
+
+
+SPAWNING = "toolu_05"
+"""The call that started the fork, of its parent's."""
+
+FORKED = {"agentType": "fork", "description": "Try the twill", "toolUseId": SPAWNING}
+"""A fork's record."""
+
+
+def _forked() -> list[Line]:
+    """A fork's file: the copies of its parent's lines, through the message
+    that holds the call that started the fork, then its own, the first the
+    call's result, which follows the message's line."""
+    copies = linked(
+        [
+            user(0, "Weave the border."),
+            instructions(
+                1, loaded("Project", "Weave tight.", f"{DIRECTORY}/CLAUDE.md")
+            ),
+            requesting(
+                4,
+                "toolu_01",
+                "Agent",
+                {"description": "Count the heddles", "prompt": "Count them."},
+                "msg_01",
+            ),
+            result(6, "toolu_01", "Forty heddles."),
+            retried(7),
+            attached(8, "date", "Today is a weaving day."),
+            requesting(
+                9,
+                SPAWNING,
+                "Agent",
+                {"description": "Try the twill", "prompt": "Weave a twill."},
+                "msg_02",
+            ),
+        ],
+        "copy",
+    )
+    own = linked(
+        [result(10, SPAWNING, "Weave a twill."), assistant(14, "msg_03", output=4)],
+        "own",
+    )
+    return [*copies, own[0] | {"parentUuid": copies[-1]["uuid"]}, *own[1:]]
+
+
+class TestASubAgentsRecord:
+    def test_its_type_description_and_spawning_call_are_its_records(
+        self, tmp_path: Path
+    ) -> None:
+        publication = _sub_agent(
+            tmp_path,
+            linked([user(0), assistant(4)]),
+            agentType="Explore",
+            description="Count the heddles",
+            toolUseId="toolu_09",
+            spawnDepth=2,
+            parentAgentId="a1b2c3d4e5f607182",
+        )
+
+        assert (
+            publication.agent_type,
+            publication.description,
+            publication.spawned_by,
+        ) == ("Explore", "Count the heddles", "toolu_09")
+
+    @pytest.mark.parametrize(
+        ("record", "facts"),
+        [
+            ({}, (None, None, None)),
+            ({"agentType": "weaver"}, ("weaver", None, None)),
+            (
+                {"agentType": "Explore", "description": "Count the heddles"},
+                ("Explore", "Count the heddles", None),
+            ),
+        ],
+        ids=["no record", "a workflow's agent", "older than 2.1.144"],
+    )
+    def test_each_is_none_where_the_record_or_its_key_is_missing(
+        self,
+        record: dict[str, str],
+        facts: tuple[str | None, str | None, str | None],
+        tmp_path: Path,
+    ) -> None:
+        publication = _sub_agent(tmp_path, linked([user(0), assistant(4)]), **record)
+
+        assert (
+            publication.agent_type,
+            publication.description,
+            publication.spawned_by,
+        ) == facts
+
+    @pytest.mark.parametrize("content", ['{"agentType": "Ex', "[]"])
+    def test_a_record_that_is_no_json_object_makes_the_file_unreadable(
+        self, content: str, tmp_path: Path
+    ) -> None:
+        named = filed(tmp_path, linked([user(0), assistant(4)]), AGENT)
+        named.path.with_name(f"agent-{AGENT}.meta.json").write_text(content)
+
+        with pytest.raises(UnreadableError, match="its record is no JSON"):
+            read(named, SETTINGS)
+
+
+class TestAFork:
+    def test_its_copies_of_its_parents_lines_are_no_facts_of_its(
+        self, tmp_path: Path
+    ) -> None:
+        publication = _sub_agent(tmp_path, _forked(), **FORKED)
+
+        assert publication.spawned_by == SPAWNING
+        assert [call.model_dump(exclude_none=True) for call in publication.calls] == [
+            {
+                "message_id": "msg_03",
+                "completed_at": moment(14),
+                "model": "claude-opus-4-5",
+                "tokens": {"output": 4},
+                "tool_calls": [],
+                "events": [],
+                "context_parts": [],
+            }
+        ]
+
+    def test_a_line_timed_at_or_before_its_spawning_calls_is_a_copy_where_it_stands(
+        self, tmp_path: Path
+    ) -> None:
+        copied = [
+            assistant(3, "msg_00", output=2) | {"uuid": "copy-0", "parentUuid": None},
+            retried(9) | {"uuid": "copy-9", "parentUuid": None},
+        ]
+        lines = _forked()
+        lines[-1:-1] = copied
+
+        publication = _sub_agent(tmp_path, lines, **FORKED)
+
+        assert [call.message_id for call in publication.calls] == ["msg_03"]
+        assert publication.calls[0].events == []
+
+    def test_a_line_of_its_spawning_message_is_a_copy_whatever_its_time(
+        self, tmp_path: Path
+    ) -> None:
+        lines = _forked()
+        spawned = next(line for line in lines if line.get("uuid") == "copy-7")
+        later = answering(11, "msg_02", words("And then the satin.")) | {
+            "uuid": "copy-8",
+            "parentUuid": spawned["uuid"],
+        }
+        lines.insert(-1, later)
+
+        publication = _sub_agent(tmp_path, lines, **FORKED)
+
+        assert [call.message_id for call in publication.calls] == ["msg_03"]
+
+    def test_one_whose_file_holds_no_line_of_its_spawning_call_copies_none(
+        self, tmp_path: Path
+    ) -> None:
+        publication = _sub_agent(
+            tmp_path, _forked(), **(FORKED | {"toolUseId": "toolu_77"})
+        )
+
+        assert [call.message_id for call in publication.calls] == [
+            "msg_01",
+            "msg_02",
+            "msg_03",
+        ]
+
+    def test_a_sub_agent_that_is_no_fork_takes_every_line(self, tmp_path: Path) -> None:
+        publication = _sub_agent(
+            tmp_path, _forked(), **(FORKED | {"agentType": "general-purpose"})
+        )
+
+        assert [call.message_id for call in publication.calls] == [
+            "msg_01",
+            "msg_02",
+            "msg_03",
+        ]
+        assert [asked.tool_use_id for asked in _tool_calls(publication)] == [
+            "toolu_01",
+            SPAWNING,
+        ]
+        assert [event.kind for event in publication.calls[0].events] == ["api_retry"]
 
 
 class TestLaunches:

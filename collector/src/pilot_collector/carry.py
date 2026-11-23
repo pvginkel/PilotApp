@@ -22,11 +22,12 @@ with a time since its last that named a version began, and the plugins it
 named, and the latest Prompt it received, with the Hook Runs taken for that
 Prompt, what the lines before it record of the Context Parts of the
 boundary's Call where it is its Launch's first, the Context Parts injected
-before the boundary's Call, the prompts waiting in the queue, and those a
+before the boundary's Call, the prompts waiting in the queue, those a
 `remove` took out of it that no message taken in the middle of a run has
-claimed. No id of any other line before the boundary is
-held, and of no Call but the one the chain leads to; no request shape but
-those the boundary's Call's requests name.
+claimed, and on a fork's thread the call that started it, with the message
+of its parent's that holds that call and its time. No id of any other line
+before the boundary is held, and of no Call but the one the chain leads to;
+no request shape but those the boundary's Call's requests name.
 
 **The bound.** The carries are kept up to a number of transcripts and a size,
 both settings. Past either, the transcript whose file changed longest ago is
@@ -85,6 +86,9 @@ _PART = 320
 _PLUGIN = 120
 """The bytes a plugin the Launch open named is counted at beside its name
 and its version."""
+
+_FORK = 160
+"""The bytes a fork's spawning call is counted at beside its ids."""
 
 
 def digest(content: bytes) -> bytes:
@@ -250,6 +254,24 @@ class Prompted:
 
 
 @dataclass(frozen=True)
+class Fork:
+    """A fork's thread, a sub-agent's whose record names it a fork: the
+    call that started it, and the message of its parent's that holds that
+    call, where a line of the file holds it. The lines of that message, and
+    every line timed at or before the one that holds the call, are copies
+    of its parent's lines."""
+
+    spawned_by: str
+    """The `toolUseId` of the call that started it, as its record names
+    it."""
+    message: str | None = None
+    """The `message.id` of the line that holds that call; none where no line
+    does, and no line is then a copy."""
+    at: datetime | None = None
+    """That line's time."""
+
+
+@dataclass(frozen=True)
 class Standing:
     """Where a reading stands before one line of the file: what the lines
     from that line on continue. A file's first line continues nothing."""
@@ -306,6 +328,9 @@ class Standing:
     """The prompts a `remove` took out of the queue before it that no
     message taken in the middle of a run has claimed, in the order they were
     taken out, as the queue holds them."""
+    fork: Fork | None = None
+    """On a fork's thread, the call that started it, as the lines before it
+    found it; none on any other thread."""
 
 
 @dataclass(frozen=True)
@@ -332,6 +357,7 @@ class Carry:
         runs = () if prompt is None else prompt.runs
         opening = stands.opening
         files = () if opening is None else opening.files
+        fork = stands.fork
         shapes = [asked.sends for asked in stands.requests if asked.sends is not None]
         if opening is not None and opening.snapshot is not None:
             shapes.append(opening.snapshot)
@@ -354,6 +380,7 @@ class Carry:
             *(run.command for run in runs),
             *(path for path, _ in files),
             *(part.name for part in stands.injected),
+            *(() if fork is None else (fork.spawned_by, fork.message)),
         )
         return (
             _HELD
@@ -365,6 +392,7 @@ class Carry:
             + _FILE * len(files)
             + _PART * len(stands.injected)
             + _PLUGIN * len(plugins)
+            + (0 if fork is None else _FORK)
             + _SHAPE * len(shapes)
             + _AWAITED * len(stands.awaited)
             + _REQUESTED * len(stands.requests)

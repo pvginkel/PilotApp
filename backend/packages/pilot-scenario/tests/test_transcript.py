@@ -24,6 +24,7 @@ from pilot_scenario.script import (
     Occurrence,
     Prompt,
     Session,
+    SubAgent,
     Tokens,
     ToolUse,
 )
@@ -57,10 +58,13 @@ FACTS = {
     "file_modified_at",
     "working_directory",
     "environment",
+    "agent_type",
+    "description",
+    "spawned_by",
     "compactions",
 }
-"""What a publication says of its thread that its file's name, size, time
-and lines say."""
+"""What a publication says of its thread that its file's name, size, time,
+lines and record say."""
 
 LAUNCH_FACTS = ("started_at", "ended_at", "components", "prompts")
 CALL_FACTS = (
@@ -234,6 +238,12 @@ def _read(file: HomeFile, home: dict[str, HomeFile]) -> dict[str, Any]:
         assert {line["agentId"] for line in lines if "uuid" in line} == {
             read["agent_id"]
         }
+        record = json.loads(
+            home[file.path.removesuffix(".jsonl") + ".meta.json"].content
+        )
+        read["agent_type"] = record["agentType"]
+        read["description"] = record["description"]
+        read["spawned_by"] = record["toolUseId"]
     results = {
         block["tool_use_id"]: line
         for line in lines
@@ -612,6 +622,62 @@ def _resumed() -> Scenario:
     )
 
 
+def _nested() -> Scenario:
+    """A thread whose sub-agent starts one of its own: the main thread's
+    call starts `tracing`, and a call of `tracing`'s starts `counting`."""
+    tracing = SubAgent(
+        name="tracing",
+        type="general-purpose",
+        steps=(
+            Call(
+                at=8,
+                tokens=Tokens(input=40, output=6),
+                tools=(
+                    ToolUse(
+                        "Agent",
+                        "Count the spokes",
+                        took=10,
+                        characters=90,
+                        spawns="counting",
+                    ),
+                ),
+            ),
+        ),
+    )
+    counting = SubAgent(
+        name="counting",
+        type="Explore",
+        steps=(Call(at=12, tokens=Tokens(input=30, output=2)),),
+    )
+    agent = ToolUse(
+        "Agent", "Trace the chain", took=30, characters=200, spawns="tracing"
+    )
+    first = Prompt(
+        at=0,
+        source="typed",
+        characters=20,
+        steps=(Call(at=4, tokens=Tokens(input=20, output=5), tools=(agent,)),),
+    )
+    return Scenario(
+        name="nested",
+        people=("ada",),
+        projects=(),
+        kinds=(),
+        units=(),
+        sessions=(
+            Session(
+                name="nested",
+                directory="/tmp/rides",
+                person="ada",
+                launches=(
+                    Launch(versions=(("claude-code", "2.1.317"),), prompts=(first,)),
+                ),
+                sub_agents=(tracing, counting),
+            ),
+        ),
+    )
+
+
 class TestTheHome:
     def test_a_thread_is_a_file_where_claude_code_files_it(self) -> None:
         assert [file.path for file in Builder(SCENARIO, UNTIL).files()] == [
@@ -619,6 +685,7 @@ class TestTheHome:
             f"projects/-work-RecipeBox/{HALVING}/tool-results"
             "/mcp-pantry-list_recipes-toolu_0004.txt",
             f"projects/-work-RecipeBox/{HALVING}/subagents/agent-{COUNTING}.jsonl",
+            f"projects/-work-RecipeBox/{HALVING}/subagents/agent-{COUNTING}.meta.json",
             f"projects/-work-RecipeBox/{HALVING}/tool-results/toolu_0008.txt",
             f"projects/-work-BikeLog/{GEARS}.jsonl",
         ]
@@ -655,6 +722,39 @@ class TestTheHome:
         assert first[0].content != later[0].content
         assert first[1].content == later[1].content
 
+    def test_a_sub_agents_record_lies_beside_its_file(self) -> None:
+        home = {file.path: file for file in Builder(_nested(), UNTIL).files()}
+        records = {
+            path: json.loads(file.content)
+            for path, file in home.items()
+            if path.endswith(".meta.json")
+        }
+        tracing, counting = (
+            path.removesuffix(".jsonl").rsplit("agent-", 1)[1]
+            for path in home
+            if "/subagents/" in path and path.endswith(".jsonl")
+        )
+
+        assert list(records.values()) == [
+            {
+                "agentType": "general-purpose",
+                "description": "Trace the chain",
+                "toolUseId": "toolu_0001",
+                "spawnDepth": 1,
+            },
+            {
+                "agentType": "Explore",
+                "description": "Count the spokes",
+                "toolUseId": "toolu_0002",
+                "parentAgentId": tracing,
+                "spawnDepth": 2,
+            },
+        ]
+        assert [path.rsplit("agent-", 1)[1] for path in records] == [
+            f"{tracing}.meta.json",
+            f"{counting}.meta.json",
+        ]
+
     def test_a_file_is_json_lines_each_an_object(self) -> None:
         for file in _transcripts(Builder(SCENARIO, UNTIL)):
             assert file.content.endswith(b"\n")
@@ -673,8 +773,13 @@ def _killed() -> Scenario:
 class TestAPublicationIsWhatItsFileSays:
     @pytest.mark.parametrize(
         "scenario",
-        [SCENARIO, _resumed(), _killed()],
-        ids=["the scenario", "a resumed thread", "a killed process's thread"],
+        [SCENARIO, _resumed(), _killed(), _nested()],
+        ids=[
+            "the scenario",
+            "a resumed thread",
+            "a killed process's thread",
+            "a nested sub-agent",
+        ],
     )
     def test_each_thread_read_off_its_lines_is_its_publication(
         self, scenario: Scenario

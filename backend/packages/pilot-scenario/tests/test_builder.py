@@ -23,6 +23,7 @@ from pilot_scenario.script import (
     Prompt,
     Retry,
     Session,
+    SubAgent,
     Tokens,
     ToolUse,
 )
@@ -771,6 +772,44 @@ class TestAMainThread:
         assert "repository" not in publication
 
 
+def _nested(*order: str) -> Scenario:
+    """A scenario of one session whose main thread's call starts `tracing`,
+    and a call of `tracing`'s `counting`, the sub-agents in that `order`."""
+    agents = {
+        "tracing": SubAgent(
+            name="tracing",
+            type="general-purpose",
+            steps=(
+                Call(
+                    at=8,
+                    tokens=Tokens(input=40, output=6),
+                    tools=(
+                        ToolUse(
+                            "Agent",
+                            "Count the spokes",
+                            took=10,
+                            characters=90,
+                            spawns="counting",
+                        ),
+                    ),
+                ),
+            ),
+        ),
+        "counting": SubAgent(
+            name="counting",
+            type="Explore",
+            steps=(Call(at=12, tokens=Tokens(input=30, output=2)),),
+        ),
+    }
+    agent = ToolUse(
+        "Agent", "Trace the chain", took=30, characters=200, spawns="tracing"
+    )
+    scenario = _one(Call(at=4, tokens=Tokens(input=20, output=5), tools=(agent,)))
+    (session,) = scenario.sessions
+    started = replace(session, sub_agents=tuple(agents[name] for name in order))
+    return replace(scenario, sessions=(started,))
+
+
 class TestASubAgent:
     def test_it_names_the_call_that_started_it(self) -> None:
         built = _built()
@@ -785,6 +824,23 @@ class TestASubAgent:
         assert built["counting"]["spawned_by"] == "toolu_0002"
         assert built["counting"]["description"] == spawning["first_argument"]
         assert built["counting"]["agent_type"] == "Explore"
+
+    def test_one_a_sub_agents_call_started_names_that_call(self) -> None:
+        main, tracing, counting = Builder(
+            _nested("tracing", "counting"), UNTIL
+        ).publications()
+
+        (started,) = tracing["calls"][0]["tool_calls"]
+        assert tracing["spawned_by"] == main["calls"][0]["tool_calls"][0]["tool_use_id"]
+        assert counting["spawned_by"] == started["tool_use_id"]
+        assert (
+            counting["description"] == started["first_argument"] == "Count the spokes"
+        )
+        assert counting["agent_type"] == "Explore"
+
+    def test_one_no_thread_before_it_starts_is_refused(self) -> None:
+        with pytest.raises(ValueError, match="none starts `counting`"):
+            Builder(_nested("counting", "tracing"), UNTIL).publications()
 
     def test_its_first_call_carries_its_task(self) -> None:
         first, *later = _built()["counting"]["calls"]

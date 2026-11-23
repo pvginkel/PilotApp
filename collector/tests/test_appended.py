@@ -15,6 +15,7 @@ from pilot_collector import VERSION
 from pilot_collector.carry import (
     ROOT,
     Carry,
+    Fork,
     Lead,
     Left,
     Occurred,
@@ -55,6 +56,7 @@ from tests.support import (
     loaded,
     moment,
     queue,
+    recorded,
     request,
     requesting,
     result,
@@ -67,7 +69,15 @@ from tests.support import (
     typed,
     user,
 )
-from tests.test_reader import LOOM, SCHEMAS, UNTIL, _resumed
+from tests.test_reader import (
+    FORKED,
+    LOOM,
+    SCHEMAS,
+    SPAWNING,
+    UNTIL,
+    _forked,
+    _resumed,
+)
 
 SETTINGS = support.settings()
 
@@ -346,6 +356,43 @@ class TestTheCarry:
 
         assert (stands.calls, stands.launches, stands.prompts) == (1, 0, 0)
         assert stands.launch is None
+
+    def test_a_forks_thread_holds_the_call_that_started_it(
+        self, tmp_path: Path
+    ) -> None:
+        named = filed(tmp_path, _forked(), AGENT)
+        recorded(tmp_path, **FORKED)
+
+        stands = read(named, SETTINGS).carry.stands
+
+        assert stands.fork == Fork(SPAWNING, "msg_02", moment(9))
+        assert stands.calls == 0
+
+    def test_a_fork_with_no_call_of_its_own_stands_at_its_start(
+        self, tmp_path: Path
+    ) -> None:
+        named = filed(tmp_path, _forked()[:-1], AGENT)
+        recorded(tmp_path, **FORKED)
+
+        stands = read(named, SETTINGS).carry.stands
+
+        assert (stands.byte, stands.fork) == (0, Fork(SPAWNING, "msg_02", moment(9)))
+
+    def test_a_fork_whose_file_holds_no_line_of_its_call_holds_the_call_alone(
+        self, tmp_path: Path
+    ) -> None:
+        named = filed(tmp_path, _forked()[:3], AGENT)
+        recorded(tmp_path, **FORKED)
+
+        assert read(named, SETTINGS).carry.stands.fork == Fork(SPAWNING)
+
+    def test_no_other_thread_holds_a_fork(self, tmp_path: Path) -> None:
+        main = filed(tmp_path, linked([typed(0), assistant(4)]))
+        agent = filed(tmp_path, _forked(), AGENT)
+        recorded(tmp_path, **(FORKED | {"agentType": "general-purpose"}))
+
+        assert read(main, SETTINGS).carry.stands.fork is None
+        assert read(agent, SETTINGS).carry.stands.fork is None
 
     def test_it_holds_where_the_chain_leads_from_its_line_and_no_other_lines(
         self, tmp_path: Path
@@ -1589,6 +1636,73 @@ class TestAFileThatGrew:
         ]
         assert _held(before.publication, grown.publication) == whole.publication
 
+    def test_a_sub_agents_appended_publication_names_its_record(
+        self, tmp_path: Path
+    ) -> None:
+        recorded(
+            tmp_path,
+            agentType="Explore",
+            description="Count the heddles",
+            toolUseId="toolu_09",
+        )
+        _, grown = _grown(
+            tmp_path,
+            linked([user(0), assistant(4, "msg_01"), assistant(9, "msg_02")]),
+            linked([assistant(14, "msg_03")], "grown"),
+            agent=AGENT,
+        )
+
+        assert grown.publication.appended is not None
+        assert (
+            grown.publication.agent_type,
+            grown.publication.description,
+            grown.publication.spawned_by,
+        ) == ("Explore", "Count the heddles", "toolu_09")
+
+    def test_a_forks_file_grown_a_line_at_a_time_reads_as_its_whole(
+        self, tmp_path: Path
+    ) -> None:
+        """Its copies, the one from the boundary on among them, stay no
+        facts of its, as the whole reading has it; read whole instead at the
+        line that holds its call, which the carry before it was read
+        without."""
+        lines = _forked()
+        lines += _continuing(
+            lines[-1]["uuid"],
+            [
+                assistant(18, "msg_04", output=2),
+                retried(9),
+                assistant(21, "msg_04", output=5),
+                assistant(25, "msg_05", output=1),
+            ],
+        )
+        named = filed(tmp_path, b"", AGENT)
+        recorded(tmp_path, **FORKED)
+        held: Read | None = None
+        whole_instead: list[str] = []
+        for line in lines:
+            _added(named, [line])
+            whole = read(named, SETTINGS)
+            if held is not None:
+                try:
+                    taken = read(named, SETTINGS, held.carry)
+                except NotContinuedError as error:
+                    whole_instead.append(line["uuid"])
+                    assert "holds the call that started it" in str(error)
+                else:
+                    was = _held(held.publication, taken.publication)
+                    assert was == whole.publication
+                    assert taken.carry == whole.carry
+            held = whole
+
+        assert held is not None
+        assert [call.message_id for call in held.publication.calls] == [
+            "msg_03",
+            "msg_04",
+            "msg_05",
+        ]
+        assert whole_instead == ["copy-7"]
+
     def test_a_sub_agents_thread_names_no_launch_and_no_prompt_before(
         self, tmp_path: Path
     ) -> None:
@@ -1955,6 +2069,61 @@ class TestAFileThatDoesNotContinueItsCarry:
         publication = read(named, SETTINGS, carry).publication
 
         assert [call.message_id for call in publication.calls] == ["msg_02", "msg_03"]
+
+    @pytest.mark.parametrize(
+        ("then", "reason"),
+        [
+            (
+                FORKED | {"toolUseId": "toolu_77"},
+                "its record names another fork's call than the one it was read with",
+            ),
+            (
+                FORKED | {"agentType": "general-purpose"},
+                "its record names another fork's call than the one it was read with",
+            ),
+        ],
+        ids=["another fork's call", "no fork's"],
+    )
+    def test_a_record_that_names_another_fork_than_the_carrys_is_not_read_on(
+        self, then: dict[str, str], reason: str, tmp_path: Path
+    ) -> None:
+        named = filed(tmp_path, _forked(), AGENT)
+        recorded(tmp_path, **FORKED)
+        carry = read(named, SETTINGS).carry
+        recorded(tmp_path, **then)
+        _added(named, [assistant(18, "msg_03", output=6)])
+
+        with pytest.raises(NotContinuedError, match=reason):
+            read(named, SETTINGS, carry)
+
+    def test_a_forks_record_written_after_the_reading_it_continues_is_not_read_on(
+        self, tmp_path: Path
+    ) -> None:
+        named = filed(tmp_path, _forked(), AGENT)
+        carry = read(named, SETTINGS).carry
+        recorded(tmp_path, **FORKED)
+        _added(named, [assistant(18, "msg_03", output=6)])
+
+        with pytest.raises(
+            NotContinuedError, match="its record names another fork's call"
+        ):
+            read(named, SETTINGS, carry)
+
+    def test_a_forks_line_from_the_boundary_on_holding_its_call_is_not_read_on(
+        self, tmp_path: Path
+    ) -> None:
+        """Read before the file held the line, every line was the fork's."""
+        lines = _forked()
+        named = filed(tmp_path, lines[:5], AGENT)
+        recorded(tmp_path, **FORKED)
+        carry = read(named, SETTINGS).carry
+        _added(named, lines[5:])
+
+        with pytest.raises(
+            NotContinuedError,
+            match="a fork's line from its boundary on holds the call that started it",
+        ):
+            read(named, SETTINGS, carry)
 
     def test_a_whole_reading_drops_a_result_no_request_names(
         self, named: Transcript, carry: Carry

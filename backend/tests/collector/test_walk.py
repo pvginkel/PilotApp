@@ -27,9 +27,11 @@ from pilot_collector.home import transcript
 from pilot_collector.pilot import NotAdmitted, NotAppendable, Pilot, Refused
 from pilot_collector.settings import Settings
 from pilot_collector.walk import Walker
-from pilot_scenario import SCENARIO, Builder
+from pilot_scenario import SCENARIO, Builder, Scenario, script
+from pilot_scenario.transcript import stamp
 from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session as DbSession
+from sqlalchemy.orm import aliased
 from werkzeug.serving import make_server
 
 from app.extensions import db
@@ -1079,6 +1081,199 @@ def _facts(app: Flask, name: str) -> dict[str, Any]:
                 key=lambda event: (event["call_id"], event["at"]),
             ),
         }
+
+
+def _nested() -> Scenario:
+    """A conversation whose main thread's call starts `tracing`, whose own
+    calls start `counting` and then a fork the script has no thread of."""
+    tracing = script.SubAgent(
+        name="tracing",
+        type="general-purpose",
+        steps=(
+            script.Call(
+                at=8,
+                tokens=script.Tokens(input=40, output=6),
+                tools=(
+                    script.ToolUse(
+                        "Agent",
+                        "Count the spokes",
+                        took=10,
+                        characters=90,
+                        spawns="counting",
+                    ),
+                ),
+            ),
+            script.Call(
+                at=22,
+                tokens=script.Tokens(cache_read=40, output=3),
+                tools=(
+                    script.ToolUse("Agent", "Try the twill", took=9, characters=60),
+                ),
+            ),
+        ),
+    )
+    counting = script.SubAgent(
+        name="counting",
+        type="Explore",
+        steps=(script.Call(at=12, tokens=script.Tokens(input=30, output=2)),),
+    )
+    agent = script.ToolUse(
+        "Agent", "Trace the warp", took=40, characters=200, spawns="tracing"
+    )
+    first = script.Prompt(
+        at=0,
+        source="typed",
+        characters=20,
+        steps=(
+            script.Call(at=4, tokens=script.Tokens(input=20, output=5), tools=(agent,)),
+        ),
+    )
+    return Scenario(
+        name="nested",
+        people=("cleo",),
+        projects=(),
+        kinds=(),
+        units=(),
+        sessions=(
+            script.Session(
+                name="nested",
+                directory="/tmp/looms",
+                person="cleo",
+                launches=(
+                    script.Launch(
+                        versions=(("claude-code", "2.1.317"),), prompts=(first,)
+                    ),
+                ),
+                sub_agents=(tracing, counting),
+            ),
+        ),
+    )
+
+
+FORK = "f0f1f2f3f4f5f6f70"
+"""Claude Code's id of the fork `tracing` started."""
+
+
+def _forked(home: Path, parent: Path, spawning: str, kind: str) -> None:
+    """A sub-agent's file and record beside its parent's, started by the
+    call `spawning` of the parent's, its record naming its type `kind`: a
+    fork's, the parent's lines copied through the one that holds that call,
+    then the fork's own, the call's result and a Call."""
+    copies: list[dict[str, Any]] = []
+    for line in _lines(parent):
+        copies.append(line | {"agentId": FORK})
+        content = line.get("message", {}).get("content")
+        if line["type"] == "assistant" and any(
+            block["type"] == "tool_use" and block["id"] == spawning for block in content
+        ):
+            break
+    spawned = copies[-1]
+    at = datetime.fromisoformat(spawned["timestamp"])
+    returned = {
+        "parentUuid": spawned["uuid"],
+        "isSidechain": True,
+        "agentId": FORK,
+        "type": "user",
+        "message": {
+            "role": "user",
+            "content": [
+                {"type": "tool_result", "tool_use_id": spawning, "content": "Twill."}
+            ],
+        },
+        "uuid": f"{FORK}-returned",
+        "timestamp": stamp(at + timedelta(seconds=1)),
+        "cwd": spawned["cwd"],
+        "sessionId": spawned["sessionId"],
+        "version": spawned["version"],
+    }
+    own = {name: fact for name, fact in spawned.items() if name != "requestRef"} | {
+        "parentUuid": returned["uuid"],
+        "uuid": f"{FORK}-own",
+        "timestamp": stamp(at + timedelta(seconds=3)),
+        "message": spawned["message"]
+        | {"id": "msg_fork", "content": [{"type": "text", "text": "Twill it is."}]},
+    }
+    path = parent.with_name(f"agent-{FORK}.jsonl")
+    _written(path, [*copies, returned, own])
+    record = {"agentType": kind, "description": "Try the twill", "toolUseId": spawning}
+    path.with_name(f"agent-{FORK}.meta.json").write_text(json.dumps(record))
+
+
+def _parents(app: Flask, session_id: str) -> dict[str, tuple[str | None, str] | None]:
+    """Each sub-agent's thread of that conversation Pilot holds, by its
+    sub-agent's id: the thread of the Tool Call Pilot joined it to, by its
+    sub-agent's id, none for a main thread, and the call's `tool_use_id`;
+    none where Pilot joined it to none."""
+    holder = aliased(Transcript)
+    with _record(app) as record:
+        rows = record.execute(
+            select(Transcript.agent_id, holder.agent_id, ToolCall.tool_use_id)
+            .outerjoin(ToolCall, ToolCall.id == Transcript.spawned_by_id)
+            .outerjoin(holder, holder.id == ToolCall.transcript_id)
+            .where(
+                Transcript.session_id == session_id, Transcript.agent_id.is_not(None)
+            )
+        ).all()
+    return {
+        agent: None if tool_use_id is None else (holder_agent, tool_use_id)
+        for agent, holder_agent, tool_use_id in rows
+    }
+
+
+class TestASubAgentsSpawningCall:
+    """F152.5: a sub-agent's spawning call, as its record names it."""
+
+    @pytest.mark.parametrize(
+        ("kind", "copied"),
+        [("fork", False), ("general-purpose", True)],
+        ids=["a fork", "a sub-agent whose copies are its own"],
+    )
+    def test_each_is_joined_to_the_call_that_started_it_in_one_thread(
+        self,
+        committed_app: Flask,
+        home: Path,
+        walker: Walker,
+        kind: str,
+        copied: bool,
+    ) -> None:
+        """A nested sub-agent's is its parent sub-agent's call; a fork's
+        copies of its parent's lines are no facts of its, so a call it copied
+        stands in its parent's thread alone. Read as its own, the copy is a
+        second thread holding it, and Pilot joins no sub-agent to it."""
+        builder = Builder(_nested(), UNTIL)
+        builder.write(home)
+        main, tracing, counting = builder.publications()
+        a1 = main["calls"][0]["tool_calls"][0]["tool_use_id"]
+        b1, f1 = (
+            asked["tool_use_id"]
+            for call in tracing["calls"]
+            for asked in call["tool_calls"]
+        )
+        parent = home / next(
+            file.path for file in builder.files() if tracing["agent_id"] in file.path
+        )
+        _forked(home, parent, f1, kind)
+
+        walker.walk()
+
+        assert _parents(committed_app, main["session_id"]) == {
+            tracing["agent_id"]: (None, a1),
+            counting["agent_id"]: None if copied else (tracing["agent_id"], b1),
+            FORK: (tracing["agent_id"], f1),
+        }
+        calls = _calls_of(committed_app, f"{main['session_id']}/{FORK}")
+        assert calls == (3 if copied else 1)
+
+
+def _calls_of(app: Flask, name: str) -> int:
+    """How many Calls Pilot holds of the transcript of that name."""
+    with _record(app) as record:
+        thread = _thread(record, name)
+        return record.scalar(
+            select(func.count())
+            .select_from(Call)
+            .where(Call.transcript_id == thread.id)
+        )
 
 
 class TestAFileThatGrows:
