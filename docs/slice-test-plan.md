@@ -633,7 +633,7 @@ Each push starts its repo's jobs, and each is followed to its end:
 `AaC/*` build to that build's own result alone.
 
 ```bash
-timeout 1800 track_build.py PilotApp/Build-Main --hash "$(git rev-parse HEAD)" --appear-timeout 120 --diagnose
+timeout 4800 track_build.py PilotApp/Build-Main --hash "$(git rev-parse HEAD)" --appear-timeout 120 --diagnose
 timeout 900 track_build.py AaC/PilotApp --hash "$(git rev-parse HEAD)" --appear-timeout 120 --diagnose
 ```
 
@@ -642,11 +642,17 @@ It needs `JENKINS_TOKEN`, which this environment projects, and the deploy repo's
 green it reads the pin line from the console (`pvginkel/PilotDeploy <sha> pins
 config/dev/values.yaml, config/prd/values.yaml.`) and waits until every Application that follows
 the commit has rolled it: one whose source tracks PilotDeploy's `main` and whose values files name a
-pinned file, which is `pilot-dev` alone, since `pilot-prd` tracks `prd`. The `timeout` sits above
-the build (the job's first build took 270 s, the model app's run near ten minutes), the 120 s Argo
-CD may take to see the pin commit and the ten-minute roll deadline after that, so that a slow roll
-ends in `track_build.py`'s own exit `6` with its diagnosis rather than in `timeout`'s `124` with
-none. The pin commit starts `AaC/PilotDeployDev` alone, which `track_build.py` does not follow:
+pinned file, which is `pilot-dev` alone, since `pilot-prd` tracks `prd`. The `timeout`, 80
+minutes, sits above everything the wait can take: the 120 s the build may take to appear, the build
+itself, the 120 s Argo CD may take to see the pin commit and the ten-minute roll deadline after
+that, 74 minutes in all, so that a slow build or roll ends in `track_build.py`'s own exit (`1`,
+`6`) with its diagnosis rather than in `timeout`'s `124` with none. The build is counted at the
+`Jenkinsfile`'s own cap, `timeout(time: 60, unit: 'MINUTES')`, past which Jenkins aborts it, an
+exit `1`, rather than at what builds take: builds #192 to #211 (2026-11-16 to 11-23) took 25 to
+43.5 minutes, the pin line at their end, and the Playwright suite's every test runs about twice as
+long when the validation Job's node is busy, so a build of 45 minutes or more is to be expected. A
+change to that cap changes this `timeout` and the roll check's window (below) with it. The pin
+commit starts `AaC/PilotDeployDev` alone, which `track_build.py` does not follow:
 `AaC/PilotDeploy` builds `prd`. While Argo CD has no
 `pilot-dev` (before its first deploy below), pass `--no-follow-argocd`: the pins have nothing to
 roll them yet. Its exit status says where it stopped:
@@ -687,7 +693,7 @@ command, `scripts/roll-check.py`, and it makes the push itself, once it is measu
 background with the push after `--`, and follow the build beside it as above.
 
 ```bash
-timeout 2100 scripts/roll-check.py -- git push origin main          # or: -- git -C ../PilotDeploy push origin main
+timeout 5100 scripts/roll-check.py -- git push origin main          # or: -- git -C ../PilotDeploy push origin main
 ```
 
 It lists `pilot-dev`'s pods first, up to three tries of 10 s each, and writes the one pod that runs
@@ -697,11 +703,15 @@ has no roll check); two, a roll already under way, so wait for it to end and run
 probes the site every half second, with reads that write nothing, and runs the push only once both
 URLs have answered, so the roll is measured from its start; a push that fails ends the check. It
 lists the pods every 5 s, and ends on its own once the pod in `tmp/roll/old` is gone, its
-termination included, or 30 minutes after the push (`--timeout`). It prints how often each URL gave
-each status. `/` answers `200` (the UI's nginx) and `/api/auth/self` answers `401` (the backend,
-through that nginx, refusing a request with no session); any other status is a finding: a `502` or
-`504` is nothing answering behind a proxy, a `503` traffic that reached a pod while it was not
-ready, a draining one included, and a `000` no answer at all. `tmp/roll/probes` has each answer's
+termination included, or 80 minutes after the push (`--timeout`): the build's wait above, 74
+minutes at its longest, with the 70 s of the old pod's termination after it. The `timeout` around
+it sits five minutes above that, for the listing before the push and the summary after it, so that
+a roll that outlives the window ends in the check's own exit `2` and its tally rather than in
+`timeout`'s `124`. It prints how often each URL gave each status. `/` answers `200` (the UI's
+nginx) and `/api/auth/self` answers `401` (the backend, through that nginx, refusing a request with
+no session); any other status is a finding: a `502` or `504` is nothing answering behind a proxy, a
+`503` traffic that reached a pod while it was not ready, a draining one included, and a `000` no
+answer at all. `tmp/roll/probes` has each answer's
 time (UTC), and `tmp/roll/pods` the pods' states every 5 s to set beside it. The pod the roll
 produced is named in `tmp/roll/new`. Its exit status says how the roll went:
 
@@ -709,7 +719,7 @@ produced is named in `tmp/roll/new`. Its exit status says how the roll went:
 |------|---------|
 | `0` | The old pod is gone and every read answered as expected. |
 | `1` | A read failed: a finding; the summary gives the first and last failed read's time. |
-| `2` | The old pod outlived the check: the roll did not finish within 30 minutes, a finding too. |
+| `2` | The old pod outlived the check: the roll did not finish within 80 minutes, a finding too. |
 | `3` | Both `1` and `2`. |
 | `4` | No check, and no push: the listing failed three times, or named no pod or two. |
 | `5` | The push failed, and nothing was measured. Fix the push and run it again. |

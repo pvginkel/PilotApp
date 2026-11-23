@@ -5,7 +5,7 @@ Usage:
     scripts/roll-check.py [--timeout SECONDS] -- <push command...>
 
 For example, in the background:
-    timeout 2100 scripts/roll-check.py -- git push origin main
+    timeout 5100 scripts/roll-check.py -- git push origin main
 
 pilot-dev rolls by starting the new pod beside the old one and retiring the old
 one once the new one is ready (docs/slice-test-plan.md § The roll check). The
@@ -19,7 +19,7 @@ check rides the roll a push causes, and holds the push until it is measuring:
 3. Once both URLs have answered, it runs the push command, its output passed
    through. A push that fails ends the check.
 4. It lists the pods every 5 s, appended to tmp/roll/pods with the time, until
-   the old pod is gone, its termination included, or until --timeout (1800 s)
+   the old pod is gone, its termination included, or until --timeout (4800 s)
    after the push.
 5. It prints how often each URL gave each status, the failed reads' first and
    last times, and the pod the roll produced, also in tmp/roll/new.
@@ -64,6 +64,11 @@ FIRST_LISTING_TRIES = 3
 PROBE_INTERVAL = 0.5
 PROBE_TIMEOUT = 5
 LIST_INTERVAL = 5
+WINDOW = 4800
+"""How long after the push the old pod may stand: the build's whole wait, the
+120 s it may take to appear, the build at the Jenkinsfile's 60-minute cap, the
+120 s Argo CD may take to see the pin commit and its ten-minute roll deadline,
+with the old pod's 70 s termination after it (docs/slice-test-plan.md)."""
 
 
 class _NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -159,7 +164,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
-    parser.add_argument("--timeout", type=int, default=1800)
+    parser.add_argument("--timeout", type=int, default=WINDOW)
     parser.add_argument("push", nargs=argparse.REMAINDER)
     args = parser.parse_args()
     push = args.push[1:] if args.push[:1] == ["--"] else args.push
