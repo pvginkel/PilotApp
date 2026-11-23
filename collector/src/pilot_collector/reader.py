@@ -1095,7 +1095,8 @@ class _Thread:
             leads=ROOT
             if self._link is None
             else self._reached(self._leads[self._link], calls),
-            awaited=self._before.awaited + tuple(self._awaited),
+            awaited=(self._before.awaited if self._before.byte else ())
+            + tuple(self._awaited),
             requests=self._requests,
             events=tuple(self._early),
             directory=self.directory,

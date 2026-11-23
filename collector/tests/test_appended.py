@@ -894,6 +894,28 @@ class TestAFileThatGrew:
         assert grown.carry.stands.calls == 2
         assert grown.carry.stands.awaited == ("a-line-of-another-file",)
 
+    def test_a_line_awaited_at_the_files_first_line_stays_in_the_carry_once(
+        self, tmp_path: Path
+    ) -> None:
+        """A sub-agent's file whose first line is its first Call's, following
+        a line of another file: the boundary is the file's start, and every
+        reading from it on carries that line's id once, as the whole reading
+        does."""
+        lines = linked([assistant(4, "msg_01"), *_ticks(3)])
+        lines[0]["parentUuid"] = "a-line-of-another-file"
+        named = filed(tmp_path, lines[:1], AGENT)
+        held = read(named, SETTINGS)
+        for line in lines[1:]:
+            _added(named, [line])
+            whole = read(named, SETTINGS)
+
+            taken = read(named, SETTINGS, held.carry)
+
+            assert taken.carry.stands.byte == 0
+            assert taken.carry.stands.awaited == ("a-line-of-another-file",)
+            assert taken.carry == whole.carry
+            held = taken
+
     def test_the_boundarys_call_takes_what_its_later_lines_say(
         self, tmp_path: Path
     ) -> None:
