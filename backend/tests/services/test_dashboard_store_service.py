@@ -524,6 +524,25 @@ class TestLoadWorkflow:
             ("rides", "Rides", "t=d7&by=project&p=time,day&m=cost.sum&col=source"),
         ]
 
+    @pytest.mark.usefixtures("from_the_file")
+    def test_a_ratio_the_load_removes_is_dropped_from_its_views_with_a_note(
+        self, session: DbSession, service: DashboardStoreService
+    ) -> None:
+        """The views are read under the ratios the load leaves, not those
+        held before it: per_ride, held from the file, is gone with it."""
+        run_after_commit_callbacks()
+        views, ratios = workflow_views.entries()
+
+        loaded = service.load_workflow(
+            views, [ratio for ratio in ratios if ratio.key != "per_ride"], NOW
+        )
+
+        assert loaded.notes == (
+            'view "rides", m=r:per_ride: no ratio has the key "per_ride", so the '
+            "measure is dropped.",
+        )
+        assert "per_ride" not in _row(session, Origin.WORKFLOW, "rides").state
+
     def test_it_leaves_pilots_own_views_and_what_a_person_made_alone(
         self, session: DbSession, service: DashboardStoreService
     ) -> None:
