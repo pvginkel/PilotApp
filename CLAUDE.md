@@ -119,7 +119,7 @@ Template-owned code is improved in this repo, not in the template repos (D018): 
 gets wrong, or does less well than the work needs, is changed here, with no need to stay backwards
 compatible, in a commit of its own, and listed here as a standing edit, so that a `copier update`
 that conflicts on it resolves to this repo's side; an agent merges it into ModernAppTemplate.
-Twenty-six stand today: the `Jenkinsfile`, the app's own as a whole, which tags its images `dev-<n>` and
+Twenty-seven stand today: the `Jenkinsfile`, the app's own as a whole, which tags its images `dev-<n>` and
 `dev-latest` and pins `dev-<n>` into PilotDeploy's `config/dev` and `prd-<n>` into its `config/prd`
 in one commit, where the template's tags `<n>` and `latest` and pins production alone, and which
 carries the sidecar's `golang` container and its `Test sidecar` and `Build pilot-sync image` stages,
@@ -189,7 +189,11 @@ where the library's `modernApp.test` fixes run-suite's flags and so left CI on t
 config's count; the completion of `useSSETask` in `frontend/src/hooks/use-sse-task.ts`, which
 takes a `task_completed` as the task's result unless the result says it failed, with `success` false
 or an `error_message`, where the template's took one without `success: true` as failed, and so
-failed every task whose result is a plain model, as the backend's `TaskService` sends one; the
+failed every task whose result is a plain model, as the backend's `TaskService` sends one; a
+task's progress update, `TaskProgressUpdate.data` in `backend/app/schemas/task_schema.py`, which
+`send_progress` takes in `backend/app/services/base_task.py` and `task_service.py`, what the task
+has answered so far, where the template's carried a text and a fraction alone, so that a page shows
+a task's answer as it comes, By's counts a fact's at a time; the
 generated mutation hooks of `frontend/scripts/generate-api.js`, which name the page in each write's
 `X-Sender` header, `SENDER`, exported from the generated hooks, where the template's named none, so
 that a page leaves the `project_changed` its own write committed to the read of every query that

@@ -70,13 +70,16 @@ class TaskProgressHandle:
         """Send a progress value update (0.0 to 1.0) to connected clients."""
         self.send_progress(self.progress_text, value)
 
-    def send_progress(self, text: str, value: float) -> None:
-        """Send both text and progress value update to connected clients."""
+    def send_progress(
+        self, text: str, value: float, data: dict[str, Any] | None = None
+    ) -> None:
+        """Send both text and progress value update to connected clients,
+        with `data`, what the task has answered so far, where it has any."""
         self.progress_text = text
         if value > self.progress:
             self.progress = value
 
-        self._send_progress_event(TaskProgressUpdate(text=text, value=value))
+        self._send_progress_event(TaskProgressUpdate(text=text, value=value, data=data))
 
     def _send_progress_event(self, progress: TaskProgressUpdate) -> None:
         """Send progress update event to the task's target."""

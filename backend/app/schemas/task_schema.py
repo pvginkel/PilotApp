@@ -31,6 +31,13 @@ class TaskProgressUpdate(BaseModel):
     value: float = Field(
         ..., ge=0.0, le=1.0, description="Progress value from 0.0 to 1.0"
     )
+    data: dict[str, Any] | None = Field(
+        None,
+        description=(
+            "What the task has answered so far, for a page that shows it before "
+            "the result; null where the update is its text and value alone"
+        ),
+    )
 
 
 def _now_utc() -> datetime:

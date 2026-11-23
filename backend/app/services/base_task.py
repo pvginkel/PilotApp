@@ -22,8 +22,11 @@ class ProgressHandle(Protocol):
         """Send a progress value update (0.0 to 1.0) to connected clients."""
         ...
 
-    def send_progress(self, text: str, value: float) -> None:
-        """Send both text and progress value update to connected clients."""
+    def send_progress(
+        self, text: str, value: float, data: dict[str, Any] | None = None
+    ) -> None:
+        """Send both text and progress value update to connected clients,
+        with `data`, what the task has answered so far, where it has any."""
         ...
 
 
@@ -41,8 +44,10 @@ class SubProgressHandle(ProgressHandle):
     def send_progress_value(self, value: float) -> None:
         self.parent.send_progress_value(self._scale_progress_value(value))
 
-    def send_progress(self, text: str, value: float) -> None:
-        self.parent.send_progress(text, self._scale_progress_value(value))
+    def send_progress(
+        self, text: str, value: float, data: dict[str, Any] | None = None
+    ) -> None:
+        self.parent.send_progress(text, self._scale_progress_value(value), data)
 
     def _scale_progress_value(self, value: float) -> float:
         return self.start + (self.end - self.start) * value
