@@ -266,9 +266,15 @@ class TestQuickFilters:
     def test_an_each_item_one_negated_counts_the_items_that_fail(
         self, container: ServiceContainer, service: CountsService, session: DbSession
     ) -> None:
-        _quick_filter(session, "cheap", "!@items,gt,1,cost.sum.conversation")
+        _quick_filter(
+            session, "cheap", "!@items,gt,1,cost.sum.conversation", amount="cost"
+        )
+        kept = container.rows_service().rows("t=all&by=conversation&b=cheap", NOW)
 
-        assert _quick_filters(container, service, "t=all")["cheap"].count == 2
+        counts = _quick_filters(container, service, "t=all")
+
+        assert counts["cheap"].count == kept.total_rows == 3
+        assert counts["cheap"].amount == pytest.approx(0.90)
 
     def test_all_are_counted_one_statement_a_fact(
         self, container: ServiceContainer, service: CountsService, session: DbSession

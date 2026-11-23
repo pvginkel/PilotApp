@@ -1074,7 +1074,10 @@ class _Builder:
                 columns.append(case((kept, path)).label(f"t{index}"))
             elif tally.grain is not None:
                 item = self.catalogue.dimension(tally.grain).path(self.row)
-                columns.append(case((kept, item)).label(f"t{index}"))
+                columns += [
+                    kept.label(f"k{index}"),
+                    case((kept, item)).label(f"t{index}"),
+                ]
             else:
                 columns.append(kept.label(f"t{index}"))
         where = self.scoped()
@@ -1090,6 +1093,7 @@ class _Builder:
         for index in items:
             inner += [
                 func.grouping(rows.c[f"t{index}"]).label(f"g{index}"),
+                rows.c[f"k{index}"],
                 rows.c[f"t{index}"],
             ]
         for index, tally in enumerate(tallies):
@@ -1103,7 +1107,10 @@ class _Builder:
                     else func.count().filter(value)
                 ).label(f"t{index}")
             )
-        sets = [tuple_(), *(tuple_(rows.c[f"t{index}"]) for index in items)]
+        sets = [
+            tuple_(),
+            *(tuple_(rows.c[f"k{index}"], rows.c[f"t{index}"]) for index in items),
+        ]
         groups = (
             select(*inner)
             .select_from(rows)
@@ -1113,9 +1120,7 @@ class _Builder:
         whole = and_(true(), *(groups.c[f"g{index}"] == 1 for index in items))
         outer = [
             (
-                func.count().filter(
-                    groups.c[f"g{index}"] == 0, groups.c[f"t{index}"].is_not(None)
-                )
+                func.count().filter(groups.c[f"g{index}"] == 0, groups.c[f"k{index}"])
                 if index in items
                 else func.max(groups.c[f"t{index}"]).filter(whole)
             ).label(f"t{index}")
