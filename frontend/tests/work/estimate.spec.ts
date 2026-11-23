@@ -448,6 +448,18 @@ test.describe('The time a running work item still takes', () => {
     await expect(cells(item.work.etaPop.steps)).toHaveText([quick, /^\d+ min$/, '0 min', '0 min']);
     await page.keyboard.press('Escape');
 
+    // The mark taken back and set again, the badge the em dash throughout: the head's sentence
+    // follows the work item's at once, not at the minute's read.
+    for (const [marked, says, headSays] of [
+      [false, OUTRUN, outrunOf(TITLE)],
+      [true, MARKED, markedOf(TITLE)],
+    ] as const) {
+      await projects.setProgress(work, listOf({ kind: quick, seconds: 0, marked, tag: 'quick-' }));
+      await expect(item.work.eta).toHaveAccessibleName(says);
+      await expect(projectHead.eta).toHaveAccessibleName(headSays);
+      await expect(projectHead.eta).toHaveText('—');
+    }
+
     // The running step alone on the list, of a kind with no timing: no estimate and no row, the
     // mark's alert alone, its sentence alone in its pop, at most 300px wide.
     const untimed = makeUnique('consult');

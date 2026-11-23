@@ -455,8 +455,8 @@ reads no item's body, no timeline and no plan; an unknown id answers `404`. `use
 (`frontend/src/hooks/use-estimates.ts`), on the project's page, reads it each minute while the head
 or any work item shows a badge, by the wall clock, looked at every 5 s, so that a page that lived
 through a suspend reads within 5 s of waking, and writes it over the head's and each work item's as read, a work
-item it does not list losing its badge. A move that changed a work item's badge reads it at once, so
-that the head's follows. The read writes only over what stands as it stood when the read was sent,
+item it does not list losing its badge. A move that changed a work item's badge, or the mark its
+sentence turns on, reads it at once, so that the head's follows. The read writes only over what stands as it stood when the read was sent,
 so a `work_moved` heard meanwhile keeps its figure. The page computes nothing of an estimate.
 
 ## Create project

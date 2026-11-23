@@ -3,9 +3,9 @@
  * an estimate: a work item's rides its timeline item and each `work_moved`, the head's the head's
  * read. While a badge shows, GET /api/projects/<id>/estimates is read each minute, by the wall
  * clock (use-now.ts), and written over both as read: the head's, and each work item's, none for a
- * work item the read does not list. A move that changes a work item's badge reads it at once, so
- * that the head's follows. What changed while a read was under way, a move's or a read's of its
- * own, is left as it stands.
+ * work item the read does not list. A move that changes a work item's badge, or the mark its
+ * sentence turns on, reads it at once, so that the head's follows. What changed while a read was
+ * under way, a move's or a read's of its own, is left as it stands.
  */
 
 import { useCallback, useEffect, useMemo, useRef } from 'react';
@@ -25,12 +25,17 @@ const MINUTE = 60_000;
 /** How often the wall clock is looked at for the minute, in milliseconds. */
 const TICK = 5_000;
 
-/** What the work items' badges show, to compare: nothing of how long a run has taken, which every read moves. */
+/**
+ * What the work items' badges show, to compare, the mark their sentence turns on among it: nothing
+ * of how long a run has taken, which every read moves.
+ */
 function badgesOf(timeline: Timeline): string {
   return timeline.items
     .flatMap(({ id, work }) => {
       const estimate = work?.estimate ?? null;
-      return estimate === null ? [] : [[id, estimate.minutes, estimate.longer_than_usual, estimate.kind].join(' ')];
+      return estimate === null
+        ? []
+        : [[id, estimate.minutes, estimate.longer_than_usual, estimate.marked, estimate.kind].join(' ')];
     })
     .join('\n');
 }
