@@ -28,6 +28,12 @@ const NO_BATCH_SECONDS = 86_400;
 /** The settings of the backend serving at `backendUrl`. */
 export function loadAppBackendEnv(backendUrl: string): NodeJS.ProcessEnv {
   return {
+    // A local stage, whatever the run's own (CI's validation Job sets STAGE=tst): in any other the
+    // backend fetches the frontend's version.json on every stream connect and sends it as the
+    // page's version (backend/app/services/frontend_version_service.py), and a build under vite
+    // preview serves its commit there, so that a page takes the commit, not the version a spec
+    // posts, as the one it runs (tests/shell/new-version.spec.ts).
+    STAGE: 'local-tst',
     // The backend's controller is its own fake, mounted under /api/testing/controller in testing
     // mode (backend/app/api/testing_controller.py); tests/support/controller.ts drives it.
     CONTROLLER_URL: `${backendUrl}/api/testing/controller`,
