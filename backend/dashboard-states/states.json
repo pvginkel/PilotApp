@@ -3,6 +3,7 @@
     "States of a dashboard view as written, each with what the server reads in it (F154.2, F159).",
     "An entry that reads has its normal form, the state after #dash/ in the address the server answers, its look-only parts as that form writes them, and its notes where it has any, one per part dropped.",
     "It has the query it means too, the planner's: its time, a range by its key as written, else its spans as instants in UTC, each end exclusive; its By, color and focus; its scope, each drill level, each chip on a dimension's values and each condition on each item as a chip writes it, a quick filter that is on as its chip; each measure with its fact and the part its items are, or why it is refused and what stands in for it, a ratio with its two; its statements, a grouped scan per fact, a statement per fact and grain over a part's items and, where a chip marks, a statement of the marked rows per fact, each with its groupings, the joins it reads and each dimension or item condition it reads through another fact's conversations; its marks, the marked chips with no mark; each threshold on the By's rows with what it keeps or marks and its measure; and whether the outlier rows' chip keeps or marks.",
+    "A state in order or over time has its series in its query too: the dimension it asks, the band's length, each panel's drawing and what its band rolls over, the statements of its rows by that dimension, those of its dots, its markers' kinds, each with the fact it reads, none on a time whose values come round again, and its events strip's statement, or why the events lack that dimension.",
     "An entry with a fault has the refusal's exact text, a line an item.",
     "The backend's suite reads every entry through GET /api/dashboard/address's service (tests/dashboard/test_states.py), on the suite's database, whose quota weeks start on 2 January 2025."
   ],
@@ -348,7 +349,38 @@
               "project"
             ]
           }
-        ]
+        ],
+        "series": {
+          "by": "day",
+          "roll": [
+            10,
+            15
+          ],
+          "panels": [
+            {
+              "measure": "cost.sum",
+              "kind": "column",
+              "band": null
+            }
+          ],
+          "statements": [
+            {
+              "fact": "call",
+              "grouping": [
+                [
+                  "day"
+                ],
+                []
+              ],
+              "joins": []
+            }
+          ],
+          "markers": [],
+          "events": {
+            "fact": "event",
+            "joins": []
+          }
+        }
       }
     },
     {
@@ -383,7 +415,42 @@
               "project"
             ]
           }
-        ]
+        ],
+        "series": {
+          "by": "qweek",
+          "roll": [
+            10,
+            15
+          ],
+          "panels": [
+            {
+              "measure": "cost.sum",
+              "kind": "column",
+              "band": null
+            }
+          ],
+          "statements": [
+            {
+              "fact": "call",
+              "grouping": [
+                [
+                  "qweek"
+                ],
+                []
+              ],
+              "joins": [
+                "quota_week"
+              ]
+            }
+          ],
+          "markers": [],
+          "events": {
+            "fact": "event",
+            "joins": [
+              "quota_week"
+            ]
+          }
+        }
       }
     },
     {
@@ -427,7 +494,51 @@
             ],
             "joins": []
           }
-        ]
+        ],
+        "series": {
+          "by": "session_start",
+          "roll": [
+            10,
+            15
+          ],
+          "panels": [
+            {
+              "measure": "cost.median.psession",
+              "kind": "point",
+              "band": "points"
+            }
+          ],
+          "statements": [
+            {
+              "fact": "call",
+              "grouping": [
+                [
+                  "session_start"
+                ],
+                []
+              ],
+              "joins": [
+                "session"
+              ]
+            },
+            {
+              "fact": "call",
+              "items": "psession",
+              "grouping": [
+                [
+                  "session_start"
+                ],
+                []
+              ],
+              "joins": []
+            }
+          ],
+          "markers": [],
+          "events": {
+            "fact": "event",
+            "joins": []
+          }
+        }
       }
     },
     {
@@ -459,7 +570,42 @@
               "turn"
             ]
           }
-        ]
+        ],
+        "series": {
+          "by": "turn_seq",
+          "roll": [
+            10,
+            15
+          ],
+          "panels": [
+            {
+              "measure": "cost.sum",
+              "kind": "column",
+              "band": "points"
+            }
+          ],
+          "statements": [
+            {
+              "fact": "call",
+              "grouping": [
+                [
+                  "turn_seq"
+                ],
+                []
+              ],
+              "joins": [
+                "turn"
+              ]
+            }
+          ],
+          "markers": [],
+          "events": {
+            "fact": "event",
+            "joins": [
+              "turn"
+            ]
+          }
+        }
       }
     },
     {
@@ -749,7 +895,48 @@
               "project"
             ]
           }
-        ]
+        ],
+        "series": {
+          "by": "day",
+          "roll": [
+            10,
+            15
+          ],
+          "panels": [
+            {
+              "measure": "cost.sum",
+              "kind": "column",
+              "band": null
+            }
+          ],
+          "statements": [
+            {
+              "fact": "call",
+              "grouping": [
+                [
+                  "day"
+                ],
+                []
+              ],
+              "joins": [
+                "session",
+                "thread",
+                "main",
+                "project"
+              ]
+            }
+          ],
+          "markers": [],
+          "events": {
+            "fact": "event",
+            "joins": [
+              "session",
+              "thread",
+              "main",
+              "project"
+            ]
+          }
+        }
       }
     },
     {
@@ -1148,12 +1335,12 @@
     },
     {
       "about": "The look-only parts",
-      "state": "rel=1&mk=model,miss&dw=dots:out,band:off,cols:on&col=source&lit=work,~,%E2%80%A6&ev=hook_error,-cache_miss&z=1763600000.0,1763686400.5&d=items",
-      "normal": "t=qw&by=project&m=cost.sum&col=source&d=items&rel=1&mk=miss,model&dw=dots:out,band:off&lit=%E2%80%A6,work,~&ev=-cache_miss,hook_error&z=1763600000,1763686400.5",
+      "state": "rel=1&mk=none&dw=dots:out,band:off,cols:on&col=source&lit=work,~,%E2%80%A6&ev=hook_error,-cache_miss&z=1763600000.0,1763686400.5&d=items",
+      "normal": "t=qw&by=project&m=cost.sum&col=source&d=items&rel=1&mk=none&dw=dots:out,band:off&lit=%E2%80%A6,work,~&ev=-cache_miss,hook_error&z=1763600000,1763686400.5",
       "look": [
         "d=items",
         "rel=1",
-        "mk=miss,model",
+        "mk=none",
         "dw=dots:out,band:off",
         "lit=%E2%80%A6,work,~",
         "ev=-cache_miss,hook_error",
@@ -1223,7 +1410,348 @@
               "session"
             ]
           }
-        ]
+        ],
+        "series": {
+          "by": "session_start",
+          "roll": [
+            5,
+            5
+          ],
+          "panels": [
+            {
+              "measure": "cost.sum",
+              "kind": "column",
+              "band": "points"
+            }
+          ],
+          "statements": [
+            {
+              "fact": "call",
+              "grouping": [
+                [
+                  "session_start"
+                ],
+                []
+              ],
+              "joins": [
+                "session"
+              ]
+            }
+          ],
+          "markers": [],
+          "events": {
+            "fact": "event",
+            "joins": []
+          }
+        }
+      }
+    },
+    {
+      "about": "Over time by the day, a measure over a part's items drawn as its dots, and the event's kind a color like any other",
+      "state": "p=time,day&m=events.count&m=cost.median.conversation&col=event_kind",
+      "normal": "t=qw&by=project&p=time,day&m=events.count&m=cost.median.conversation&col=event_kind",
+      "look": [],
+      "query": {
+        "time": "qw",
+        "by": "project",
+        "color": "event_kind",
+        "scope": [],
+        "measures": [
+          {
+            "measure": "events.count",
+            "fact": "event"
+          },
+          {
+            "measure": "cost.median.conversation",
+            "fact": "call",
+            "items": "conversation"
+          }
+        ],
+        "statements": [
+          {
+            "fact": "call",
+            "grouping": [
+              [
+                "project"
+              ],
+              []
+            ],
+            "joins": [
+              "session",
+              "thread",
+              "main",
+              "project"
+            ]
+          },
+          {
+            "fact": "event",
+            "grouping": [
+              [
+                "project"
+              ],
+              [],
+              [
+                "project",
+                "event_kind"
+              ]
+            ],
+            "joins": [
+              "session",
+              "thread",
+              "main",
+              "project"
+            ]
+          },
+          {
+            "fact": "call",
+            "items": "conversation",
+            "grouping": [
+              [
+                "project"
+              ],
+              []
+            ],
+            "joins": [
+              "session",
+              "thread",
+              "main",
+              "project"
+            ]
+          }
+        ],
+        "series": {
+          "by": "day",
+          "roll": [
+            10,
+            15
+          ],
+          "panels": [
+            {
+              "measure": "events.count",
+              "kind": "column",
+              "band": null
+            },
+            {
+              "measure": "cost.median.conversation",
+              "kind": "items",
+              "band": "dots"
+            }
+          ],
+          "statements": [
+            {
+              "fact": "call",
+              "grouping": [
+                [
+                  "day"
+                ],
+                []
+              ],
+              "joins": []
+            },
+            {
+              "fact": "event",
+              "grouping": [
+                [
+                  "day"
+                ],
+                [],
+                [
+                  "day",
+                  "event_kind"
+                ]
+              ],
+              "joins": []
+            },
+            {
+              "fact": "call",
+              "items": "conversation",
+              "grouping": [
+                [
+                  "day"
+                ],
+                []
+              ],
+              "joins": []
+            }
+          ],
+          "dots": [
+            {
+              "measure": "cost.median.conversation",
+              "fact": "call",
+              "joins": [],
+              "items": "conversation"
+            }
+          ],
+          "markers": [],
+          "events": {
+            "fact": "event",
+            "joins": []
+          }
+        }
+      }
+    },
+    {
+      "about": "Over time by the hour, whose values come round again",
+      "state": "p=time,hod",
+      "normal": "t=qw&by=project&p=time,hod&m=cost.sum&col=none",
+      "look": [],
+      "query": {
+        "time": "qw",
+        "by": "project",
+        "color": null,
+        "scope": [],
+        "measures": [
+          {
+            "measure": "cost.sum",
+            "fact": "call"
+          }
+        ],
+        "statements": [
+          {
+            "fact": "call",
+            "grouping": [
+              [
+                "project"
+              ],
+              []
+            ],
+            "joins": [
+              "session",
+              "thread",
+              "main",
+              "project"
+            ]
+          }
+        ],
+        "series": {
+          "by": "hod",
+          "roll": [
+            10,
+            15
+          ],
+          "panels": [
+            {
+              "measure": "cost.sum",
+              "kind": "column",
+              "band": null
+            }
+          ],
+          "statements": [
+            {
+              "fact": "call",
+              "grouping": [
+                [
+                  "hod"
+                ],
+                []
+              ],
+              "joins": []
+            }
+          ],
+          "markers": null,
+          "events": {
+            "fact": "event",
+            "joins": []
+          }
+        }
+      }
+    },
+    {
+      "about": "In order, a measure over a part's items drawn as its dots",
+      "state": "by=psession&p=order&m=cost.median.conversation",
+      "normal": "t=qw&by=psession&p=order&m=cost.median.conversation&col=none",
+      "look": [],
+      "query": {
+        "time": "qw",
+        "by": "psession",
+        "color": null,
+        "scope": [],
+        "measures": [
+          {
+            "measure": "cost.median.conversation",
+            "fact": "call",
+            "items": "conversation"
+          }
+        ],
+        "statements": [
+          {
+            "fact": "call",
+            "grouping": [
+              [
+                "psession"
+              ],
+              []
+            ],
+            "joins": [
+              "session"
+            ]
+          },
+          {
+            "fact": "call",
+            "items": "conversation",
+            "grouping": [
+              [
+                "psession"
+              ],
+              []
+            ],
+            "joins": []
+          }
+        ],
+        "series": {
+          "by": "session_start",
+          "roll": [
+            10,
+            15
+          ],
+          "panels": [
+            {
+              "measure": "cost.median.conversation",
+              "kind": "items",
+              "band": "dots"
+            }
+          ],
+          "statements": [
+            {
+              "fact": "call",
+              "grouping": [
+                [
+                  "session_start"
+                ],
+                []
+              ],
+              "joins": [
+                "session"
+              ]
+            },
+            {
+              "fact": "call",
+              "items": "conversation",
+              "grouping": [
+                [
+                  "session_start"
+                ],
+                []
+              ],
+              "joins": []
+            }
+          ],
+          "dots": [
+            {
+              "measure": "cost.median.conversation",
+              "fact": "call",
+              "joins": [
+                "session"
+              ],
+              "items": "conversation"
+            }
+          ],
+          "markers": [],
+          "events": {
+            "fact": "event",
+            "joins": []
+          }
+        }
       }
     },
     {
@@ -1471,6 +1999,15 @@
         "Cannot read the view because its state has 1 fault.",
         "- p=order: project has no order. In order takes a By that has one: psession or pturn.",
         "A presentation reads p=order[,<order dimension>], p=time,<grain>, p=lanes or p=table, as in p=time,day."
+      ]
+    },
+    {
+      "about": "A marker's kind is the catalogue's, a version of a component the record holds",
+      "state": "mk=model",
+      "refusal": [
+        "Cannot read the view because its state has 1 fault.",
+        "- mk=model: \"model\" is no kind of marker. A kind of marker is the version of a component the record holds, and it holds none.",
+        "A list of markers reads mk=<kind>,… or mk=none, as in mk=none."
       ]
     },
     {

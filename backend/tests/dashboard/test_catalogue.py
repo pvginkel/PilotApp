@@ -15,6 +15,7 @@ from app.dashboard.catalogue import (
     Fact,
     Figure,
     Join,
+    Marker,
     QuickFilter,
     Ratio,
     TimeRange,
@@ -55,6 +56,8 @@ JOINS = (
     ),
     Join("town", _towns, lambda row: _towns.c.id == row.to("market").c.town_id),
 )
+NEW_STALL = Marker("stall", "New stall", "Where a stall was first seen", "stall")
+
 TOWN = Dimension(
     key="town",
     label="Town",
@@ -195,6 +198,7 @@ class TestCatalogue:
             ({"figures": (SALES, SALES)}, "figure sales"),
             ({"aggregates": (*AGGREGATES, AGGREGATES[0])}, "aggregate sum"),
             ({"quick_filters": (MARKET_DAY, MARKET_DAY)}, "quick filter market_day"),
+            ({"markers": (NEW_STALL, NEW_STALL)}, "marker stall"),
         ],
     )
     def test_a_key_stands_once_among_its_kind(

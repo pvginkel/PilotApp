@@ -204,23 +204,35 @@ class RowsService:
         found = plan(
             view.address.state, view.catalogue, view.weeks, now or datetime.now(UTC)
         )
-        shaper = _Shaper(view.catalogue, found, view.address)
         with self.bounds.read(self.db) as db:
-            shaper.take(_ran(db, statements(found, view.catalogue)))
-            kept = shaper.judge()
-            if kept:
-                narrowed = replace(found, rows=kept, marks=())
-                shaper.take(_ran(db, statements(narrowed, view.catalogue)), whole=True)
+            shaper, _ = answered(db, found, view.catalogue, view.address)
         return shaper.shaped()
 
 
-def _ran(
+def answered(
+    db: Session, found: Plan, catalogue: Catalogue, address: Address
+) -> tuple[Shaper, tuple[Value, ...]]:
+    """The plan's statements run on `db` and their rows judged: the shaper
+    holding the rows a threshold or the outlier rows' chip keeps, with the
+    All row answered again from them where they keep fewer than all; and
+    every value of the By the statements read, those dropped among them."""
+    shaper = Shaper(catalogue, found, address)
+    shaper.take(ran(db, statements(found, catalogue)))
+    read = tuple(shaper.rows)
+    kept = shaper.judge()
+    if kept:
+        narrowed = replace(found, rows=kept, marks=())
+        shaper.take(ran(db, statements(narrowed, catalogue)), whole=True)
+    return shaper, read
+
+
+def ran(
     db: Session, built: Sequence[Statement]
 ) -> list[tuple[Statement, Sequence[Any]]]:
     return [(statement, db.execute(statement.select).all()) for statement in built]
 
 
-class _Shaper:
+class Shaper:
     def __init__(self, catalogue: Catalogue, found: Plan, address: Address) -> None:
         self.catalogue = catalogue
         self.plan = found
@@ -283,7 +295,10 @@ class _Shaper:
         self.all = _Taken()
         return tuple(kept)
 
-    def shaped(self) -> Rows:
+    def shaped(self, sort: Sort | None = None, every: bool = False) -> Rows:
+        """The rows answered: in `sort`, else the state's, else by the first
+        measure, the largest first; the first `ROWS` of them, or with `every`
+        all."""
         for taken in self.rows.values():
             for index, cells in taken.by_color.items():
                 whole = self.all.by_color.setdefault(index, {})
@@ -319,7 +334,7 @@ class _Shaper:
                     marked=marked,
                 )
             )
-        sort = state.sort or Sort("desc", measure_key(state.measures[0]))
+        sort = sort or state.sort or Sort("desc", measure_key(state.measures[0]))
         rows = _sorted(
             rows,
             sort,
@@ -350,7 +365,7 @@ class _Shaper:
             measures=measures,
             color=color,
             all=total,
-            rows=tuple(rows[:ROWS]),
+            rows=tuple(rows if every else rows[:ROWS]),
             total_rows=len(rows),
             sort=sort,
         )

@@ -1,7 +1,8 @@
 """The dashboard's catalogue (F154.4), what a view may name, read through
 one route, a part at a call, with what the dashboard stores (F155); a view's
-address (F159), its state checked and written back in its normal form; and
-a view's rows (F154.1), answered from the record at the query."""
+address (F159), its state checked and written back in its normal form; a
+view's rows (F154.1), answered from the record at the query; and a view's
+series and its events strip (F163.3, F164.6), each a route of its own."""
 
 from typing import Any
 
@@ -18,30 +19,52 @@ from app.api.dashboard_store import (
 from app.dashboard.address import AddressService
 from app.dashboard.assembly import CatalogueService
 from app.dashboard.catalogue import Catalogue
-from app.dashboard.rows import ColorValue, Line, Rows, RowsService
+from app.dashboard.planner import Window
+from app.dashboard.rows import (
+    ByRow,
+    Color,
+    ColorValue,
+    Line,
+    Measure,
+    Rows,
+    RowsService,
+)
+from app.dashboard.series import Series, SeriesService
+from app.dashboard.strip import Strip, StripService
 from app.schemas.common import ApiErrorResponseSchema
 from app.schemas.dashboard import (
     AddressQuerySchema,
     AddressResponseSchema,
     AggregateSchema,
+    BandSchema,
+    BucketSchema,
     ByRowSchema,
     CatalogueQuerySchema,
     CatalogueResponseSchema,
     ColorSchema,
     ColorValueSchema,
     DimensionSchema,
+    DotSchema,
     FactSchema,
     FigureSchema,
     GrainSchema,
     LineSchema,
+    MarkerSchema,
+    PanelSchema,
+    PointSchema,
     RatioSchema,
+    RollSchema,
     RowsDimensionSchema,
     RowsMeasureSchema,
-    RowsQuerySchema,
     RowsResponseSchema,
+    SeenKindSchema,
+    SeriesResponseSchema,
+    SightingSchema,
     SortSchema,
     SpanSchema,
     StandInSchema,
+    StateQuerySchema,
+    StripResponseSchema,
     TimeRangeSchema,
     ValueSchema,
 )
@@ -127,7 +150,7 @@ def get_address(
 
 @dashboard_bp.route("/rows", methods=["GET"])
 @api.validate(
-    query=RowsQuerySchema,
+    query=StateQuerySchema,
     resp=SpectreeResponse(
         HTTP_200=RowsResponseSchema,
         HTTP_400=ApiErrorResponseSchema,
@@ -138,7 +161,7 @@ def get_address(
 )
 @inject
 def get_rows(
-    query: RowsQuerySchema,
+    query: StateQuerySchema,
     rows_service: RowsService = Provide[ServiceContainer.rows_service],
 ) -> Any:
     """Answer a view's rows from the record at the query: each measure on
@@ -160,61 +183,241 @@ def get_rows(
     return _rows(rows_service.rows(query.state)).model_dump(mode="json")
 
 
+@dashboard_bp.route("/series", methods=["GET"])
+@api.validate(
+    query=StateQuerySchema,
+    resp=SpectreeResponse(
+        HTTP_200=SeriesResponseSchema,
+        HTTP_400=ApiErrorResponseSchema,
+        HTTP_401=ApiErrorResponseSchema,
+        HTTP_403=ApiErrorResponseSchema,
+        HTTP_409=ApiErrorResponseSchema,
+    ),
+)
+@inject
+def get_series(
+    query: StateQuerySchema,
+    series_service: SeriesService = Provide[ServiceContainer.series_service],
+) -> Any:
+    """Answer a view's series, in order or over time, from the record at the
+    query: its points along the axis, each measure's value on each, with the
+    split by the color, as a panel draws it — its dots, its outliers and its
+    rolling band — and the markers where a value of a marker's dimension was
+    first seen; its time as instants, with the zone its days are in.
+
+    Returns:
+        200: The view's series, with its address, its look-only parts and a
+            note for each part dropped
+        400: The state has faults, or is not in order or over time: the error
+            names every one, and ends on a correct example of each kind of
+            part refused
+        401: No one is signed in
+        403: The caller lacks the editor role
+        409: The view passed the engine's bounds: a statement past its
+            timeout (`QUERY_TIMEOUT`), one past the database's limit on
+            temporary files (`QUERY_TEMP_FILE_LIMIT`), or no slot among its
+            statements at once freed in time (`QUERY_BUSY`)
+    """
+    return _series(series_service.series(query.state)).model_dump(mode="json")
+
+
+@dashboard_bp.route("/series/events", methods=["GET"])
+@api.validate(
+    query=StateQuerySchema,
+    resp=SpectreeResponse(
+        HTTP_200=StripResponseSchema,
+        HTTP_400=ApiErrorResponseSchema,
+        HTTP_401=ApiErrorResponseSchema,
+        HTTP_403=ApiErrorResponseSchema,
+        HTTP_409=ApiErrorResponseSchema,
+    ),
+)
+@inject
+def get_series_events(
+    query: StateQuerySchema,
+    strip_service: StripService = Provide[ServiceContainer.strip_service],
+) -> Any:
+    """Answer a series' events strip from the record at the query: the
+    events in each of its points, by their kind, and those that count as
+    errors; asked apart from the series, so that it never holds the chart up.
+
+    Returns:
+        200: The strip, with the view's address, its look-only parts and a
+            note for each part dropped
+        400: The state has faults, or is not in order or over time: the error
+            names every one, and ends on a correct example of each kind of
+            part refused
+        401: No one is signed in
+        403: The caller lacks the editor role
+        409: The view passed the engine's bounds: a statement past its
+            timeout (`QUERY_TIMEOUT`), one past the database's limit on
+            temporary files (`QUERY_TEMP_FILE_LIMIT`), or no slot among its
+            statements at once freed in time (`QUERY_BUSY`)
+    """
+    return _strip(strip_service.strip(query.state)).model_dump(mode="json")
+
+
 def _rows(found: Rows) -> RowsResponseSchema:
     return RowsResponseSchema(
         address=found.address.address,
         look=list(found.address.look),
         notes=list(found.address.notes),
         zone=found.zone,
-        window=(
-            None
-            if found.window is None
-            else [SpanSchema(start=start, end=end) for start, end in found.window]
-        ),
+        window=_window(found.window),
         by=RowsDimensionSchema(
             key=found.by.key, label=found.by.label, group=found.by.group
         ),
-        measures=[
-            RowsMeasureSchema(
-                key=measure.key,
-                label=measure.label,
-                format=measure.format,
-                aggregate=measure.aggregate,
-                grain=measure.grain,
-                stacks=measure.stacks,
-                refused=measure.refused,
-                stand_in=None
-                if measure.stand_in is None
-                else StandInSchema(
-                    key=measure.stand_in.key, label=measure.stand_in.label
-                ),
-                median=measure.median,
-            )
-            for measure in found.measures
-        ],
-        color=(
-            None
-            if found.color is None
-            else ColorSchema(
-                key=found.color.key,
-                label=found.color.label,
-                values=[_color_value(value) for value in found.color.values],
-            )
-        ),
+        measures=[RowsMeasureSchema(**_measure(measure)) for measure in found.measures],
+        color=_color(found.color),
         all=LineSchema(**_line(found.all)),
-        rows=[
-            ByRowSchema(
-                **_line(row),
-                key=row.key,
-                label=row.label,
-                focus=row.focus,
-                marked=row.marked,
-            )
-            for row in found.rows
-        ],
+        rows=[ByRowSchema(**_by_row(row)) for row in found.rows],
         total_rows=found.total_rows,
         sort=SortSchema(direction=found.sort.direction, column=found.sort.column),
     )
+
+
+def _series(found: Series) -> SeriesResponseSchema:
+    return SeriesResponseSchema(
+        address=found.address.address,
+        look=list(found.address.look),
+        notes=list(found.address.notes),
+        zone=found.zone,
+        window=_window(found.window),
+        presentation=found.presentation,
+        by=RowsDimensionSchema(
+            key=found.by.key, label=found.by.label, group=found.by.group
+        ),
+        roll=RollSchema(read=found.roll.read, before=found.roll.before),
+        measures=[
+            PanelSchema(
+                **_measure(panel.measure),
+                kind=panel.kind,
+                outliers=list(panel.outliers),
+                band=None
+                if panel.band is None
+                else [
+                    None
+                    if band is None
+                    else BandSchema(
+                        first=band.first, median=band.median, third=band.third
+                    )
+                    for band in panel.band
+                ],
+                before=panel.before,
+                dots=None
+                if panel.dots is None
+                else [
+                    DotSchema(
+                        point=dot.point,
+                        key=dot.key,
+                        label=dot.label,
+                        value=dot.value,
+                        at=dot.at,
+                        focus=dot.focus,
+                    )
+                    for dot in panel.dots
+                ],
+                cut=panel.cut,
+            )
+            for panel in found.panels
+        ],
+        color=_color(found.color),
+        all=LineSchema(**_line(found.all)),
+        points=[
+            PointSchema(
+                **_by_row(point),
+                axis=point.axis,
+                starts_at=point.starts_at,
+                ends_at=point.ends_at,
+            )
+            for point in found.points
+        ],
+        total_points=found.total_points,
+        off_axis=None
+        if found.off_axis is None
+        else ByRowSchema(**_by_row(found.off_axis)),
+        markers=[
+            SightingSchema(
+                kind=marker.kind,
+                value=marker.value,
+                before=marker.before,
+                at=marker.at,
+            )
+            for marker in found.markers
+        ],
+    )
+
+
+def _strip(found: Strip) -> StripResponseSchema:
+    return StripResponseSchema(
+        address=found.address.address,
+        look=list(found.address.look),
+        notes=list(found.address.notes),
+        zone=found.zone,
+        window=_window(found.window),
+        by=RowsDimensionSchema(
+            key=found.by.key, label=found.by.label, group=found.by.group
+        ),
+        kinds=[
+            SeenKindSchema(
+                key=kind.key, label=kind.label, is_error=kind.is_error, total=kind.total
+            )
+            for kind in found.kinds
+        ],
+        buckets=[
+            BucketSchema(
+                key=bucket.key, counts=list(bucket.counts), errors=bucket.errors
+            )
+            for bucket in found.buckets
+        ],
+        refused=found.refused,
+    )
+
+
+def _window(window: Window) -> list[SpanSchema] | None:
+    return (
+        None
+        if window is None
+        else [SpanSchema(start=start, end=end) for start, end in window]
+    )
+
+
+def _measure(measure: Measure) -> dict[str, Any]:
+    return {
+        "key": measure.key,
+        "label": measure.label,
+        "format": measure.format,
+        "aggregate": measure.aggregate,
+        "grain": measure.grain,
+        "stacks": measure.stacks,
+        "refused": measure.refused,
+        "stand_in": None
+        if measure.stand_in is None
+        else StandInSchema(key=measure.stand_in.key, label=measure.stand_in.label),
+        "median": measure.median,
+    }
+
+
+def _color(color: Color | None) -> ColorSchema | None:
+    return (
+        None
+        if color is None
+        else ColorSchema(
+            key=color.key,
+            label=color.label,
+            values=[_color_value(value) for value in color.values],
+        )
+    )
+
+
+def _by_row(row: ByRow) -> dict[str, Any]:
+    return {
+        **_line(row),
+        "key": row.key,
+        "label": row.label,
+        "focus": row.focus,
+        "marked": row.marked,
+    }
 
 
 def _color_value(value: ColorValue) -> ColorValueSchema:
@@ -265,8 +468,18 @@ def _dimensions(catalogue: Catalogue) -> CatalogueResponseSchema:
                 next_null=dimension.next_null,
                 base=dimension.base,
                 focus=dimension.focus,
+                unit=dimension.unit,
             )
             for dimension in catalogue.dimensions
+        ],
+        markers=[
+            MarkerSchema(
+                key=marker.key,
+                label=marker.label,
+                line=marker.line,
+                dimension=marker.dimension,
+            )
+            for marker in catalogue.markers
         ],
     )
 

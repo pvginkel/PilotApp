@@ -1,7 +1,8 @@
 """The file of states (F154.2): every state it holds as written, read
 through the address's service, gives its normal form, its look-only parts,
-its notes and the query it means, the planner's, or the refusal's exact
-text. The file is read whole."""
+its notes and the query it means, the planner's with its series' where it is
+in order or over time, or the refusal's exact text. The file is read
+whole."""
 
 import json
 from datetime import UTC, datetime
@@ -10,8 +11,8 @@ from typing import Any
 
 import pytest
 
-from app.dashboard import planner, statements
-from app.dashboard.address import AddressService
+from app.dashboard import planner, series, statements
+from app.dashboard.address import AddressService, View
 from app.exceptions import StateRefusedException
 from app.services.container import ServiceContainer
 
@@ -61,15 +62,22 @@ def test_an_entry(service: AddressService, entry: dict[str, Any]) -> None:
 
     view = service.view(entry["state"])
     found = view.address
-    planned = planner.plan(found.state, view.catalogue, view.weeks, NOW)
 
     assert found.address == f"#dash/{entry['normal']}"
     assert list(found.look) == entry["look"]
     assert list(found.notes) == entry.get("notes", [])
-    assert (
-        planner.described(planned, statements.described(planned, view.catalogue))
-        == entry["query"]
-    )
+    assert _query(view) == entry["query"]
+
+
+def _query(view: View) -> dict[str, Any]:
+    """The query a state means: the planner's, with its series' where it is
+    in order or over time."""
+    planned = planner.plan(view.address.state, view.catalogue, view.weeks, NOW)
+    query = planner.described(planned, statements.described(planned, view.catalogue))
+    shown = series.described(view, NOW)
+    if shown is not None:
+        query["series"] = shown
+    return query
 
 
 @pytest.mark.parametrize(

@@ -1136,6 +1136,22 @@
             "description": "`measures`",
             "title": "Grains"
           },
+          "markers": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/CatalogueResponseSchema.b67cf98.MarkerSchema"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "`dimensions`: every kind of marker",
+            "title": "Markers"
+          },
           "part": {
             "enum": [
               "dimensions",
@@ -1496,6 +1512,22 @@
             ],
             "title": "One"
           },
+          "unit": {
+            "anyOf": [
+              {
+                "enum": [
+                  "day",
+                  "quota_week"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "A time dimension's alone: the span of time one of its values is; null where its values come round again, as a weekday's and an hour's do, and no time falls on one",
+            "title": "Unit"
+          },
           "values": {
             "anyOf": [
               {
@@ -1525,7 +1557,8 @@
           "next",
           "next_null",
           "base",
-          "focus"
+          "focus",
+          "unit"
         ],
         "title": "DimensionSchema",
         "type": "object"
@@ -1706,6 +1739,44 @@
           "shows"
         ],
         "title": "GrainSchema",
+        "type": "object"
+      },
+      "CatalogueResponseSchema.b67cf98.MarkerSchema": {
+        "description": "A kind of marker a series draws.",
+        "properties": {
+          "dimension": {
+            "description": "The dimension a value of which, first seen, it marks",
+            "title": "Dimension",
+            "type": "string"
+          },
+          "key": {
+            "description": "What a state's `mk=` names it by",
+            "examples": [
+              "claude_code_version"
+            ],
+            "title": "Key",
+            "type": "string"
+          },
+          "label": {
+            "examples": [
+              "Claude Code version"
+            ],
+            "title": "Label",
+            "type": "string"
+          },
+          "line": {
+            "description": "What it marks",
+            "title": "Line",
+            "type": "string"
+          }
+        },
+        "required": [
+          "key",
+          "label",
+          "line",
+          "dimension"
+        ],
+        "title": "MarkerSchema",
         "type": "object"
       },
       "CatalogueResponseSchema.b67cf98.QuickFilterSchema": {
@@ -12707,24 +12778,6 @@
         "title": "RenameViewSchema",
         "type": "object"
       },
-      "RowsQuerySchema.b67cf98": {
-        "description": "A view's state, whose rows are asked.",
-        "properties": {
-          "state": {
-            "description": "The view's state as the URL writes it after `#dash/`, `#dash/` before it or not; an entry, its focus alone, is filled in from the record",
-            "examples": [
-              "t=qw&by=project&m=cost.sum&col=none"
-            ],
-            "title": "State",
-            "type": "string"
-          }
-        },
-        "required": [
-          "state"
-        ],
-        "title": "RowsQuerySchema",
-        "type": "object"
-      },
       "RowsResponseSchema.b67cf98": {
         "description": "A view's rows.",
         "properties": {
@@ -13853,6 +13906,1124 @@
         "title": "SelfResponseSchema",
         "type": "object"
       },
+      "SeriesResponseSchema.b67cf98": {
+        "description": "A view's series.",
+        "properties": {
+          "address": {
+            "description": "The view's address, its state in its normal form after `#dash/`",
+            "title": "Address",
+            "type": "string"
+          },
+          "all": {
+            "$ref": "#/components/schemas/SeriesResponseSchema.b67cf98.LineSchema"
+          },
+          "by": {
+            "$ref": "#/components/schemas/SeriesResponseSchema.b67cf98.RowsDimensionSchema",
+            "description": "The dimension it asks: in order its order dimension, over time its grain"
+          },
+          "color": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SeriesResponseSchema.b67cf98.ColorSchema"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "look": {
+            "description": "Its look-only parts as the address writes them",
+            "items": {
+              "type": "string"
+            },
+            "title": "Look",
+            "type": "array"
+          },
+          "markers": {
+            "description": "Within the span of the axis, by kind, each in the order first seen",
+            "items": {
+              "$ref": "#/components/schemas/SeriesResponseSchema.b67cf98.SightingSchema"
+            },
+            "title": "Markers",
+            "type": "array"
+          },
+          "measures": {
+            "items": {
+              "$ref": "#/components/schemas/SeriesResponseSchema.b67cf98.PanelSchema"
+            },
+            "title": "Measures",
+            "type": "array"
+          },
+          "notes": {
+            "description": "A note for each part it dropped",
+            "items": {
+              "type": "string"
+            },
+            "title": "Notes",
+            "type": "array"
+          },
+          "off_axis": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SeriesResponseSchema.b67cf98.ByRowSchema"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The row with none, which is no point"
+          },
+          "points": {
+            "description": "The dimension's values in the order of the axis, the earliest first, those a threshold or the outlier rows' chip keeps",
+            "items": {
+              "$ref": "#/components/schemas/SeriesResponseSchema.b67cf98.PointSchema"
+            },
+            "title": "Points",
+            "type": "array"
+          },
+          "presentation": {
+            "enum": [
+              "order",
+              "time"
+            ],
+            "title": "Presentation",
+            "type": "string"
+          },
+          "roll": {
+            "$ref": "#/components/schemas/SeriesResponseSchema.b67cf98.RollSchema"
+          },
+          "total_points": {
+            "description": "The points, those answered and the rest",
+            "title": "Total Points",
+            "type": "integer"
+          },
+          "window": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/SeriesResponseSchema.b67cf98.SpanSchema"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The time it reads; null for all time, empty for none of it",
+            "title": "Window"
+          },
+          "zone": {
+            "description": "The zone the view's days, weekdays and hours are in",
+            "examples": [
+              "Europe/Amsterdam"
+            ],
+            "title": "Zone",
+            "type": "string"
+          }
+        },
+        "required": [
+          "address",
+          "look",
+          "notes",
+          "zone",
+          "window",
+          "presentation",
+          "by",
+          "roll",
+          "measures",
+          "color",
+          "all",
+          "points",
+          "total_points",
+          "off_axis",
+          "markers"
+        ],
+        "title": "SeriesResponseSchema",
+        "type": "object"
+      },
+      "SeriesResponseSchema.b67cf98.BandSchema": {
+        "description": "The rolling quartiles at a point or a dot.",
+        "properties": {
+          "first": {
+            "title": "First",
+            "type": "number"
+          },
+          "median": {
+            "title": "Median",
+            "type": "number"
+          },
+          "third": {
+            "title": "Third",
+            "type": "number"
+          }
+        },
+        "required": [
+          "first",
+          "median",
+          "third"
+        ],
+        "title": "BandSchema",
+        "type": "object"
+      },
+      "SeriesResponseSchema.b67cf98.ByRowSchema": {
+        "description": "A row of the By.",
+        "properties": {
+          "focus": {
+            "description": "Whether it holds the view's focus",
+            "title": "Focus",
+            "type": "boolean"
+          },
+          "key": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The By's value, typed as the By reads it",
+            "title": "Key"
+          },
+          "label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Its label; null where the key is its own, as a date or a time",
+            "title": "Label"
+          },
+          "marked": {
+            "description": "Whether every mark holds on it: each marked threshold, the outlier rows' chip where it marks, and a row a marked chip keeps",
+            "title": "Marked",
+            "type": "boolean"
+          },
+          "marks": {
+            "anyOf": [
+              {
+                "items": {
+                  "anyOf": [
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Where a chip marks values or each item, each measure's part on the rows it marks, 0 on a row not marked, the All row's the sum of its rows'; null for a measure that does not add up",
+            "title": "Marks"
+          },
+          "n": {
+            "description": "Each measure's items with a value here",
+            "items": {
+              "type": "integer"
+            },
+            "title": "N",
+            "type": "array"
+          },
+          "split": {
+            "anyOf": [
+              {
+                "items": {
+                  "anyOf": [
+                    {
+                      "items": {
+                        "type": "number"
+                      },
+                      "type": "array"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "With a color, each measure's amounts over the color's values, in their order; null for a measure that does not stack",
+            "title": "Split"
+          },
+          "values": {
+            "description": "Each measure's value; null where it has no item here",
+            "items": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "title": "Values",
+            "type": "array"
+          }
+        },
+        "required": [
+          "values",
+          "n",
+          "split",
+          "marks",
+          "key",
+          "label",
+          "focus",
+          "marked"
+        ],
+        "title": "ByRowSchema",
+        "type": "object"
+      },
+      "SeriesResponseSchema.b67cf98.ColorSchema": {
+        "description": "The color the stacked measures split by.",
+        "properties": {
+          "key": {
+            "description": "A dimension's key, or `token_kind`",
+            "title": "Key",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "values": {
+            "description": "Its values, by the first stacked measure's amount, the largest first, or the token kinds in their order; empty where no measure stacks",
+            "items": {
+              "$ref": "#/components/schemas/SeriesResponseSchema.b67cf98.ColorValueSchema"
+            },
+            "title": "Values",
+            "type": "array"
+          }
+        },
+        "required": [
+          "key",
+          "label",
+          "values"
+        ],
+        "title": "ColorSchema",
+        "type": "object"
+      },
+      "SeriesResponseSchema.b67cf98.ColorValueSchema": {
+        "description": "A value of the color.",
+        "properties": {
+          "key": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The value, typed as its dimension reads it; null for none, or for the values folded",
+            "title": "Key"
+          },
+          "label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Its label; null where the key is its own",
+            "title": "Label"
+          },
+          "others": {
+            "description": "The count of values folded into it; 0 for a value of its own",
+            "title": "Others",
+            "type": "integer"
+          },
+          "total": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The first stacked measure's amount on the All row",
+            "title": "Total"
+          }
+        },
+        "required": [
+          "key",
+          "label",
+          "total",
+          "others"
+        ],
+        "title": "ColorValueSchema",
+        "type": "object"
+      },
+      "SeriesResponseSchema.b67cf98.DotSchema": {
+        "description": "An item of a panel's grain in a point.",
+        "properties": {
+          "at": {
+            "description": "Its first moment in the point",
+            "format": "date-time",
+            "title": "At",
+            "type": "string"
+          },
+          "focus": {
+            "description": "Whether it is the view's focus",
+            "title": "Focus",
+            "type": "boolean"
+          },
+          "key": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The item, typed as its part reads it",
+            "title": "Key"
+          },
+          "label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Its name; null where the key is its own",
+            "title": "Label"
+          },
+          "point": {
+            "description": "The point's place among the points, from 0",
+            "title": "Point",
+            "type": "integer"
+          },
+          "value": {
+            "description": "Its figure in the point",
+            "title": "Value",
+            "type": "number"
+          }
+        },
+        "required": [
+          "point",
+          "key",
+          "label",
+          "value",
+          "at",
+          "focus"
+        ],
+        "title": "DotSchema",
+        "type": "object"
+      },
+      "SeriesResponseSchema.b67cf98.LineSchema": {
+        "description": "The All row: each measure's value, in the view's order.",
+        "properties": {
+          "marks": {
+            "anyOf": [
+              {
+                "items": {
+                  "anyOf": [
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Where a chip marks values or each item, each measure's part on the rows it marks, 0 on a row not marked, the All row's the sum of its rows'; null for a measure that does not add up",
+            "title": "Marks"
+          },
+          "n": {
+            "description": "Each measure's items with a value here",
+            "items": {
+              "type": "integer"
+            },
+            "title": "N",
+            "type": "array"
+          },
+          "split": {
+            "anyOf": [
+              {
+                "items": {
+                  "anyOf": [
+                    {
+                      "items": {
+                        "type": "number"
+                      },
+                      "type": "array"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "With a color, each measure's amounts over the color's values, in their order; null for a measure that does not stack",
+            "title": "Split"
+          },
+          "values": {
+            "description": "Each measure's value; null where it has no item here",
+            "items": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "title": "Values",
+            "type": "array"
+          }
+        },
+        "required": [
+          "values",
+          "n",
+          "split",
+          "marks"
+        ],
+        "title": "LineSchema",
+        "type": "object"
+      },
+      "SeriesResponseSchema.b67cf98.PanelSchema": {
+        "description": "A measure as a series draws it, in the view's order; its `median` the\npoints', or the dots', those holding the focus left out.",
+        "properties": {
+          "aggregate": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Its aggregate; null for a ratio",
+            "title": "Aggregate"
+          },
+          "band": {
+            "anyOf": [
+              {
+                "items": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/SeriesResponseSchema.b67cf98.BandSchema"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The band at each point, or each dot, null before it draws; null where it draws none",
+            "title": "Band"
+          },
+          "before": {
+            "description": "The values before the range the band read before the first",
+            "title": "Before",
+            "type": "integer"
+          },
+          "cut": {
+            "description": "Whether dots past those answered were left out",
+            "title": "Cut",
+            "type": "boolean"
+          },
+          "dots": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/SeriesResponseSchema.b67cf98.DotSchema"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Its items in each point, in the points' order, then by their first moments; null where it draws no dots",
+            "title": "Dots"
+          },
+          "format": {
+            "description": "The format of what is answered",
+            "enum": [
+              "usd",
+              "tokens",
+              "count",
+              "seconds",
+              "share"
+            ],
+            "title": "Format",
+            "type": "string"
+          },
+          "grain": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The part its items are; null for its fact's own rows, and for a ratio",
+            "title": "Grain"
+          },
+          "key": {
+            "description": "The measure as the view's normal form writes it",
+            "examples": [
+              "cost.median.conversation"
+            ],
+            "title": "Key",
+            "type": "string"
+          },
+          "kind": {
+            "description": "A column per point, a sum or a count, stacked by the color; the items' dots in each point, a measure over a part's items other than the points' own; else one dot at each point, a ratio among them",
+            "enum": [
+              "column",
+              "point",
+              "items"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "label": {
+            "description": "Its figure's label, or its ratio's",
+            "title": "Label",
+            "type": "string"
+          },
+          "median": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The median of its rows' values, the rows holding the focus left out: the peers' median",
+            "title": "Median"
+          },
+          "outliers": {
+            "description": "The places of its outlying points, or of its dots, from 0",
+            "items": {
+              "type": "integer"
+            },
+            "title": "Outliers",
+            "type": "array"
+          },
+          "refused": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Why the By refuses it, where it does: its values are its stand-in's, or null where none stands in",
+            "title": "Refused"
+          },
+          "stacks": {
+            "description": "Whether it splits by the color, each row's `split` holding it",
+            "title": "Stacks",
+            "type": "boolean"
+          },
+          "stand_in": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SeriesResponseSchema.b67cf98.StandInSchema"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The measure answered in its place, where it is refused"
+          }
+        },
+        "required": [
+          "key",
+          "label",
+          "format",
+          "aggregate",
+          "grain",
+          "stacks",
+          "refused",
+          "stand_in",
+          "median",
+          "kind",
+          "outliers",
+          "band",
+          "before",
+          "dots",
+          "cut"
+        ],
+        "title": "PanelSchema",
+        "type": "object"
+      },
+      "SeriesResponseSchema.b67cf98.PointSchema": {
+        "description": "A point of a series, a row of the dimension it asks.",
+        "properties": {
+          "axis": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "In order, the member's place on its axis",
+            "title": "Axis"
+          },
+          "ends_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Over time by a span of time, the point's end, exclusive",
+            "title": "Ends At"
+          },
+          "focus": {
+            "description": "Whether it holds the view's focus",
+            "title": "Focus",
+            "type": "boolean"
+          },
+          "key": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The By's value, typed as the By reads it",
+            "title": "Key"
+          },
+          "label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Its label; null where the key is its own, as a date or a time",
+            "title": "Label"
+          },
+          "marked": {
+            "description": "Whether every mark holds on it: each marked threshold, the outlier rows' chip where it marks, and a row a marked chip keeps",
+            "title": "Marked",
+            "type": "boolean"
+          },
+          "marks": {
+            "anyOf": [
+              {
+                "items": {
+                  "anyOf": [
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Where a chip marks values or each item, each measure's part on the rows it marks, 0 on a row not marked, the All row's the sum of its rows'; null for a measure that does not add up",
+            "title": "Marks"
+          },
+          "n": {
+            "description": "Each measure's items with a value here",
+            "items": {
+              "type": "integer"
+            },
+            "title": "N",
+            "type": "array"
+          },
+          "split": {
+            "anyOf": [
+              {
+                "items": {
+                  "anyOf": [
+                    {
+                      "items": {
+                        "type": "number"
+                      },
+                      "type": "array"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "With a color, each measure's amounts over the color's values, in their order; null for a measure that does not stack",
+            "title": "Split"
+          },
+          "starts_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Over time by a span of time, the point's start",
+            "title": "Starts At"
+          },
+          "values": {
+            "description": "Each measure's value; null where it has no item here",
+            "items": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "title": "Values",
+            "type": "array"
+          }
+        },
+        "required": [
+          "values",
+          "n",
+          "split",
+          "marks",
+          "key",
+          "label",
+          "focus",
+          "marked",
+          "axis",
+          "starts_at",
+          "ends_at"
+        ],
+        "title": "PointSchema",
+        "type": "object"
+      },
+      "SeriesResponseSchema.b67cf98.RollSchema": {
+        "description": "The rolling median's and its band's length.",
+        "properties": {
+          "before": {
+            "description": "The values with one before it that it draws from",
+            "examples": [
+              15
+            ],
+            "title": "Before",
+            "type": "integer"
+          },
+          "read": {
+            "description": "The values with one it reads",
+            "examples": [
+              10
+            ],
+            "title": "Read",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "read",
+          "before"
+        ],
+        "title": "RollSchema",
+        "type": "object"
+      },
+      "SeriesResponseSchema.b67cf98.RowsDimensionSchema": {
+        "description": "The dimension the rows are By.",
+        "properties": {
+          "group": {
+            "enum": [
+              "part",
+              "attribute",
+              "time",
+              "order"
+            ],
+            "title": "Group",
+            "type": "string"
+          },
+          "key": {
+            "examples": [
+              "project"
+            ],
+            "title": "Key",
+            "type": "string"
+          },
+          "label": {
+            "examples": [
+              "Project"
+            ],
+            "title": "Label",
+            "type": "string"
+          }
+        },
+        "required": [
+          "key",
+          "label",
+          "group"
+        ],
+        "title": "RowsDimensionSchema",
+        "type": "object"
+      },
+      "SeriesResponseSchema.b67cf98.SightingSchema": {
+        "description": "A marker: where a value of its kind's dimension was first seen.",
+        "properties": {
+          "at": {
+            "description": "Its first moment",
+            "format": "date-time",
+            "title": "At",
+            "type": "string"
+          },
+          "before": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The value it followed",
+            "examples": [
+              "2.1.317"
+            ],
+            "title": "Before"
+          },
+          "kind": {
+            "description": "Its kind's key",
+            "examples": [
+              "claude_code_version"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "value": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The value first seen",
+            "examples": [
+              "2.1.318"
+            ],
+            "title": "Value"
+          }
+        },
+        "required": [
+          "kind",
+          "value",
+          "before",
+          "at"
+        ],
+        "title": "SightingSchema",
+        "type": "object"
+      },
+      "SeriesResponseSchema.b67cf98.SpanSchema": {
+        "description": "A span of the time a view reads, its end the instant before which it\nends.",
+        "properties": {
+          "end": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Its end, exclusive; null, open",
+            "title": "End"
+          },
+          "start": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Its start; null, open",
+            "title": "Start"
+          }
+        },
+        "required": [
+          "start",
+          "end"
+        ],
+        "title": "SpanSchema",
+        "type": "object"
+      },
+      "SeriesResponseSchema.b67cf98.StandInSchema": {
+        "description": "The measure answered in a refused one's place.",
+        "properties": {
+          "key": {
+            "description": "It as the view's normal form writes a measure",
+            "examples": [
+              "kind_cost.sum"
+            ],
+            "title": "Key",
+            "type": "string"
+          },
+          "label": {
+            "description": "Its figure's label, or its ratio's",
+            "title": "Label",
+            "type": "string"
+          }
+        },
+        "required": [
+          "key",
+          "label"
+        ],
+        "title": "StandInSchema",
+        "type": "object"
+      },
       "ServiceUserSchema.6d6b324": {
         "description": "A service user as `create-service-user` makes its row (DB 338).",
         "properties": {
@@ -14477,6 +15648,24 @@
         "title": "StandingSchema",
         "type": "object"
       },
+      "StateQuerySchema.b67cf98": {
+        "description": "A view's state, as the URL writes it.",
+        "properties": {
+          "state": {
+            "description": "The view's state as the URL writes it after `#dash/`, `#dash/` before it or not; an entry, its focus alone, is filled in from the record",
+            "examples": [
+              "t=qw&by=project&m=cost.sum&col=none"
+            ],
+            "title": "State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "state"
+        ],
+        "title": "StateQuerySchema",
+        "type": "object"
+      },
       "StopRequestSchema.4ff8b5e": {
         "additionalProperties": false,
         "description": "A work item whose session to stop, and with a reason to close for\ngood.",
@@ -14512,6 +15701,261 @@
           "item"
         ],
         "title": "StopRequestSchema",
+        "type": "object"
+      },
+      "StripResponseSchema.b67cf98": {
+        "description": "A series' events strip.",
+        "properties": {
+          "address": {
+            "description": "The view's address, its state in its normal form after `#dash/`",
+            "title": "Address",
+            "type": "string"
+          },
+          "buckets": {
+            "description": "The points that hold an event",
+            "items": {
+              "$ref": "#/components/schemas/StripResponseSchema.b67cf98.BucketSchema"
+            },
+            "title": "Buckets",
+            "type": "array"
+          },
+          "by": {
+            "$ref": "#/components/schemas/StripResponseSchema.b67cf98.RowsDimensionSchema",
+            "description": "The dimension the series asks"
+          },
+          "kinds": {
+            "description": "The kinds it holds, the errors first, each group by its count",
+            "items": {
+              "$ref": "#/components/schemas/StripResponseSchema.b67cf98.SeenKindSchema"
+            },
+            "title": "Kinds",
+            "type": "array"
+          },
+          "look": {
+            "description": "Its look-only parts as the address writes them",
+            "items": {
+              "type": "string"
+            },
+            "title": "Look",
+            "type": "array"
+          },
+          "notes": {
+            "description": "A note for each part it dropped",
+            "items": {
+              "type": "string"
+            },
+            "title": "Notes",
+            "type": "array"
+          },
+          "refused": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Why it holds none, where the events lack the dimension",
+            "title": "Refused"
+          },
+          "window": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/StripResponseSchema.b67cf98.SpanSchema"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The time it reads; null for all time, empty for none of it",
+            "title": "Window"
+          },
+          "zone": {
+            "examples": [
+              "Europe/Amsterdam"
+            ],
+            "title": "Zone",
+            "type": "string"
+          }
+        },
+        "required": [
+          "address",
+          "look",
+          "notes",
+          "zone",
+          "window",
+          "by",
+          "kinds",
+          "buckets",
+          "refused"
+        ],
+        "title": "StripResponseSchema",
+        "type": "object"
+      },
+      "StripResponseSchema.b67cf98.BucketSchema": {
+        "description": "A point's events.",
+        "properties": {
+          "counts": {
+            "description": "Each kind's events, in the kinds' order",
+            "items": {
+              "type": "integer"
+            },
+            "title": "Counts",
+            "type": "array"
+          },
+          "errors": {
+            "description": "Its events that count as errors",
+            "title": "Errors",
+            "type": "integer"
+          },
+          "key": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The point's key, typed as the dimension reads it",
+            "title": "Key"
+          }
+        },
+        "required": [
+          "key",
+          "counts",
+          "errors"
+        ],
+        "title": "BucketSchema",
+        "type": "object"
+      },
+      "StripResponseSchema.b67cf98.RowsDimensionSchema": {
+        "description": "The dimension the rows are By.",
+        "properties": {
+          "group": {
+            "enum": [
+              "part",
+              "attribute",
+              "time",
+              "order"
+            ],
+            "title": "Group",
+            "type": "string"
+          },
+          "key": {
+            "examples": [
+              "project"
+            ],
+            "title": "Key",
+            "type": "string"
+          },
+          "label": {
+            "examples": [
+              "Project"
+            ],
+            "title": "Label",
+            "type": "string"
+          }
+        },
+        "required": [
+          "key",
+          "label",
+          "group"
+        ],
+        "title": "RowsDimensionSchema",
+        "type": "object"
+      },
+      "StripResponseSchema.b67cf98.SeenKindSchema": {
+        "description": "A kind of event the strip holds.",
+        "properties": {
+          "is_error": {
+            "description": "Whether an event of it counts as an error",
+            "title": "Is Error",
+            "type": "boolean"
+          },
+          "key": {
+            "examples": [
+              "api_error"
+            ],
+            "title": "Key",
+            "type": "string"
+          },
+          "label": {
+            "examples": [
+              "API error"
+            ],
+            "title": "Label",
+            "type": "string"
+          },
+          "total": {
+            "description": "Its events over every bucket",
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "key",
+          "label",
+          "is_error",
+          "total"
+        ],
+        "title": "SeenKindSchema",
+        "type": "object"
+      },
+      "StripResponseSchema.b67cf98.SpanSchema": {
+        "description": "A span of the time a view reads, its end the instant before which it\nends.",
+        "properties": {
+          "end": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Its end, exclusive; null, open",
+            "title": "End"
+          },
+          "start": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Its start; null, open",
+            "title": "Start"
+          }
+        },
+        "required": [
+          "start",
+          "end"
+        ],
+        "title": "SpanSchema",
         "type": "object"
       },
       "SyncCheckRequestSchema.19c06e7": {
@@ -21839,6 +23283,170 @@
           }
         ],
         "summary": "Star a view, a system view or a saved one, for the signed-in person; a view they starred keeps its place among their stars (F155.2).",
+        "tags": [],
+        "x-required-role": "editor"
+      }
+    },
+    "/api/dashboard/series": {
+      "get": {
+        "description": "Returns:     200: The view's series, with its address, its look-only parts and a         note for each part dropped     400: The state has faults, or is not in order or over time: the error         names every one, and ends on a correct example of each kind of         part refused     401: No one is signed in     403: The caller lacks the editor role     409: The view passed the engine's bounds: a statement past its         timeout (`QUERY_TIMEOUT`), one past the database's limit on         temporary files (`QUERY_TEMP_FILE_LIMIT`), or no slot among its         statements at once freed in time (`QUERY_BUSY`)",
+        "operationId": "get__api_dashboard_series",
+        "parameters": [
+          {
+            "description": "The view's state as the URL writes it after `#dash/`, `#dash/` before it or not; an entry, its focus alone, is filled in from the record",
+            "in": "query",
+            "name": "state",
+            "required": true,
+            "schema": {
+              "description": "The view's state as the URL writes it after `#dash/`, `#dash/` before it or not; an entry, its focus alone, is filled in from the record",
+              "examples": [
+                "t=qw&by=project&m=cost.sum&col=none"
+              ],
+              "title": "State",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SeriesResponseSchema.b67cf98"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Conflict"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Answer a view's series, in order or over time, from the record at the query: its points along the axis, each measure's value on each, with the split by the color, as a panel draws it — its dots, its outliers and its rolling band — and the markers where a value of a marker's dimension was first seen; its time as instants, with the zone its days are in.",
+        "tags": [],
+        "x-required-role": "editor"
+      }
+    },
+    "/api/dashboard/series/events": {
+      "get": {
+        "description": "Returns:     200: The strip, with the view's address, its look-only parts and a         note for each part dropped     400: The state has faults, or is not in order or over time: the error         names every one, and ends on a correct example of each kind of         part refused     401: No one is signed in     403: The caller lacks the editor role     409: The view passed the engine's bounds: a statement past its         timeout (`QUERY_TIMEOUT`), one past the database's limit on         temporary files (`QUERY_TEMP_FILE_LIMIT`), or no slot among its         statements at once freed in time (`QUERY_BUSY`)",
+        "operationId": "get__api_dashboard_series_events",
+        "parameters": [
+          {
+            "description": "The view's state as the URL writes it after `#dash/`, `#dash/` before it or not; an entry, its focus alone, is filled in from the record",
+            "in": "query",
+            "name": "state",
+            "required": true,
+            "schema": {
+              "description": "The view's state as the URL writes it after `#dash/`, `#dash/` before it or not; an entry, its focus alone, is filled in from the record",
+              "examples": [
+                "t=qw&by=project&m=cost.sum&col=none"
+              ],
+              "title": "State",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StripResponseSchema.b67cf98"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Conflict"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Answer a series' events strip from the record at the query: the events in each of its points, by their kind, and those that count as errors; asked apart from the series, so that it never holds the chart up.",
         "tags": [],
         "x-required-role": "editor"
       }

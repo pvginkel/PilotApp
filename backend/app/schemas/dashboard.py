@@ -1,7 +1,9 @@
 """Schemas for GET /api/dashboard/catalogue, what a view of the dashboard may
 name, a part at a call (F154.4), with what the dashboard stores (F155); for
 GET /api/dashboard/address, a view's state checked and written back in its
-normal form (F159); and for GET /api/dashboard/rows, a view's rows (F154.1)."""
+normal form (F159); for GET /api/dashboard/rows, a view's rows (F154.1); and
+for GET /api/dashboard/series and its events strip, a view's series (F163.3,
+F164.6)."""
 
 import uuid
 from datetime import date, datetime
@@ -81,6 +83,26 @@ class DimensionSchema(BaseModel):
     )
     focus: bool = Field(
         description="A part's alone: whether a view is opened on one of its values, as `f=`"
+    )
+    unit: Literal["day", "quota_week"] | None = Field(
+        description=(
+            "A time dimension's alone: the span of time one of its values is; "
+            "null where its values come round again, as a weekday's and an "
+            "hour's do, and no time falls on one"
+        )
+    )
+
+
+class MarkerSchema(BaseModel):
+    """A kind of marker a series draws."""
+
+    key: str = Field(
+        description="What a state's `mk=` names it by", examples=["claude_code_version"]
+    )
+    label: str = Field(examples=["Claude Code version"])
+    line: str = Field(description="What it marks")
+    dimension: str = Field(
+        description="The dimension a value of which, first seen, it marks"
     )
 
 
@@ -257,6 +279,9 @@ class CatalogueResponseSchema(BaseModel):
         default=None,
         description="`dimensions`: every dimension, in the catalogue's order",
     )
+    markers: list[MarkerSchema] | None = Field(
+        default=None, description="`dimensions`: every kind of marker"
+    )
     facts: list[FactSchema] | None = Field(default=None, description="`measures`")
     figures: list[FigureSchema] | None = Field(default=None, description="`measures`")
     aggregates: list[AggregateSchema] | None = Field(
@@ -339,8 +364,8 @@ Key = int | uuid.UUID | datetime | date | str | None
 an id, an instant, a date, a text; null for the row with none."""
 
 
-class RowsQuerySchema(BaseModel):
-    """A view's state, whose rows are asked."""
+class StateQuerySchema(BaseModel):
+    """A view's state, as the URL writes it."""
 
     state: str = Field(
         description=(
@@ -518,3 +543,170 @@ class RowsResponseSchema(BaseModel):
     )
     total_rows: int = Field(description="The By's rows, those answered and the rest")
     sort: SortSchema
+
+
+class RollSchema(BaseModel):
+    """The rolling median's and its band's length."""
+
+    read: int = Field(description="The values with one it reads", examples=[10])
+    before: int = Field(
+        description="The values with one before it that it draws from",
+        examples=[15],
+    )
+
+
+class BandSchema(BaseModel):
+    """The rolling quartiles at a point or a dot."""
+
+    first: float
+    median: float
+    third: float
+
+
+class DotSchema(BaseModel):
+    """An item of a panel's grain in a point."""
+
+    point: int = Field(description="The point's place among the points, from 0")
+    key: Key = Field(description="The item, typed as its part reads it")
+    label: str | None = Field(description="Its name; null where the key is its own")
+    value: float = Field(description="Its figure in the point")
+    at: datetime = Field(description="Its first moment in the point")
+    focus: bool = Field(description="Whether it is the view's focus")
+
+
+class PanelSchema(RowsMeasureSchema):
+    """A measure as a series draws it, in the view's order; its `median` the
+    points', or the dots', those holding the focus left out."""
+
+    kind: Literal["column", "point", "items"] = Field(
+        description=(
+            "A column per point, a sum or a count, stacked by the color; the "
+            "items' dots in each point, a measure over a part's items other "
+            "than the points' own; else one dot at each point, a ratio among them"
+        )
+    )
+    outliers: list[int] = Field(
+        description="The places of its outlying points, or of its dots, from 0"
+    )
+    band: list[BandSchema | None] | None = Field(
+        description=(
+            "The band at each point, or each dot, null before it draws; null "
+            "where it draws none"
+        )
+    )
+    before: int = Field(
+        description="The values before the range the band read before the first"
+    )
+    dots: list[DotSchema] | None = Field(
+        description=(
+            "Its items in each point, in the points' order, then by their first "
+            "moments; null where it draws no dots"
+        )
+    )
+    cut: bool = Field(description="Whether dots past those answered were left out")
+
+
+class PointSchema(ByRowSchema):
+    """A point of a series, a row of the dimension it asks."""
+
+    axis: datetime | None = Field(
+        description="In order, the member's place on its axis"
+    )
+    starts_at: datetime | None = Field(
+        description="Over time by a span of time, the point's start"
+    )
+    ends_at: datetime | None = Field(
+        description="Over time by a span of time, the point's end, exclusive"
+    )
+
+
+class SightingSchema(BaseModel):
+    """A marker: where a value of its kind's dimension was first seen."""
+
+    kind: str = Field(description="Its kind's key", examples=["claude_code_version"])
+    value: Key = Field(description="The value first seen", examples=["2.1.318"])
+    before: Key = Field(description="The value it followed", examples=["2.1.317"])
+    at: datetime = Field(description="Its first moment")
+
+
+class SeriesResponseSchema(BaseModel):
+    """A view's series."""
+
+    address: str = Field(
+        description="The view's address, its state in its normal form after `#dash/`"
+    )
+    look: list[str] = Field(
+        description="Its look-only parts as the address writes them"
+    )
+    notes: list[str] = Field(description="A note for each part it dropped")
+    zone: str = Field(
+        description="The zone the view's days, weekdays and hours are in",
+        examples=["Europe/Amsterdam"],
+    )
+    window: list[SpanSchema] | None = Field(
+        description="The time it reads; null for all time, empty for none of it"
+    )
+    presentation: Literal["order", "time"]
+    by: RowsDimensionSchema = Field(
+        description="The dimension it asks: in order its order dimension, over time its grain"
+    )
+    roll: RollSchema
+    measures: list[PanelSchema]
+    color: ColorSchema | None
+    all: LineSchema
+    points: list[PointSchema] = Field(
+        description=(
+            "The dimension's values in the order of the axis, the earliest "
+            "first, those a threshold or the outlier rows' chip keeps"
+        )
+    )
+    total_points: int = Field(description="The points, those answered and the rest")
+    off_axis: ByRowSchema | None = Field(
+        description="The row with none, which is no point"
+    )
+    markers: list[SightingSchema] = Field(
+        description=(
+            "Within the span of the axis, by kind, each in the order first seen"
+        )
+    )
+
+
+class SeenKindSchema(BaseModel):
+    """A kind of event the strip holds."""
+
+    key: str = Field(examples=["api_error"])
+    label: str = Field(examples=["API error"])
+    is_error: bool = Field(description="Whether an event of it counts as an error")
+    total: int = Field(description="Its events over every bucket")
+
+
+class BucketSchema(BaseModel):
+    """A point's events."""
+
+    key: Key = Field(description="The point's key, typed as the dimension reads it")
+    counts: list[int] = Field(description="Each kind's events, in the kinds' order")
+    errors: int = Field(description="Its events that count as errors")
+
+
+class StripResponseSchema(BaseModel):
+    """A series' events strip."""
+
+    address: str = Field(
+        description="The view's address, its state in its normal form after `#dash/`"
+    )
+    look: list[str] = Field(
+        description="Its look-only parts as the address writes them"
+    )
+    notes: list[str] = Field(description="A note for each part it dropped")
+    zone: str = Field(examples=["Europe/Amsterdam"])
+    window: list[SpanSchema] | None = Field(
+        description="The time it reads; null for all time, empty for none of it"
+    )
+    by: RowsDimensionSchema = Field(description="The dimension the series asks")
+    kinds: list[SeenKindSchema] = Field(
+        description="The kinds it holds, the errors first, each group by its count"
+    )
+    buckets: list[BucketSchema] = Field(description="The points that hold an event")
+    refused: str | None = Field(
+        description="Why it holds none, where the events lack the dimension"
+    )

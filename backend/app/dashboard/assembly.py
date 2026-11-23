@@ -1,9 +1,9 @@
 """The catalogue's assembly (F154.4): Pilot's code's entries, with what the
 record's rows give — a vocabulary's rows as a dimension's values, a version
-dimension per Component, and from the stored configuration the custom
-ratios and the quick filters — and the process's copy of it, kept until a
-publication writes a vocabulary's row or a person writes a quick filter or a
-ratio.
+dimension per Component and the marker of its versions, and from the stored
+configuration the custom ratios and the quick filters — and the process's
+copy of it, kept until a publication writes a vocabulary's row or a person
+writes a quick filter or a ratio.
 
 A stored ratio or quick filter is offered where what it names reads under
 the rest of the catalogue: a ratio's two measures, a quick filter's chip and
@@ -34,6 +34,7 @@ from app.dashboard.dimensions import (
     own_dimensions,
     version_dimension,
     version_keys,
+    version_marker,
     with_values,
 )
 from app.dashboard.facts import FACTS, OCCURRENCES, own_joins, version_joins
@@ -192,6 +193,9 @@ def _own(db: Session, zone: str, sitting_gap: timedelta) -> Catalogue:
         aggregates=AGGREGATES,
         ratios=RATIOS,
         ranges=RANGES,
+        markers=tuple(
+            version_marker(component, keys[component.code]) for component in components
+        ),
     )
 
 

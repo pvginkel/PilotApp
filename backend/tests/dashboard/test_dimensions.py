@@ -85,6 +85,20 @@ class TestEveryDimension:
         assert dimensions["turn_seq"].base == "pturn"
         assert dimensions["session_start"].group == dimensions["turn_seq"].group
 
+    def test_a_time_on_a_line_has_its_unit_one_that_comes_round_none(
+        self, session: DbSession
+    ) -> None:
+        assert {
+            dimension.key: dimension.unit
+            for dimension in own_dimensions(ZONE)
+            if dimension.group == "time"
+        } == {"qweek": "quota_week", "day": "day", "weekday": None, "hod": None}
+        assert {
+            dimension.unit
+            for dimension in own_dimensions(ZONE)
+            if dimension.group != "time"
+        } == {None}
+
     def test_what_a_fact_offers_is_what_its_rows_reach(
         self, session: DbSession
     ) -> None:

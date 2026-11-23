@@ -21,6 +21,7 @@ from app.dashboard.statements import (
     Scan,
     adds,
     described,
+    ordered,
     stacks,
     statements,
 )
@@ -221,6 +222,17 @@ class TestStatements:
         compiled = str(found.select.compile())
         assert "GROUPING SETS((r.b, r.item), (r.item))" in compiled
         assert "DISTINCT" not in compiled
+
+
+class TestOrdered:
+    def test_an_order_is_its_own_and_a_part_lies_along_its_first(
+        self, held: Catalogue
+    ) -> None:
+        start = held.dimension("session_start")
+
+        assert ordered(held, start) is start
+        assert ordered(held, held.dimension("psession")) is start
+        assert ordered(held, held.dimension("project")) is None
 
 
 class TestDescribed:

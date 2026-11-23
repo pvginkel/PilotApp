@@ -3,6 +3,7 @@ thresholds and outlier rows, the quick filters' chips and a refused
 measure's stand-in; and the query it means, as the file of states holds
 it."""
 
+import uuid
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 
@@ -16,8 +17,10 @@ from app.dashboard.planner import (
     Planned,
     PlannedRatio,
     Threshold,
+    asked,
     described,
     plan,
+    series_plan,
     window,
 )
 from app.dashboard.reading import read
@@ -30,6 +33,7 @@ from app.dashboard.state import (
     Simple,
     Weeks,
 )
+from app.exceptions import StateRefusedException
 from app.services.quota_week_service import Period
 from tests.support.dashboard import catalogue
 
@@ -341,6 +345,39 @@ def _standing(held: Catalogue, standing: str, stands_for: str) -> Catalogue:
             for figure in held.figures
         ),
     )
+
+
+class TestSeriesPlan:
+    @pytest.mark.parametrize(
+        ("written", "by"),
+        [
+            ("p=time,hod", "hod"),
+            ("by=psession&p=order", "session_start"),
+            ("by=pturn&p=order,turn_seq", "turn_seq"),
+            ("by=psession", "psession"),
+        ],
+    )
+    def test_the_dimension_a_view_asks(
+        self, held: Catalogue, written: str, by: str
+    ) -> None:
+        assert asked(read(written, held, WEEKS).state, held) == by
+
+    def test_its_rows_are_by_the_dimension_asked(self, held: Catalogue) -> None:
+        state = read("dr=project:" + PROJECT + "&p=time,day", held, WEEKS).state
+
+        found = series_plan(state, held, WEEKS, NOW)
+
+        assert found.by == "day"
+        assert found.scope == (Condition("project", (uuid.UUID(PROJECT),)),)
+
+    @pytest.mark.parametrize("written", ["by=project", "by=call&p=lanes", "p=table"])
+    def test_a_view_with_no_series_is_refused(
+        self, held: Catalogue, written: str
+    ) -> None:
+        with pytest.raises(StateRefusedException) as refused:
+            series_plan(read(written, held, WEEKS).state, held, WEEKS, NOW)
+
+        assert refused.value.faults[0].kind == "p"
 
 
 class TestDescribed:

@@ -1,6 +1,7 @@
 """The dimensions Pilot's code declares, over Pilot's own record and the
 collector's facts (F154.4), and those the record's rows give: a version
-dimension per Component, and a vocabulary's rows as a dimension's values.
+dimension per Component, with the marker of its versions, and a vocabulary's
+rows as a dimension's values.
 
 A dimension's key is the mockup's where the mockup has the dimension
 (`design/mockup/dashboard/state.js`), so that a state written there reads
@@ -27,7 +28,7 @@ from sqlalchemy import (
     select,
 )
 
-from app.dashboard.catalogue import Dimension, Path, Row, Value
+from app.dashboard.catalogue import Dimension, Marker, Path, Row, Value
 from app.dashboard.facts import version_join
 from app.models import ClaimAssignment, Component, ResearchAssignment
 from app.models.reference import ChatKind, TurnCause, WorkTrigger
@@ -423,6 +424,7 @@ def own_dimensions(zone: str) -> tuple[Dimension, ...]:
             path=lambda row: row.to("quota_week").c.starts_at,
             null="(No quota week)",
             next="day",
+            unit="quota_week",
         ),
         Dimension(
             key="day",
@@ -430,6 +432,7 @@ def own_dimensions(zone: str) -> tuple[Dimension, ...]:
             group="time",
             line=f"The day in {zone}",
             path=lambda row: cast(local(row), Date),
+            unit="day",
         ),
         Dimension(
             key="weekday",
@@ -499,6 +502,17 @@ def version_dimension(component: Component, key: str) -> Dimension:
         line=f"The version of {component.name} the Call's Launch ran with",
         path=lambda row: row.to(version_join(component.code)).c.version,
         null="(No version)",
+    )
+
+
+def version_marker(component: Component, key: str) -> Marker:
+    """Where a version of `component` was first seen, its version
+    dimension's `key`."""
+    return Marker(
+        key=key,
+        label=f"{component.name} version",
+        line=f"Where a version of {component.name} was first seen",
+        dimension=key,
     )
 
 

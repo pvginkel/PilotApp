@@ -11,7 +11,7 @@ import pytest
 from sqlalchemy import select
 from sqlalchemy.orm import Session as DbSession
 
-from app.dashboard.catalogue import Catalogue, QuickFilter
+from app.dashboard.catalogue import Catalogue, Marker, QuickFilter
 from app.dashboard.reading import Checked, is_entry, read, read_chip, read_simple, split
 from app.dashboard.state import (
     OTHERS,
@@ -46,6 +46,10 @@ FIRST = datetime(2025, 1, 2, 10, tzinfo=UTC)
 Reads = Callable[..., Checked]
 Refuses = Callable[[str], list[str]]
 SECOND = datetime(2025, 1, 9, 10, tzinfo=UTC)
+MARKERS = tuple(
+    Marker(key, key, f"Where a version of {key} was first seen", key)
+    for key in ("claude_code_version", "plugin_pantry_version")
+)
 
 
 @pytest.fixture
@@ -832,11 +836,30 @@ class TestFocus:
 
 
 class TestLook:
-    def test_relative_and_the_markers(self, reads: Reads) -> None:
+    def test_relative_and_the_markers(self, reads: Reads, held: Catalogue) -> None:
+        marked = replace(held, markers=MARKERS)
+
         assert _state(reads, "rel=1").relative
         assert not _state(reads, "rel=0").relative
         assert _state(reads, "mk=none").markers == ()
-        assert _state(reads, "mk=model,miss,model").markers == ("miss", "model")
+        assert reads(
+            "mk=plugin_pantry_version,claude_code_version,plugin_pantry_version",
+            marked,
+        ).state.markers == ("claude_code_version", "plugin_pantry_version")
+
+    def test_a_marker_is_the_catalogues_kind_alone(
+        self, held: Catalogue, weeks: list[Period]
+    ) -> None:
+        with pytest.raises(StateRefusedException) as refused:
+            read("mk=claude_code_versoin,model", replace(held, markers=MARKERS), weeks)
+
+        assert refused.value.message.splitlines()[1:3] == [
+            '- mk=claude_code_versoin,model: "claude_code_versoin" is no kind of '
+            'marker. Did you mean "claude_code_version"? A kind of marker is '
+            "claude_code_version or plugin_pantry_version.",
+            '- mk=claude_code_versoin,model: "model" is no kind of marker. A kind of '
+            "marker is claude_code_version or plugin_pantry_version.",
+        ]
 
     def test_what_a_series_draws(self, reads: Reads) -> None:
         assert _state(reads, "dw=band:off,dots:all,cols:on").draw == Draw(
@@ -879,8 +902,9 @@ class TestLook:
         [
             ("rel=yes", '- rel=yes: "yes" is no switch. rel takes 1.'),
             (
-                "mk=modle",
-                '- mk=modle: "modle" is no kind of marker. Did you mean "model"?',
+                "mk=model",
+                '- mk=model: "model" is no kind of marker. A kind of marker is the '
+                "version of a component the record holds, and it holds none.",
             ),
             (
                 "dw=dots:some",

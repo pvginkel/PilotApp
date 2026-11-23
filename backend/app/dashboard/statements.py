@@ -17,6 +17,22 @@ and what the process does"), built from a plan.
   marks: by the By, the rows the marks keep, their count and each marking
   measure's part.
 
+A series reads more, each a statement of one fact (`Read`):
+
+- **a bucket's items**, for a measure drawn as its items' dots: by the By
+  and the item, each item's figure there, its first moment and its name, in
+  the order of the By's values on their axis, then of the items' first
+  moments;
+- **the members before the range**, in order: the last of the By's values
+  whose place on the axis is before the window, under the scope over all
+  time; and **the items before the range** of a measure drawn as its items'
+  dots, the last to start before the window, each item's figure over all
+  its rows;
+- **the first sightings** of a marker's dimension: each value's first
+  moment, under the scope over all time;
+- **the events by bucket**: by the By and the event's kind, their count and
+  whether the kind counts as an error.
+
 A condition on each item reads its figure over each item's rows of all
 time, its own filters keeping them: on a fact's own rows the row's figure,
 on a part the items whose figure, taken together as it says, passes. The
@@ -34,7 +50,8 @@ it ignores the row.
 from __future__ import annotations
 
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
+from datetime import datetime
 from typing import Any
 
 from sqlalchemy import (
@@ -120,6 +137,17 @@ class Marked:
 
 
 Statement = Scan | Items | Marked
+
+
+@dataclass(frozen=True)
+class Read:
+    """One of a series' statements: its fact, the joins it reads and each
+    dimension it reads through another fact's conversations."""
+
+    fact: str
+    select: Select[Any]
+    joins: tuple[str, ...]
+    through: tuple[tuple[str, str], ...]
 
 
 def adds(planned: Planned, catalogue: Catalogue) -> bool:
@@ -367,7 +395,7 @@ class _Builder:
                 columns.append(dimension.name(self.row).label("c_name"))
         if by.name is not None:
             columns.append(by.name(self.row).label("b_name"))
-        order = _order_of(self.catalogue, by.key)
+        order = ordered(self.catalogue, by)
         if order is not None and order.axis is not None:
             columns.append(order.axis(self.row).label("axis"))
         focus = self.plan.focus
@@ -577,14 +605,219 @@ class _Builder:
             measures=tuple(marking),
         )
 
+    # ------------------------------------------------------------ a series'
 
-def _order_of(catalogue: Catalogue, part: str) -> Dimension | None:
-    """The first order dimension along which `part` lies."""
+    def read(self, statement: Select[Any]) -> Read:
+        return Read(
+            fact=self.row.fact.key,
+            select=statement.execution_options(max_statement_length=_LENGTH),
+            joins=self.row.taken,
+            through=tuple(self.through.items()),
+        )
+
+    def place(self) -> ColumnElement[Any]:
+        """The row's By's place on its axis: its order's, else its own."""
+        by = self.by()
+        order = ordered(self.catalogue, by)
+        if order is not None and order.axis is not None:
+            return order.axis(self.row)
+        return by.path(self.row)
+
+    def bucketed(self, planned: Planned, most: int) -> Read:
+        assert planned.grain is not None
+        part = self.catalogue.dimension(planned.grain)
+        b = self.by().path(self.row)
+        item = part.path(self.row)
+        columns: list[ColumnElement[Any]] = [
+            b.label("b"),
+            item.label("item"),
+            self.value(planned).label("v"),
+            self.row["at"].label("at"),
+            self.place().label("place"),
+        ]
+        if part.name is not None:
+            columns.append(part.name(self.row).label("name"))
+        rows = (
+            select(*columns)
+            .select_from(self.row.source())
+            .where(*self.scoped(), b.is_not(None), item.is_not(None))
+            .subquery("r")
+        )
+        value = _within(self.catalogue.figure(planned.answered.figure), rows.c.v)
+        grouped: list[ColumnElement[Any]] = [
+            rows.c.b,
+            rows.c.item,
+            value.label("v"),
+            func.min(rows.c.at).label("at"),
+            func.min(func.min(rows.c.place)).over(partition_by=rows.c.b).label("place"),
+        ]
+        if "name" in rows.c:
+            grouped.append(func.max(rows.c.name).label("name"))
+        items = (
+            select(*grouped)
+            .group_by(rows.c.b, rows.c.item)
+            .having(value.is_not(None))
+            .subquery("i")
+        )
+        return self.read(
+            select(*items.c)
+            .order_by(items.c.place, items.c.b, items.c.at, items.c.item)
+            .limit(most)
+        )
+
+    def members_before(
+        self, start: datetime, excluded: Sequence[Value], most: int
+    ) -> Read:
+        b = self.by().path(self.row)
+        where = [*self.scoped(), b.is_not(None)]
+        if excluded:
+            where.append(not_(_among(b, excluded)))
+        rows = (
+            select(b.label("b"), self.place().label("place"))
+            .select_from(self.row.source())
+            .where(*where)
+            .subquery("r")
+        )
+        place = func.min(rows.c.place)
+        return self.read(
+            select(rows.c.b)
+            .group_by(rows.c.b)
+            .having(place < start)
+            .order_by(place.desc(), rows.c.b)
+            .limit(most)
+        )
+
+    def items_before(
+        self, planned: Planned, start: datetime, excluded: Sequence[Value], most: int
+    ) -> Read:
+        assert planned.grain is not None
+        item = self.catalogue.dimension(planned.grain).path(self.row)
+        where = [*self.scoped(), item.is_not(None)]
+        if excluded:
+            where.append(not_(_among(item, excluded)))
+        rows = (
+            select(
+                item.label("item"),
+                self.value(planned).label("v"),
+                self.row["at"].label("at"),
+            )
+            .select_from(self.row.source())
+            .where(*where)
+            .subquery("r")
+        )
+        value = _within(self.catalogue.figure(planned.answered.figure), rows.c.v)
+        first = func.min(rows.c.at)
+        return self.read(
+            select(rows.c.item, value.label("v"))
+            .group_by(rows.c.item)
+            .having(and_(first < start, value.is_not(None)))
+            .order_by(first.desc(), rows.c.item)
+            .limit(most)
+        )
+
+    def sightings(self, dimension: Dimension) -> Read:
+        value = dimension.path(self.row)
+        rows = (
+            select(value.label("v"), self.row["at"].label("at"))
+            .select_from(self.row.source())
+            .where(*self.scoped(), value.is_not(None))
+            .subquery("r")
+        )
+        return self.read(
+            select(rows.c.v, func.min(rows.c.at).label("at")).group_by(rows.c.v)
+        )
+
+    def counted(self, kind: Dimension, error: Dimension) -> Read:
+        rows = (
+            select(
+                self.by().path(self.row).label("b"),
+                kind.path(self.row).label("kind"),
+                error.path(self.row).label("error"),
+            )
+            .select_from(self.row.source())
+            .where(*self.scoped())
+            .subquery("r")
+        )
+        return self.read(
+            select(
+                rows.c.b,
+                rows.c.kind,
+                func.max(rows.c.error).label("error"),
+                func.count().label("n"),
+            ).group_by(rows.c.b, rows.c.kind)
+        )
+
+
+def bucketed(found: Plan, catalogue: Catalogue, planned: Planned, most: int) -> Read:
+    """The items of the measure's grain in each of the By's values the plan
+    reads, at most `most`."""
+    return _Builder(found, catalogue, planned.fact).bucketed(planned, most)
+
+
+def members_before(
+    found: Plan,
+    catalogue: Catalogue,
+    fact: str,
+    start: datetime,
+    excluded: Sequence[Value],
+    most: int,
+) -> Read:
+    """The last `most` of the By's values with rows of `fact` whose place on
+    the By's axis is before `start`, `excluded` aside, under the plan's
+    scope over all time, the latest first."""
+    return _Builder(_all_time(found), catalogue, fact).members_before(
+        start, excluded, most
+    )
+
+
+def items_before(
+    found: Plan,
+    catalogue: Catalogue,
+    planned: Planned,
+    start: datetime,
+    excluded: Sequence[Value],
+    most: int,
+) -> Read:
+    """The last `most` items of the measure's grain to start before `start`,
+    `excluded` aside, each with its figure over all its rows, under the
+    plan's scope over all time, the latest first."""
+    return _Builder(_all_time(found), catalogue, planned.fact).items_before(
+        planned, start, excluded, most
+    )
+
+
+def sightings(found: Plan, catalogue: Catalogue, dimension: str) -> Read:
+    """Each value of the dimension with its first moment, on the first fact
+    that offers it, under the plan's scope over all time."""
+    fact = catalogue.offered(dimension)[0]
+    return _Builder(_all_time(found), catalogue, fact).sightings(
+        catalogue.dimension(dimension)
+    )
+
+
+def counted(found: Plan, catalogue: Catalogue, kind: str, error: str) -> Read:
+    """By the By and the dimension `kind`, the rows the plan reads of the
+    first fact that offers it, and whether any is one `error` holds."""
+    fact = catalogue.offered(kind)[0]
+    return _Builder(found, catalogue, fact).counted(
+        catalogue.dimension(kind), catalogue.dimension(error)
+    )
+
+
+def _all_time(found: Plan) -> Plan:
+    return replace(found, window=None, rows=None)
+
+
+def ordered(catalogue: Catalogue, by: Dimension) -> Dimension | None:
+    """The order dimension the By lies along: itself where it is one, else
+    the first along its part."""
+    if by.group == "order":
+        return by
     return next(
         (
             dimension
             for dimension in catalogue.dimensions
-            if dimension.group == "order" and dimension.base == part
+            if dimension.group == "order" and dimension.base == by.key
         ),
         None,
     )

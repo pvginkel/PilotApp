@@ -1061,15 +1061,20 @@ class _Reader:
     def markers(self, part: _Part) -> tuple[str, ...]:
         if part.value == "none":
             return ()
+        offered = [marker.key for marker in self.catalogue.markers]
         kinds = []
         for kind in part.value.split(","):
-            if kind in self.dimensions:
+            if kind in offered:
                 kinds.append(kind)
             elif kind:
                 self.fault(
                     part,
                     f'"{kind}" is no kind of marker',
-                    nearest(kind, self.dimensions),
+                    nearest(kind, offered),
+                    f"A kind of marker is {listed(offered, 'or')}"
+                    if offered
+                    else "A kind of marker is the version of a component the "
+                    "record holds, and it holds none",
                 )
         return tuple(sorted(set(kinds)))
 

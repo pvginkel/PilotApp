@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session as DbSession
 
 from app import models
 from app.dashboard.assembly import CatalogueService, assemble
-from app.dashboard.catalogue import Catalogue, QuickFilter, Ratio
+from app.dashboard.catalogue import Catalogue, Marker, QuickFilter, Ratio
 from app.dashboard.facts import FACTS, OCCURRENCES
 from app.dashboard.measures import AGGREGATES, FIGURES, RANGES, RATIOS
 from app.dashboard.reading import read
@@ -143,6 +143,21 @@ class TestAssemble:
         assert {join.key for join in after.joins} - {
             join.key for join in before.joins
         } == {"used_plugin:pantry", "version_plugin:pantry"}
+
+    def test_a_component_adds_the_marker_of_its_versions(
+        self, session: DbSession
+    ) -> None:
+        assert assemble(session, ZONE, GAP).markers == ()
+        reference(session, Component, "plugin:pantry")
+
+        assert assemble(session, ZONE, GAP).markers == (
+            Marker(
+                "plugin_pantry_version",
+                "plugin:pantry version",
+                "Where a version of plugin:pantry was first seen",
+                "plugin_pantry_version",
+            ),
+        )
 
     def test_the_sittings_gap_is_the_one_given(self, session: DbSession) -> None:
         catalogue = assemble(session, ZONE, timedelta(minutes=30))

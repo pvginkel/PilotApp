@@ -12,6 +12,8 @@ from app.dashboard.address import AddressService
 from app.dashboard.assembly import CatalogueService
 from app.dashboard.bounds import Bounds
 from app.dashboard.rows import RowsService
+from app.dashboard.series import SeriesService
+from app.dashboard.strip import StripService
 from app.engine.attachments import AttachmentStore, AttachService
 from app.engine.bus import EngineBus
 from app.engine.closed_chats import ClosedChats
@@ -630,6 +632,19 @@ class ServiceContainer(containers.DeclarativeContainer):
     # A view's rows, answered from the record at the query (F154.1)
     rows_service = providers.Factory(
         RowsService,
+        db=db_session,
+        address_service=address_service,
+        bounds=dashboard_bounds,
+    )
+    # A view's series and its events strip (F163.3, F164.6)
+    series_service = providers.Factory(
+        SeriesService,
+        db=db_session,
+        address_service=address_service,
+        bounds=dashboard_bounds,
+    )
+    strip_service = providers.Factory(
+        StripService,
         db=db_session,
         address_service=address_service,
         bounds=dashboard_bounds,

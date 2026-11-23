@@ -1,17 +1,21 @@
 """/api/dashboard/catalogue, what a view of the dashboard may name, a part
 at a call (F154.4), with what the dashboard stores (F155);
 /api/dashboard/address, a view's state checked and written back in its
-normal form (F159); and /api/dashboard/rows, a view's rows (F154.1)."""
+normal form (F159); /api/dashboard/rows, a view's rows (F154.1); and
+/api/dashboard/series and /api/dashboard/series/events, a view's series and
+its events strip (F163.3, F164.6)."""
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import pytest
+from dependency_injector import providers
 from flask.testing import FlaskClient
-from sqlalchemy import text
+from sqlalchemy import Engine, text
 from sqlalchemy.orm import Session as DbSession
 
 from app import models
+from app.dashboard.bounds import Bounds
 from app.dashboard.views import VIEWS
 from app.models import (
     Component,
@@ -23,6 +27,8 @@ from app.models import (
     User,
 )
 from app.models.reference import Origin
+from app.services.container import ServiceContainer
+from tests.support import transcripts
 from tests.support.dashboard import Record, record
 from tests.support.transcripts import OPUS, STARTED, reference
 
@@ -46,7 +52,7 @@ class TestGetCatalogue:
         self, client: FlaskClient
     ) -> None:
         fields = {
-            "dimensions": {"dimensions"},
+            "dimensions": {"dimensions", "markers"},
             "measures": {"facts", "figures", "aggregates", "grains", "ratios"},
             "time": {"ranges", "zone", "sitting_gap_seconds"},
             "stored": {"saved_views", "quick_filters", "custom_ratios"},
@@ -81,8 +87,14 @@ class TestGetCatalogue:
             "next_null": "sitting",
             "base": None,
             "focus": True,
+            "unit": None,
         }
         assert dimensions["session_start"]["base"] == "psession"
+        assert {
+            key: one["unit"]
+            for key, one in dimensions.items()
+            if one["group"] == "time"
+        } == {"qweek": "quota_week", "day": "day", "weekday": None, "hod": None}
         assert [key for key, one in dimensions.items() if one["focus"]] == [
             "project",
             "psession",
@@ -140,6 +152,23 @@ class TestGetCatalogue:
 
         assert dimensions["claude_code_version"]["label"] == "Claude Code version"
         assert dimensions["claude_code_version"]["facts"] == ["call", "event"]
+
+    def test_a_components_version_is_a_kind_of_marker(
+        self, client: FlaskClient, session: DbSession, container: ServiceContainer
+    ) -> None:
+        assert _part(client, "dimensions")["markers"] == []
+        session.add(Component(code="claude-code", name="Claude Code"))
+        session.flush()
+        container.catalogue_service().drop()
+
+        assert _part(client, "dimensions")["markers"] == [
+            {
+                "key": "claude_code_version",
+                "label": "Claude Code version",
+                "line": "Where a version of Claude Code was first seen",
+                "dimension": "claude_code_version",
+            }
+        ]
 
     def test_the_measures(self, client: FlaskClient) -> None:
         body = _part(client, "measures")
@@ -626,3 +655,247 @@ class TestGetRows:
         self, oidc_client: FlaskClient
     ) -> None:
         assert oidc_client.get(ROWS, query_string={"state": ""}).status_code == 401
+
+
+SERIES = "/api/dashboard/series"
+EVENTS = "/api/dashboard/series/events"
+
+
+def _many_calls(db: DbSession, worked: Record) -> None:
+    db.execute(
+        text(
+            """
+            INSERT INTO calls (transcript_id, message_id, position, completed_at,
+                model_code, input_tokens, cache_write_5m_tokens,
+                cache_write_1h_tokens, cache_read_tokens, output_tokens, cost)
+            SELECT :thread, 'msg_many_' || n, 100 + n, :at, :model, 1, 0, 0, 0,
+                1, n * 0.001
+            FROM generate_series(1, 5000) AS n
+            """
+        ),
+        {"thread": worked.thread.id, "at": STARTED, "model": OPUS},
+    )
+
+
+class TestGetSeries:
+    def test_it_answers_the_points_and_the_panels_with_their_address(
+        self, client: FlaskClient, worked: Record
+    ) -> None:
+        response = client.get(
+            SERIES,
+            query_string={
+                "state": "t=all&p=time,day&m=cost.sum&m=cost.max.conversation&rel=1"
+            },
+        )
+
+        assert response.status_code == 200
+        body = response.get_json()
+        assert body["address"] == (
+            "#dash/t=all&by=project&p=time,day&m=cost.sum&m=cost.max.conversation"
+            "&col=none&rel=1"
+        )
+        assert (body["look"], body["notes"]) == (["rel=1"], [])
+        assert (body["zone"], body["window"], body["presentation"]) == (
+            "Europe/Amsterdam",
+            None,
+            "time",
+        )
+        assert body["by"] == {"key": "day", "label": "Day", "group": "time"}
+        assert body["roll"] == {"read": 10, "before": 15}
+        assert body["points"][0] == {
+            "key": "2026-11-12",
+            "label": None,
+            "focus": False,
+            "values": [2.6, 1.75],
+            "n": [5, 2],
+            "split": None,
+            "marks": None,
+            "marked": False,
+            "axis": None,
+            "starts_at": "2026-11-11T23:00:00Z",
+            "ends_at": "2026-11-12T23:00:00Z",
+        }
+        assert body["total_points"] == 2
+        assert body["off_axis"] is None
+        column, items = body["measures"]
+        assert (column["key"], column["kind"], column["band"], column["dots"]) == (
+            "cost.sum",
+            "column",
+            None,
+            None,
+        )
+        assert (items["kind"], items["outliers"], items["before"], items["cut"]) == (
+            "items",
+            [],
+            0,
+            False,
+        )
+        assert items["band"] == [None, None, None]
+        assert items["dots"][0] == {
+            "point": 0,
+            "key": str(worked.thread.id),
+            "label": None,
+            "value": 1.75,
+            "at": "2026-11-12T09:31:00Z",
+            "focus": False,
+        }
+        assert body["markers"] == []
+
+    def test_a_band_and_a_marker_carry_their_numbers_and_times(
+        self, client: FlaskClient, session: DbSession, worked: Record
+    ) -> None:
+        later = transcripts.component_version(session, "claude-code", "2.1.318")
+        start = transcripts.launch(
+            session, worked.loose, started_at=STARTED + timedelta(days=1)
+        )
+        session.add(
+            models.LaunchComponent(
+                launch_id=start.id,
+                component_version_id=later.id,
+                component_code="claude-code",
+            )
+        )
+        worked.calls[4].launch_id = start.id
+        worked.chat.created_at = worked.work.created_at + timedelta(hours=1)
+        session.flush()
+
+        body = client.get(
+            SERIES, query_string={"state": "t=all&by=psession&p=order&roll=1,1"}
+        ).get_json()
+
+        assert body["by"]["key"] == "session_start"
+        assert [point["key"] for point in body["points"]] == [
+            str(worked.work.id),
+            str(worked.chat.id),
+        ]
+        assert body["measures"][0]["band"] == [
+            None,
+            {"first": 1.85, "median": 1.85, "third": 1.85},
+        ]
+        body = client.get(SERIES, query_string={"state": "t=all&p=time,day"}).get_json()
+        assert body["markers"] == [
+            {
+                "kind": "claude_code_version",
+                "value": "2.1.318",
+                "before": "2.1.317",
+                "at": "2026-11-13T09:30:00Z",
+            }
+        ]
+
+    def test_a_view_with_no_series_is_refused_with_its_text(
+        self, client: FlaskClient
+    ) -> None:
+        response = client.get(SERIES, query_string={"state": "t=all&by=project"})
+
+        assert response.status_code == 400
+        body = response.get_json()
+        assert body["code"] == "STATE_REFUSED"
+        assert body["error"].splitlines()[1].startswith("- p=rows: the view draws rows")
+
+    def test_a_view_past_the_engines_bounds_is_refused_with_why(
+        self, client: FlaskClient, session: DbSession, worked: Record
+    ) -> None:
+        _many_calls(session, worked)
+        session.execute(text("SET LOCAL work_mem = '64kB'"))
+        session.execute(text("SET LOCAL temp_file_limit = '64kB'"))
+
+        response = client.get(
+            SERIES, query_string={"state": "t=all&p=time,day&m=cost.median"}
+        )
+
+        assert response.status_code == 409
+        assert response.get_json()["code"] == "QUERY_TEMP_FILE_LIMIT"
+
+    def test_no_state_is_refused(self, client: FlaskClient) -> None:
+        assert client.get(SERIES).status_code == 400
+
+    def test_without_editor_it_is_refused(self, client: FlaskClient) -> None:
+        client.post(
+            "/api/testing/auth/session", json={"subject": "someone", "roles": []}
+        )
+
+        assert client.get(SERIES, query_string={"state": "p=time"}).status_code == 403
+
+    def test_without_a_token_it_is_unauthenticated(
+        self, oidc_client: FlaskClient
+    ) -> None:
+        assert (
+            oidc_client.get(SERIES, query_string={"state": "p=time"}).status_code == 401
+        )
+
+
+class TestGetSeriesEvents:
+    def test_it_answers_each_points_events_by_kind(
+        self, client: FlaskClient, worked: Record
+    ) -> None:
+        response = client.get(
+            EVENTS, query_string={"state": "t=all&p=time,day&ev=-cache_miss"}
+        )
+
+        assert response.status_code == 200
+        body = response.get_json()
+        assert body["address"] == (
+            "#dash/t=all&by=project&p=time,day&m=cost.sum&col=none&ev=-cache_miss"
+        )
+        assert (body["look"], body["notes"]) == (["ev=-cache_miss"], [])
+        assert body["by"] == {"key": "day", "label": "Day", "group": "time"}
+        assert body["kinds"][0] == {
+            "key": "api_error",
+            "label": "api_error",
+            "is_error": True,
+            "total": 1,
+        }
+        assert [kind["is_error"] for kind in body["kinds"]] == [True] * 4 + [False] * 6
+        assert body["buckets"] == [
+            {"key": "2026-11-12", "counts": [1] * 10, "errors": 4}
+        ]
+        assert body["refused"] is None
+        assert (body["zone"], body["window"]) == ("Europe/Amsterdam", None)
+
+    def test_a_view_with_no_series_is_refused_with_its_text(
+        self, client: FlaskClient
+    ) -> None:
+        response = client.get(EVENTS, query_string={"state": "p=lanes&by=call"})
+
+        assert response.status_code == 400
+        assert response.get_json()["code"] == "STATE_REFUSED"
+
+    def test_a_strip_past_the_engines_bounds_is_refused_with_why(
+        self,
+        client: FlaskClient,
+        container: ServiceContainer,
+        session: DbSession,
+        worked: Record,
+    ) -> None:
+        bounds = Bounds(timeout_seconds=0.2, at_once=1, pool=5)
+        bind = session.get_bind()
+        assert not isinstance(bind, Engine)
+        other = DbSession(bind=bind.engine)
+        try:
+            with (
+                container.dashboard_bounds.override(providers.Object(bounds)),
+                bounds.read(other),
+            ):
+                response = client.get(EVENTS, query_string={"state": "p=time"})
+        finally:
+            other.close()
+
+        assert response.status_code == 409
+        assert response.get_json()["code"] == "QUERY_BUSY"
+
+    def test_no_state_is_refused(self, client: FlaskClient) -> None:
+        assert client.get(EVENTS).status_code == 400
+
+    def test_without_editor_it_is_refused(self, client: FlaskClient) -> None:
+        client.post(
+            "/api/testing/auth/session", json={"subject": "someone", "roles": []}
+        )
+
+        assert client.get(EVENTS, query_string={"state": "p=time"}).status_code == 403
+
+    def test_without_a_token_it_is_unauthenticated(
+        self, oidc_client: FlaskClient
+    ) -> None:
+        assert (
+            oidc_client.get(EVENTS, query_string={"state": "p=time"}).status_code == 401
+        )

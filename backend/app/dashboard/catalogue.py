@@ -17,6 +17,8 @@ source gave it, so a source that declares more adds rows and no shape.
 - A **figure** is a number of one fact's row; a view's measure is a figure
   under an aggregate at a grain. A **grain** is any part, or a fact's own row.
 - A **ratio** is two measures, each as a view's state writes it.
+- A **marker** is a kind of line a series draws where a dimension's value
+  was first seen.
 
 From the stored configuration come the custom ratios, among the ratios, and
 the quick filters, each offered where what it names reads.
@@ -161,6 +163,10 @@ class Dimension:
     focus: bool = False
     """A part's alone: whether a view is opened on one of its values, the
     piece of work a state's `f=` names."""
+    unit: Literal["day", "quota_week"] | None = None
+    """A time dimension's alone: the span of time one of its values is, a
+    day in the zone or a quota week; none where its values come round
+    again, as the weekday and the hour do, and no time falls on one."""
 
 
 @dataclass(frozen=True)
@@ -241,6 +247,17 @@ class QuickFilter:
 
 
 @dataclass(frozen=True)
+class Marker:
+    """A kind of marker a series draws: a line where a value of `dimension`
+    was first seen, each value after the first, under the view's scope."""
+
+    key: str
+    label: str
+    line: str
+    dimension: str
+
+
+@dataclass(frozen=True)
 class TimeRange:
     """A time range a view's state names by a key: the last `count` of
     `unit`, the running one included, ending `back` of them before it; no
@@ -275,6 +292,7 @@ class Catalogue:
     ratios: tuple[Ratio, ...]
     ranges: tuple[TimeRange, ...]
     quick_filters: tuple[QuickFilter, ...] = ()
+    markers: tuple[Marker, ...] = ()
     _joins: Mapping[str, Join] = field(init=False, repr=False, compare=False)
     _offered: Mapping[str, tuple[str, ...]] = field(
         init=False, repr=False, compare=False
@@ -290,6 +308,7 @@ class Catalogue:
             ("ratio", self.ratios),
             ("time range", self.ranges),
             ("quick filter", self.quick_filters),
+            ("marker", self.markers),
         ):
             keys = [entry.key for entry in entries]
             twice = sorted({key for key in keys if keys.count(key) > 1})

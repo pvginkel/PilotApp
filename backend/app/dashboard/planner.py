@@ -44,6 +44,7 @@ from zoneinfo import ZoneInfo
 from app.dashboard.address import fixed
 from app.dashboard.catalogue import Catalogue
 from app.dashboard.reading import read_chip, read_simple
+from app.dashboard.refusal import Fault, refused
 from app.dashboard.state import (
     Between,
     Bound,
@@ -255,6 +256,55 @@ def plan(
         thresholds=tuple(thresholds),
         outliers=outliers,
     )
+
+
+def series_plan(
+    state: State, catalogue: Catalogue, weeks: Sequence[Period], now: datetime
+) -> Plan:
+    """The plan of a view's series, or its events strip: its rows by the
+    dimension it asks (`asked`), the state's presentation one with a series
+    (`presentation`)."""
+    presentation(state)
+    return plan(replace(state, by=asked(state, catalogue)), catalogue, weeks, now)
+
+
+def presentation(state: State) -> Literal["order", "time"]:
+    """The view's presentation, where it has a series; a refusal naming its
+    `p` where it does not."""
+    if state.presentation == "order" or state.presentation == "time":
+        return state.presentation
+    raise refused(
+        [
+            Fault(
+                part=f"p={state.presentation}",
+                kind="p",
+                wrong=f"{_DRAWN[state.presentation]}, and only a view in order "
+                "or over time has a series",
+                allowed="A series takes p=order[,<order dimension>] or p=time,<grain>",
+            )
+        ]
+    )
+
+
+_DRAWN = {
+    "rows": "the view draws rows",
+    "lanes": "the view draws lanes",
+    "table": "the view draws a table",
+}
+
+
+def asked(state: State, catalogue: Catalogue) -> str:
+    """The dimension a view asks its rows by: in order its order dimension,
+    over time its grain, else the By."""
+    if state.presentation == "time" and state.axis is not None:
+        return state.axis
+    if state.presentation == "order":
+        return state.axis or next(
+            dimension.key
+            for dimension in catalogue.dimensions
+            if dimension.group == "order" and dimension.base == state.by
+        )
+    return state.by
 
 
 def _quick_filters(
