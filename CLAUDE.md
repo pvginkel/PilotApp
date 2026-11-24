@@ -155,9 +155,9 @@ plugins, which `frontend/vite.config.ts` appends from `loadAppPlugins()` in the 
 the template gives an app no place for a plugin; the Playwright backends' own settings, which
 `frontend/tests/support/process/servers.ts` merges over the template's from `loadAppBackendEnv()`
 in the app-owned `frontend/tests/support/backend-env-extensions.ts`, given the backend's URL, where
-the template gives an app no place for a backend setting under Playwright: this app's points each
-backend's controller at the fake it serves itself, and its chats at a store environment in that
-fake, and its collector at the fake collector it serves itself, and gives each backend a VAPID key of its own, minted at its start, and holds its waits'
+the template gives an app no place for a backend setting under Playwright: this app's runs each
+backend in a local stage, whatever the run's own, points its controller at the fake it serves
+itself, and its chats at a store environment in that fake, and its collector at the fake collector it serves itself, and gives each backend a VAPID key of its own, minted at its start, and holds its waits'
 batcher off for a day; the Playwright run's own setup, which `frontend/tests/support/global-setup.ts`
 runs from `loadAppGlobalSetup()` in the app-owned `frontend/tests/support/global-setup-extensions.ts`
 in the runner's process, before it seeds the run's database, where the template gives an app no

@@ -61,23 +61,43 @@ Every verb below runs from the repo root, because `kc project` is cwd-bound.
 
 ## 1. The suites
 
+The gate is three verbs, from the root of every repo the slice touched, each where it declares
+them, and all three must be green:
+
 ```bash
 kc project build
 kc project test
 kc project lint
 ```
 
-All three must be green. No gate is known red, so a failure is this slice's. A `kc project` verb
-prints its output only on failure, so read its exit code directly and never through a pipe.
+**The driver's run is this phase's own** (D281). Just before each round of this phase the driver
+runs the gate on the merged tree, every component's verbs one by one, and its dispatch names each
+row GREEN or RED. Nothing here runs a green row again to confirm it. No gate is known red, so a RED
+row is this slice's failure, a finding. The counts come from that run's logs, so that a suite that
+collected nothing is not taken for a green one: one a row in the slice folder's `sweeps/r<N>/`,
+`<Repo>_<component>_<verb>.log`, or, for a row the driver took from a phase's gate on the same
+tree, the gate's log the row names (`phases/<P>/gate_r<N>.log`). A test log ends on its suite's
+count: the backend's and the collector's `N passed in …`, Playwright's `N skipped` and
+`N passed (…)`, and the sidecar's a line per package, `ok`, or `?` for `cmd/pilot-sync`, which has
+no tests. A row that says `nothing ran` found nothing to run and counts nothing. A repo of the slice
+the dispatch names no row of has its verbs run here, from its root.
 
-`kc project test` prints one `[ OK ]` per suite and no counts. Run the suites once directly and read
-the counts, so that a suite that collected nothing is not taken for a green one. The sidecar's
-suite prints a line per package: `ok`, or `?` for `cmd/pilot-sync`, which has no tests.
+**After a rebase** ([§3](#3-push-and-confirm-the-rollout), step 3) the tree is one nothing has run
+against, and this phase runs the gate itself: the build and lint verbs, and each suite once,
+directly, at its verb's settings, its counts read from that run (D279). The backend runs on eight
+processes, Playwright at four workers on the test-mode build ([`ui.md`](ui.md#testing-it)), the
+collector and the sidecar as their verbs run them. A `kc project` verb prints its output only on
+failure, so read its exit code directly and never through a pipe; a direct run writes its output
+to a file under `tmp/` and has its exit code read beside it:
 
 ```bash
-cexec modern-app sh -c 'cd backend && uv run pytest -q' 2>&1 | tail -1
-cexec modern-app sh -c 'cd frontend && pnpm playwright test' 2>&1 | tail -3
-cexec go sh -c 'cd sidecar && go test -race ./...'
+kc project build
+kc project lint
+mkdir -p tmp/suites
+cexec modern-app sh -c 'cd backend && uv run pytest -n 8' > tmp/suites/backend.log 2>&1; echo "exit $?"; tail -1 tmp/suites/backend.log
+cexec modern-app sh -c 'cd collector && uv run pytest' > tmp/suites/collector.log 2>&1; echo "exit $?"; tail -1 tmp/suites/collector.log
+cexec modern-app sh -c 'cd frontend && VITE_TEST_MODE=true pnpm build-fast && PLAYWRIGHT_PREVIEW_MODE=true pnpm playwright test --workers=4' > tmp/suites/frontend.log 2>&1; echo "exit $?"; tail -4 tmp/suites/frontend.log
+cexec go sh -c 'cd sidecar && go test -race ./...'; echo "exit $?"
 ```
 
 Both suites run in the detect-flakes mode in every run a session makes, a targeted one included
@@ -100,10 +120,11 @@ suite's output names the flaky tests apart from the failed:
 A Playwright run takes the test suite lock first: one run at a time across the project's
 environments, which share one node (`frontend/tests/support/test-suite-lock.ts`). A backend run on
 xdist's workers, as `kc project test` runs it, takes the same lock before its workers start and
-holds it until it ends (`backend/tests/support/suite_lock.py`, D152); a run on one process, the
-count's above or a targeted `uv run pytest`, takes none. So `kc project test` takes the lock twice,
-once per suite. Each run waits for it without a bound, saying whose run holds it, so a run can take
-its suite's time and another's: size the command's timeout for both, up to the Bash tool's hour.
+holds it until it ends (`backend/tests/support/suite_lock.py`, D152); a run on one process, a
+targeted `uv run pytest`, takes none. So `kc project test` takes the lock twice, once per suite, and
+so do the direct runs after a rebase. Each run waits for it without a bound, saying whose run holds
+it, so a run can take its suite's time and another's: size the command's timeout for both, up to
+the Bash tool's hour.
 On taking it, each run says how long it waited, in the same words in both suites and `0 s`
 included, so that a run's time splits into the wait for the lock and the run:
 `🔒 Holding the test suite lock after waiting 3 min 12 s (<file>)`.
@@ -166,10 +187,9 @@ The load is the other half: the slow line appears where the node is loaded, so r
 suite or another environment's run, and read the line next to the failing test's name in the
 console. The worker databases of a run are dropped when it ends.
 
-Then the same verbs from the root of every other repo the slice touched, each where it declares
-them: `../PilotDeploy`, whose `test` reads `../PilotApp/docs/architecture/architecture.yaml` and so
-needs this checkout beside it, and a registry repo the slice changed in `/work/scratch/`
-(ArgoCDDeploy, Architecture).
+The other repos the gate covers are `../PilotDeploy`, whose `test` reads
+`../PilotApp/docs/architecture/architecture.yaml` and so needs this checkout beside it, and a
+registry repo the slice changed in `/work/scratch/` (ArgoCDDeploy, Architecture).
 
 ## 2. The local live check
 
@@ -596,8 +616,9 @@ honouring any repo named in `plan.md`'s `## Push holds`, in an order that holds:
    one ran (`git fetch -q && git status -sb` reads `ahead <n>, behind <m>`). Then `dev:rebase-agent`
    rebases `main` onto `origin/main`, renumbers the slice's alembic revisions after origin's head
    (`backend/alembic/versions/`: the file's number, its `revision`, its `Revises:` and
-   `down_revision`, the first of them revising origin's head), and runs the gate of
-   [§1](#1-the-suites) again before the push. A revision clash is then no push blocker.
+   `down_revision`, the first of them revising origin's head), and runs the gate as
+   [§1](#1-the-suites) runs it after a rebase, before the push. A revision clash is then no push
+   blocker.
 4. **A registry entry only once what it names exists.** A producer's entry in Architecture's
    `pipeline-producers.yaml` once its `AaC/<Repo>` job has a green build: a registered producer
    with no artifact fails `AaC/Architecture`'s collector. A stage of Pilot's in ArgoCDDeploy's

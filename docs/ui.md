@@ -568,6 +568,21 @@ sync's `/api/sync/files/*.json` among them. Both are standing edits of the templ
 
 ## Testing it
 
+A whole run of the frontend suite is on one production build in test mode (D278). The frontend test
+verb builds it with `VITE_TEST_MODE=true pnpm build-fast`, the lint verb running the check `pnpm
+build` adds, and `run-suite`, CI's entry point, with `VITE_TEST_MODE=true pnpm build`, its check
+included; then each runs the suite once on it under `PLAYWRIGHT_PREVIEW_MODE=true`, the whole suite,
+or for `run-suite` the selection `--frontend-args` gives it, its report `frontend.xml`. Under that
+setting each worker's frontend is `vite preview` on `dist/` (`frontend/scripts/testing-server.sh`),
+which refuses a `dist/` without the Playwright bridges that `VITE_TEST_MODE` puts into the bundle;
+the image's own build stays plain. The verb is one statement, so that a failed build runs no test on
+the `dist/` an earlier build left. A direct `pnpm playwright test`, as on one spec, stays on the
+Vite dev server and builds nothing. The build is the lighter load: at four workers a run peaks at
+4.0 to 4.3 GiB on it, at 6.0 to 6.3 on the dev servers. What the dev server alone shows, a direct
+run alone sees: React's StrictMode is inert in the build, so its development warnings never reach a
+spec's console check, and `tests/infrastructure/dev-server.spec.ts` skips on the preview. A test
+that needs the build, the SharedWorker's, carries the `@preview` tag and skips on the dev server.
+
 The frontend suite's fixtures (`frontend/tests/support/fixtures.ts`):
 
 - `people`: `signIn({name?, handle?, subject?})` signs in a person with a handle, chosen through
@@ -599,7 +614,7 @@ The frontend suite's fixtures (`frontend/tests/support/fixtures.ts`):
   the streams that are open send nothing too, their heartbeat included, as a connection that died
   without saying so, through `POST /api/testing/sse/outage` (`?silent=true`), which
   `DELETE /api/testing/sse/outage` ends after the spec ([`sign-in.md`](sign-in.md)); `tests/shell/connection.spec.ts` pins the tint, its
-  SharedWorker cases under the `@preview` tag, which run-suite's preview pass runs. A spec that
+  SharedWorker cases under the `@preview` tag, which run on the build alone. A spec that
   holds a request for more than 8 s tints the page, and a press under the tint lands on it.
 - `DrawnBar` and `expectDrawnBar` (`tests/support/scroll-bar.ts`) read a pane's drawn scrollbar,
   `tests/shell/scrollbar.spec.ts` pinning it; a popover's scroll is read in its body,

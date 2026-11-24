@@ -37,7 +37,8 @@ number):
 A push to PilotApp's `main` starts two Jenkins jobs, each triggered by GitHub's push hook:
 
 - **`PilotApp/Build-Main`** runs the `Jenkinsfile`: the backend and frontend suites through the
-  pipeline library's `modernApp.test`, then `Test sidecar`, `go vet` and `go test -race` of
+  pipeline library's `modernApp.test`, the frontend's once on a test-mode build under `vite preview`
+  ([`ui.md`](ui.md#testing-it)), then `Test sidecar`, `go vet` and `go test -race` of
   `sidecar/` in a `golang` container on the image this environment's `go` tool runs, and `Test
   collector`, the collector's tests in the pod's `modern-app-toolchain` container, the validation
   Job's image ([`collector.md`](collector.md#testing-it)). A red collector test fails that stage
@@ -73,8 +74,12 @@ action's paste-back are, and never a console's; no write on its way; and no fiel
 but as the tab comes back into view. It looks at once, every second after, and on
 `visibilitychange`, and while it waits the page reports why, the ui state `deployment.reload`
 `loading`, its `metadata.held` `words`, `write` or `focus`
-(`contexts/deployment-context-provider.tsx`). `tests/shell/new-version.spec.ts` pins it, and the
-template's banner spec skips under `reload`.
+(`contexts/deployment-context-provider.tsx`). Outside a local stage the backend also sends a page,
+at each connect of its stream, the version the frontend's `/version.json` names
+(`backend/app/services/frontend_version_service.py`), and a build under `vite preview` names its
+commit there; so every Playwright backend runs a local stage, `local-tst`, whatever the run's own,
+CI's `STAGE=tst` included (`loadAppBackendEnv()`), and a page takes the version a spec posts.
+`tests/shell/new-version.spec.ts` pins it, and the template's banner spec skips under `reload`.
 
 ## How a change gets to production
 

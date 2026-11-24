@@ -594,6 +594,11 @@ answers only in testing mode ([`sign-in.md`](sign-in.md)).
   open notices. A finished project with auto pilot on, a paused project that is not open, a member
   named twice, open items without an environment and a plan with a fault are each a `400`; a handle
   that is no person's, `agent` included, and an unknown environment a `404`.
+- `POST /api/testing/projects/archive`, no body, archives every project the list shows in one
+  statement and answers `200` `{projects}`, their ids; `POST /api/testing/projects/bring-back`
+  `{projects}` lists those projects again and answers `204`, an id that names no project a `404`
+  with none brought back. Both set and clear the flag alone: no transition is written and none of
+  Archive's or Bring back's effects run, so a project brought back is exactly as it was.
 - `POST /api/testing/projects/<id>/work` `{repo | environment, title, brief, cwd, step?, claims?,
   researches?}` places a work item by the repository `repo`, `owner/Name`, or in the environment
   `environment` by name, exactly one of them, else a `400`, its session to run in `cwd`, and starts
@@ -748,7 +753,7 @@ journal or the project document that changes its text or takes it for the sessio
 document it lets go. The frontend suite's `projects` fixture (`frontend/tests/support/projects.ts`)
 wraps them (`make`, `makeWithSession`, `makeDraft`, which answers `{id, folder}`, `place`, `save`,
 `saveProjectDocument`, `endTurn`, `doneByPilot`, `attach`, `attachToDraft`, `draft`, `register`,
-`workerAttach`, `askWriter`, `clarify`, `note`, `alert`, `writeNotable`, `list`, `seeded`, `head`, `transition`, `sightings`, `loadScenario`, the item writes of
+`workerAttach`, `askWriter`, `clarify`, `note`, `alert`, `writeNotable`, `list`, `seeded`, `head`, `transition`, `archiveListed`, `bringBack`, `sightings`, `loadScenario`, the item writes of
 [`timeline.md`](timeline.md), and the work item's of [`work.md`](work.md)), and the page objects
 `projectList` and `projectHead` drive the screens, a spec building a project's URLs with
 `projectAddress(id)`, the folder the testing route answered (a draft created since is at its slug,
@@ -775,4 +780,8 @@ tabs in `phone-tabs.spec.ts`, its views and Back in `phone-views.spec.ts`, and i
 project's address reached by `page.goto` has the home under it, so that Back from its Timeline is
 `/`. Each Playwright
 worker's database is a clone of the dev seed ([`record.md`](record.md)), so every spec's list holds
-the seed's projects beside its own.
+the seed's projects beside its own, and, since no worker's database is reset, those of every spec
+the worker ran before it. A spec that needs the list empty, as "No projects yet" in
+`project-list.spec.ts`, archives them with `archiveListed()` and brings them back with
+`bringBack(ids)` after, one call each way whatever ran before it, so that its time does not grow
+with the tests before it (D280).
