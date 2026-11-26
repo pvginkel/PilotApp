@@ -7,14 +7,21 @@ export const dashboardAddress = (state: string, tab = 't1') => `#dash/${tab}/${s
  * The dashboard (F160), the second screen beside Projects: its screen, and the reads of its module,
  * which the page loads at its first opening (F160.2); the line of view tabs, Close all and the new
  * view's copy-plus (F161.2); the new tab's panel, its find, Start from scratch and its two lists of
- * views (F161.4); the global toolbar and the one view's tab at its left, the banner under it, the
- * main area, which scrolls, and the view's card: the legend, the
+ * views (F161.4); the global toolbar, the one view's tab at its left, Reset and Save view, its pane
+ * asking a name (F161.5), the banner under it, the main area, which scrolls, and the view's card:
+ * the legend, the
  * headings' row, the All row and a row per value of the By, each its label, its time where it has
  * one, and a figure per measure; the medians, and the cut past 40 rows.
  */
 export class DashboardPage {
   readonly screen: Locator;
   readonly toolbar: Locator;
+  readonly reset: Locator;
+  readonly saveView: Locator;
+  readonly savePane: Locator;
+  readonly saveName: Locator;
+  readonly saveNote: Locator;
+  readonly save: Locator;
   readonly tab: Locator;
   readonly tabClose: Locator;
   readonly line: Locator;
@@ -50,6 +57,12 @@ export class DashboardPage {
   constructor(private readonly page: Page) {
     this.screen = page.getByTestId('dashboard');
     this.toolbar = page.getByTestId('dashboard.toolbar');
+    this.reset = page.getByTestId('dashboard.reset');
+    this.saveView = page.getByTestId('dashboard.save-view');
+    this.savePane = page.getByTestId('dashboard.save');
+    this.saveName = page.getByTestId('dashboard.save.name');
+    this.saveNote = page.getByTestId('dashboard.save.note');
+    this.save = page.getByTestId('dashboard.save.save');
     this.tab = page.getByTestId('dashboard.tab');
     this.tabClose = page.getByTestId('dashboard.tab.close');
     this.line = page.getByTestId('dashboard.tabs');
@@ -149,9 +162,30 @@ export class DashboardPage {
     return this.reads('/api/dashboard/address');
   }
 
-  /** The page's address moved to `hash` in place, as a link in the page moves it. */
+  /**
+   * The tab `hash` names moved to the state it names, a new entry, as the dashboard's own moves
+   * write one (F160.4): its entry carries in the history's state the tab's id, and the saved view
+   * and the state it opened with that the entry before held of the same tab.
+   */
   async go(hash: string): Promise<void> {
+    await this.page.evaluate((to) => {
+      const tab = /^#dash\/([^/=]+)\//.exec(to)?.[1];
+      const was = (history.state as { dash?: { tab: string; view: unknown; opened: unknown } } | null)?.dash;
+      const kept = was !== undefined && was.tab === tab ? was : { view: null, opened: null };
+      history.pushState({ dash: { tab, view: kept.view, opened: kept.opened } }, '', to);
+    }, hash);
+  }
+
+  /** The page's address moved to `hash`, as a link from outside the dashboard moves it: typed, or followed. */
+  async follow(hash: string): Promise<void> {
     await this.page.evaluate((to) => (location.hash = to), hash);
+  }
+
+  /** The tabs the browser keeps, each its id and its state now, in the order opened. */
+  keptTabs(): Promise<{ id: string; now: string | null }[]> {
+    return this.page.evaluate(() =>
+      (JSON.parse(localStorage.getItem('pilot') ?? '{}').viewTabs?.tabs ?? []).map((each: { id: string; now: string | null }) => ({ id: each.id, now: each.now })),
+    );
   }
 
   /** The main area's scroll. */

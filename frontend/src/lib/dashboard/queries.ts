@@ -18,6 +18,7 @@ import { toApiError } from '@/lib/api/api-error';
 import { api } from '@/lib/api/client';
 import type { components } from '@/lib/api/generated/types';
 import type { Rows } from './rows-layout';
+import { lookOf, readState } from './state';
 
 type Address = components['schemas']['AddressResponseSchema.b67cf98'];
 export type Catalogue = components['schemas']['CatalogueResponseSchema.b67cf98'];
@@ -52,6 +53,12 @@ export function addressQuery(queryClient: QueryClient, written: string) {
     },
     staleTime: Infinity,
   });
+}
+
+/** `address`, a normal form the server wrote, known as its own, so that the page asks nothing of it. */
+export function knowNormal(queryClient: QueryClient, address: string): void {
+  const normal = stateOf(address);
+  queryClient.setQueryData<Address>([ADDRESS, normal], { address, look: lookOf(readState(normal)), notes: [] });
 }
 
 /** A view's rows, `key` its state in its normal form without its look-only parts. */

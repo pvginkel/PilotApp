@@ -7,16 +7,23 @@
  * which `#dash` shows, and closing the tab showing goes back by it (F28.8).
  *
  * The address names the tab at hand and its state (`address.ts`), and the tabs follow it
- * (`useViewTabsAt`): a tab the address names takes the state it names; one it names that is not
- * open, or a state it names with no tab, opens a tab of its own, which the address is written back
- * in place to name. A move of the person's (`moves`) writes the address it leads to.
+ * (`useViewTabsAt`). An entry the dashboard writes is its own: it carries its tab's id, the saved
+ * view the tab is of and the state it opened with in the history's state (`DashEntry`). Back and
+ * Forward to an entry of its own move its tab's state alone, the tab keeping its name and what Reset
+ * goes back to; a closed tab's entry opens it again as it was (F160.4). Any other entry is a link,
+ * opened cold, typed, or a reply's: it shows the tab already showing its state, in the server's
+ * normal form, else a tab of its own, never another state in a tab that is open, and the address is
+ * written back in place to name the tab (F161.3). A move of the person's (`moves`) writes the address
+ * it leads to: a new entry, but for a close and what replaces the entry (F160.4).
  */
 
 import { useLayoutEffect, useSyncExternalStore } from 'react';
+import { useQueryClient, type QueryClient } from '@tanstack/react-query';
 import { useRouter, useRouterState } from '@tanstack/react-router';
 import { browserState, rememberViewTabs, type KeptViewTab, type KeptViewTabs } from '@/lib/browser-state';
 import { placeOf } from '@/lib/dashboard/address';
-import { DASH, hashOf } from '@/lib/screens';
+import { addressQuery, stateOf } from '@/lib/dashboard/queries';
+import { DASH, hashOf, screenOf } from '@/lib/screens';
 
 export type ViewTab = KeptViewTab;
 
@@ -24,6 +31,20 @@ export type ViewTab = KeptViewTab;
 interface OpenedView {
   id: string;
   name: string;
+}
+
+/** What an entry of the dashboard's own carries of its tab: its id, the saved view it is of, the state it opened with. */
+interface DashEntry {
+  tab: string;
+  view: OpenedView | null;
+  opened: string | null;
+}
+
+declare module '@tanstack/react-router' {
+  interface HistoryState {
+    /** The entry is the dashboard's own, of this tab (F160.4). */
+    dash?: DashEntry;
+  }
 }
 
 /** The barest view that draws: this quota week, by project, cost alone (`backend/dashboard-states/states.json`). */
@@ -55,8 +76,8 @@ function newId(): string {
 }
 
 /** A tab opened last in the line and brought to the front: on the panel, or on `now`; `id` taken where it is free. */
-function add(id: string | null, now: string | null): ViewTab {
-  const tab: ViewTab = { id: id !== null && TAB_ID.test(id) && tabOf(id) === null ? id : newId(), view: null, opened: now, now, scroll: 0 };
+function add(id: string | null, now: string | null, view: OpenedView | null = null, opened: string | null = now): ViewTab {
+  const tab: ViewTab = { id: id !== null && TAB_ID.test(id) && tabOf(id) === null ? id : newId(), view, opened, now, scroll: 0 };
   write({ tabs: [...kept.tabs, tab], seen: [tab.id, ...kept.seen] });
   return tab;
 }
@@ -72,6 +93,19 @@ function bring(id: string): void {
 /** The address of `tab`, `#dash/<id>`, its state after it where it has one. */
 const addressOf = (tab: ViewTab) => `${DASH}/${tab.id}${tab.now === null ? '' : `/${tab.now}`}`;
 
+/** The history's state of an entry of `tab`'s own, with none of the app's. */
+const entryOf = (tab: ViewTab) => ({ dash: { tab: tab.id, view: tab.view, opened: tab.opened } });
+
+/** An href without its hash. */
+const pathOf = (href: string) => href.slice(0, href.length - hashOf(href).length);
+
+/** The normal form of `written`, a state as an address carries it; none where the server refuses it. */
+const normalOf = (queryClient: QueryClient, written: string) =>
+  queryClient.fetchQuery(addressQuery(queryClient, written)).then(
+    (answer) => stateOf(answer.address),
+    () => null,
+  );
+
 /** The tabs, and the one at hand: the first in the order they showed, none before the first opening. */
 export function useViewTabs(): { tabs: readonly ViewTab[]; at: ViewTab | null } {
   const now = useSyncExternalStore(subscribe, () => kept);
@@ -79,31 +113,62 @@ export function useViewTabs(): { tabs: readonly ViewTab[]; at: ViewTab | null } 
 }
 
 /**
- * The address taken by the tabs while the dashboard shows; written back in place where it names no
- * tab of its own. It is read off the history as the effect runs, not as the render saw it:
- * StrictMode runs a mounting effect twice over one render, and the second run finds the address
- * the first wrote back.
+ * The address taken by the tabs while the dashboard shows. It is read off the history as the effect
+ * runs, not as the render saw it: StrictMode runs a mounting effect twice over one render, and the
+ * second run finds the address the first wrote back. A link's normal forms, where the page has not
+ * read them, are asked first; a newer address drops the answer.
  */
 export function useViewTabsAt(shown: boolean): void {
   const router = useRouter();
+  const queryClient = useQueryClient();
   const href = useRouterState({ select: (state) => state.location.href });
   useLayoutEffect(() => {
-    if (!shown) return;
+    if (!shown) return undefined;
     const { href: at, state } = router.history.location;
     const place = placeOf(hashOf(at));
-    const named = place.tab === null ? null : tabOf(place.tab);
-    if (named !== null) {
-      if (named.now !== place.state) change(named.id, { now: place.state, opened: named.opened ?? place.state });
-      bring(named.id);
-      return;
-    }
     if (place.tab === null && place.state === null) {
       if (kept.seen.length === 0) add(null, null);
-      return;
+      return undefined;
     }
-    const tab = add(place.tab, place.state);
-    if (tab.id !== place.tab) router.history.replace(at.slice(0, at.length - hashOf(at).length) + addressOf(tab), state);
-  }, [shown, href, router]);
+    const named = place.tab === null ? null : tabOf(place.tab);
+    const own = place.tab !== null && state.dash?.tab === place.tab ? state.dash : undefined;
+    if (own !== undefined) {
+      if (named === null) add(place.tab, place.state, own.view, own.opened ?? place.state);
+      else {
+        if (named.now !== place.state) change(named.id, { now: place.state, opened: named.opened ?? place.state });
+        bring(named.id);
+      }
+      return undefined;
+    }
+    /** The link's entry, in place, the tab's own. */
+    const take = (tab: ViewTab) => {
+      bring(tab.id);
+      router.history.replace(pathOf(at) + addressOf(tab), entryOf(tab));
+    };
+    const wanted = place.state;
+    if (wanted === null) {
+      take(named ?? add(place.tab, null));
+      return undefined;
+    }
+    // The tab named first, of those that show the link's state.
+    const first = (tabs: readonly ViewTab[]) => tabs.find((tab) => tab.id === place.tab) ?? tabs[0];
+    const showing = kept.tabs.filter((tab) => tab.now !== null);
+    const same = first(showing.filter((tab) => tab.now === wanted));
+    if (same !== undefined || showing.length === 0) {
+      take(same ?? add(place.tab, wanted));
+      return undefined;
+    }
+    let live = true;
+    void Promise.all([wanted, ...showing.map((tab) => tab.now!)].map((written) => normalOf(queryClient, written))).then(([normal, ...forms]) => {
+      if (!live) return;
+      // A tab closed or moved meanwhile is no longer showing what was asked of it.
+      const hits = showing.filter((tab, index) => normal !== null && forms[index] === normal && tabOf(tab.id)?.now === tab.now);
+      take(first(hits) ?? add(place.tab, wanted));
+    });
+    return () => {
+      live = false;
+    };
+  }, [shown, href, router, queryClient]);
 }
 
 /** Where the main area of the tab `id` was scrolled to. */
@@ -125,10 +190,9 @@ export function viewRenamed(id: string, name: string): void {
 export function useViewTabMoves() {
   const router = useRouter();
   const go = (tab: ViewTab, replace = false) => {
-    const href = router.history.location.href;
-    const to = href.slice(0, href.length - hashOf(href).length) + addressOf(tab);
-    if (replace) router.history.replace(to, router.history.location.state);
-    else router.history.push(to, {});
+    const to = pathOf(router.history.location.href) + addressOf(tab);
+    if (replace) router.history.replace(to, entryOf(tab));
+    else router.history.push(to, entryOf(tab));
   };
   /** The tab that shows after `gone` closed, the one that showed before it; a new one on the panel where none is left. */
   const after = (gone: readonly string[]): ViewTab => {
@@ -137,6 +201,11 @@ export function useViewTabMoves() {
     write({ tabs: left, seen });
     const back = seen[0];
     return back === undefined ? add(null, null) : tabOf(back)!;
+  };
+  /** The tab at hand, `id`, on the state `now`: a new entry, or the entry in place where `replace`, a selection's and a look's (F160.4). */
+  const set = (id: string, now: string, replace = false) => {
+    change(id, { now });
+    go(tabOf(id)!, replace);
   };
   return {
     /** Another tab brought to the front, as it was left. */
@@ -150,6 +219,20 @@ export function useViewTabMoves() {
     openView: (id: string, view: OpenedView | null, state: string) => {
       change(id, { view, opened: state, now: state, scroll: 0 });
       go(tabOf(id)!);
+    },
+    set,
+    /** The tab `id` back to what it opened with (F161.5). */
+    reset: (id: string) => set(id, tabOf(id)!.opened!),
+    /**
+     * The tab `id` saved as `view`, which holds `opened`: its name and what Reset goes back to. Its
+     * entry takes them in place, where the address still names it.
+     */
+    saved: (id: string, view: OpenedView, opened: string) => {
+      if (tabOf(id) === null) return;
+      change(id, { view, opened });
+      const { href } = router.history.location;
+      const hash = hashOf(href);
+      if (screenOf(hash) === 'dashboard' && placeOf(hash).tab === id) router.history.replace(href, entryOf(tabOf(id)!));
     },
     close: (id: string) => {
       if (kept.seen[0] !== id) {

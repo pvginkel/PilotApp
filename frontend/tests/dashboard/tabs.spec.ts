@@ -54,10 +54,6 @@ const lineTab = (dashboard: DashboardPage, name: string) => dashboard.lineTab(na
 /** Opens the view named `name` from a list of the panel. */
 const open = (dashboard: DashboardPage, list: Locator, name: string) => dashboard.view(list, name).getByTestId('dashboard.panel.view.open').click();
 
-/** The tabs the browser keeps, each its id and its state now. */
-const keptTabs = (page: Page) =>
-  page.evaluate(() => (JSON.parse(localStorage.getItem('pilot') ?? '{}').viewTabs?.tabs ?? []).map((each: { id: string; now: string | null }) => ({ id: each.id, now: each.now })));
-
 /** Where the browser keeps the tab `id`'s scroll. */
 const keptScroll = (page: Page, id: string) =>
   page.evaluate((tab) => (JSON.parse(localStorage.getItem('pilot') ?? '{}').viewTabs?.tabs ?? []).find((each: { id: string }) => each.id === tab)?.scroll, id);
@@ -361,13 +357,13 @@ test.describe('The view tabs', () => {
 
     await expect(dashboard.tab).toHaveText('Project');
     await expect(dashboard.line).toHaveCount(0);
-    const [opened] = await keptTabs(page);
-    expect(await keptTabs(page)).toEqual([{ id: opened.id, now: SCRATCH }]);
+    const [opened] = await dashboard.keptTabs();
+    expect(await dashboard.keptTabs()).toEqual([{ id: opened.id, now: SCRATCH }]);
     await expect(page).toHaveURL(`${projectAddress(project)}#dash/${opened.id}/${SCRATCH}`);
 
     await page.goto(`${projectAddress(project)}#dash/not_one/${byModel}`);
     await expect(dashboard.lineNames).toHaveText(['Project', 'Model']);
-    const tabs = await keptTabs(page);
+    const tabs = await dashboard.keptTabs();
     expect(tabs).toHaveLength(2);
     expect(tabs[1]).toEqual({ id: expect.stringMatching(/^[a-z0-9]{4}$/), now: byModel });
     await expect(page).toHaveURL(`${projectAddress(project)}#dash/${tabs[1].id}/${byModel}`);

@@ -8,6 +8,8 @@ import { expect, type Page } from '@playwright/test';
 import type { components } from '@/lib/api/generated/types';
 
 type Saved = components['schemas']['SaveViewResponseSchema.ddf95d6'];
+type Catalogue = components['schemas']['CatalogueResponseSchema.b67cf98'];
+type SavedView = components['schemas']['CatalogueResponseSchema.b67cf98.SavedViewSchema'];
 
 export class SavedViews {
   constructor(
@@ -20,6 +22,13 @@ export class SavedViews {
     const response = await this.page.request.post(`${this.backendUrl}/api/dashboard/saved-views`, { data: { name, state } });
     expect(response.status(), await response.text()).toBe(201);
     return ((await response.json()) as Saved).view.id;
+  }
+
+  /** The views a person saved under `name`, as the server holds them now: one at most. */
+  async named(name: string): Promise<SavedView[]> {
+    const response = await this.page.request.get(`${this.backendUrl}/api/dashboard/catalogue?part=stored`);
+    expect(response.status(), await response.text()).toBe(200);
+    return ((await response.json()) as Catalogue).saved_views!.filter((view) => !view.system && view.name === name);
   }
 
   /** The view removed, as another person removes it. */

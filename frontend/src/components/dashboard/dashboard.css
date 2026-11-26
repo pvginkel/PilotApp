@@ -45,6 +45,14 @@
   .dash .dash-tabs > .btn-icon { flex: none; align-self: center; position: relative; top: -2px; }
   .dash .dash-bar .grow { flex: 1; }
 
+  /* Save view's pane (save-view.tsx; the mockup's `.savepane`), 300px wide under its button at the
+     toolbar's right: its head, the name across it, what the name does under it, Save at the right. */
+  .dash .dash-save { width: 300px; }
+  .dash .dash-save-pane { display: flex; flex-direction: column; gap: 8px; padding: 0 14px; }
+  .dash .dash-save-pane h3 { margin: 0; padding: 0; }
+  .dash .dash-save-pane .note { margin: 0; font-size: var(--text-xs); color: hsl(var(--muted-foreground)); }
+  .dash .dash-save-pane .foot { display: flex; justify-content: flex-end; }
+
   /* The one view, with no line: a tab at the toolbar's left, a small button high, the tab's own
      look without the line's primary: its icon, its name cut short past 300px, its square-x; the
      middle button closes it too. */

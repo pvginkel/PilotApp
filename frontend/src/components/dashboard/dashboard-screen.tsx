@@ -10,7 +10,8 @@
  * view, the global toolbar, with one view its tab at the toolbar's left and copy-plus at its end;
  * the banner, what failed; the main area, which scrolls, holding the view's card. The tabs follow
  * the address (`use-view-tabs.ts`), read off the hash as the browser holds it; `#dash` names none
- * and shows the tab at hand as it was left, the panel at the first opening.
+ * and shows the tab at hand as it was left, the panel at the first opening. The toolbar's right
+ * holds Reset and Save view, and no Refresh (F160.7): the screen reads again by itself.
  *
  * Each tab's answers are kept for as long as the tab (F160.6): a tab out of sight holds its view's
  * queries without reading them, so that the walk's event leaves them stale and they are read
@@ -28,6 +29,7 @@ import { addressQuery, rowsQuery, stateOf } from '@/lib/dashboard/queries';
 import { readState, withoutLook } from '@/lib/dashboard/state';
 import { Banner, type Wrote } from './banner';
 import { RowsChart } from './rows-chart';
+import { ResetButton, SaveViewButton } from './save-view';
 import { NewViewButton, OneTab, ViewTabLine } from './view-tabs';
 import { ViewsPanel } from './views-panel';
 import './dashboard.css';
@@ -80,6 +82,8 @@ function View({ tab, now, one, moves, wrote }: ViewProps) {
       <div className="dash-bar" role="toolbar" aria-label="Dashboard" data-testid="dashboard.toolbar">
         {one && <OneTab tab={tab} moves={moves} />}
         <span className="grow" />
+        <ResetButton tab={tab} now={now} moves={moves} />
+        <SaveViewButton tab={tab} now={now} />
         {one && <NewViewButton moves={moves} />}
       </div>
       <Banner failures={[view.failure, wrote.failure]} onClose={(failure) => failure === wrote.failure && wrote.close()} />

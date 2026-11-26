@@ -1,21 +1,23 @@
 /**
  * Markdown as every screen draws it (F29.1): GFM, inside `.prose`. Ticket ids, repos and
  * environments in its text link as they do in all of the record's words (F91, F93), except in code
- * and inside a link; every link opens in a new tab, but on a phone a link to the dashboard,
- * `#dash/<state>` as a reply writes one, which stands as its words (F160.9). A quote tag is a chip
- * that goes to what it quotes (F39.3), except in code, where it shows as written, and a streamed
- * text's new deltas fade in (the chat's decision 1; delta-fade.ts). A heading's words stand alone, inline, as the heading
- * shows them. A text that links only to the documents it names by path, as a draft does (F47.3),
- * draws each link through its own component, and links nothing else. A text that opens the
+ * and inside a link; every link opens in a new tab but a link to the dashboard, `#dash/<state>` as a
+ * reply writes one, which opens on the page it is read on, and on a phone stands as its words
+ * (F161.3, F160.9). A quote tag is a chip that goes to what it quotes (F39.3), except in code,
+ * where it shows as written, and a streamed text's new deltas fade in (the chat's decision 1;
+ * delta-fade.ts). A heading's words stand alone, inline, as the heading shows them. A text that
+ * links only to the documents it names by path, as a draft does (F47.3), draws each link through
+ * its own component, and links nothing else. A text that opens the
  * project's attached material, as the project document and the handbook do (F29.3), draws each link
  * to a path in the project's `attachments/` through its own component, and every other link as the
  * rest of the record's words. A code block has its copy at its top right, its source as written
  * (copy-button.tsx).
  */
 
-import { memo, useMemo, type ComponentProps, type ComponentType, type ReactNode } from 'react';
+import { memo, useMemo, type ComponentProps, type ComponentType, type MouseEvent, type ReactNode } from 'react';
 import ReactMarkdown, { defaultUrlTransform, type Components, type ExtraProps, type Options } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import { useRouter } from '@tanstack/react-router';
 import type { ElementContent, Root } from 'hast';
 import { rehypeDeltas, type DeltaMarks } from '@/components/chat/delta-fade';
 import { QuoteChip } from '@/components/chat/quote-chip';
@@ -26,7 +28,7 @@ import { usePhone } from '@/hooks/use-phone';
 import { linksMaterial } from '@/hooks/use-timeline';
 import { parseQuoteHref, QUOTE_SCHEME, quotesToLinks } from '@/lib/chat/quotes';
 import type { Linker } from '@/lib/links';
-import { screenOf } from '@/lib/screens';
+import { hashOf, screenOf } from '@/lib/screens';
 import { cn } from '@/lib/utils';
 
 /** GFM, but only a double `~` strikes text out: a single one, as in `[!-~]+`, stays as written (P-139). */
@@ -69,16 +71,43 @@ interface LinkProps {
 }
 
 /**
- * A link of the record's words: a quote tag's chip, on a phone a dashboard's link its words alone,
- * any other link opening in a new tab.
+ * A link of the record's words: a quote tag's chip; a dashboard's link on the page, on a phone its
+ * words alone; any other link opening in a new tab.
  */
 function RecordLink({ href, title, className, children }: LinkProps) {
   const phone = usePhone();
   const quote = href === undefined ? null : parseQuoteHref(href);
   if (quote) return <QuoteChip quote={{ ...quote, label: String(children) }} label={children} />;
-  if (phone && href !== undefined && screenOf(href) === 'dashboard') return <>{children}</>;
+  if (href !== undefined && screenOf(href) === 'dashboard') {
+    if (phone) return <>{children}</>;
+    return (
+      <DashboardLink href={href} title={title} className={className}>
+        {children}
+      </DashboardLink>
+    );
+  }
   return (
     <a href={href} title={title} className={className} target="_blank" rel="noreferrer">
+      {children}
+    </a>
+  );
+}
+
+/**
+ * A dashboard link off a phone, `#dash/<state>`: a link on the page it is read on, the page kept
+ * behind the dashboard, which opens it in a view tab of its own or the one showing its state
+ * (F161.3). A press with a key held or the middle button is the browser's own.
+ */
+function DashboardLink({ href, title, className, children }: LinkProps & { href: string }) {
+  const router = useRouter();
+  const go = (event: MouseEvent) => {
+    if (event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
+    event.preventDefault();
+    const at = router.history.location.href;
+    router.history.push(at.slice(0, at.length - hashOf(at).length) + href, {});
+  };
+  return (
+    <a href={href} title={title} className={className} onClick={go}>
       {children}
     </a>
   );
