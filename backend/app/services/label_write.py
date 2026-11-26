@@ -19,7 +19,7 @@ collector counted less the Call's labelled parts (`carve`).
 import uuid
 from collections import Counter
 from collections.abc import Iterable, Sequence
-from typing import Any
+from typing import Any, cast
 
 from pilot_collection.publication import (
     LabelledTestRunSchema,
@@ -29,7 +29,7 @@ from pilot_collection.publication import (
     PublishedLabelsSchema,
     PublishedWorkUnitSchema,
 )
-from sqlalchemy import func, select, tuple_, update
+from sqlalchemy import func, select, text, tuple_, update
 from sqlalchemy.orm import Session
 
 from app.models import (
@@ -52,6 +52,7 @@ from app.models import (
     WorkUnitKindNesting,
     WorkUnitMeasure,
 )
+from app.models.label import PLACING
 from app.services.vocabulary_service import LISTS
 
 LABELLER = "labeller"
@@ -446,6 +447,13 @@ class LabelWrite:
                 zip(unmet, self._next_ids("work_units", len(unmet)), strict=True)
             )
         kinds = {unit.key: unit.kind for unit in units}
+        rekinded = {
+            row.id: kinds[key]
+            for key, row in held.items()
+            if row.kind_code != kinds[key]
+        }
+        if rekinded:
+            self._rekind(rekinded, set(kinds))
         met: list[tuple[WorkUnit, dict[str, Any]]] = []
         for unit in units:
             facts: dict[str, Any] = {
@@ -476,6 +484,8 @@ class LabelWrite:
         for row, facts in met:
             _set(row, facts)
         self.db.flush()
+        if rekinded:
+            self.db.execute(text(f"SET CONSTRAINTS {', '.join(PLACING)} IMMEDIATE"))
 
         measured = {
             (row.work_unit_id, row.measure_code): row
@@ -505,6 +515,45 @@ class LabelWrite:
                 self.db.delete(row)
         self.db.flush()
         return ids
+
+    def _rekind(self, rekinded: dict[int, str], keys: set[str]) -> None:
+        """Ready the write of held units that take another kind, `rekinded`
+        the new kind by each one's id, `keys` the labelling's units: the
+        keys that place a unit are checked once every unit stands. A unit
+        another labelling placed in one of them follows it to its new kind,
+        and sits in none where no nesting pairs its own kind with that one
+        (DB 551), until its own labelling places it again."""
+        self.db.execute(text(f"SET CONSTRAINTS {', '.join(PLACING)} DEFERRED"))
+        inside = {
+            unit: (kind, rekinded[cast(int, outer)])
+            for unit, kind, outer in self.db.execute(
+                select(WorkUnit.id, WorkUnit.kind_code, WorkUnit.part_of_id).where(
+                    WorkUnit.part_of_id.in_(list(rekinded)),
+                    WorkUnit.key.not_in(sorted(keys)),
+                )
+            )
+        }
+        if not inside:
+            return
+        nested: set[tuple[str, str]] = {
+            (inner, outer)
+            for inner, outer in self.db.execute(
+                select(
+                    WorkUnitKindNesting.inner_code, WorkUnitKindNesting.outer_code
+                ).where(
+                    tuple_(
+                        WorkUnitKindNesting.inner_code, WorkUnitKindNesting.outer_code
+                    ).in_(sorted(set(inside.values())))
+                )
+            )
+        }
+        stranded = [unit for unit, pair in inside.items() if pair not in nested]
+        if stranded:
+            self.db.execute(
+                update(WorkUnit)
+                .where(WorkUnit.id.in_(stranded))
+                .values(part_of_id=None, part_of_kind_code=None)
+            )
 
     def _suites(self, labelling: PublishedLabellingSchema) -> dict[str, int]:
         """The Test Suites as the labelling names them; the id of each by its

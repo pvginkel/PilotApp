@@ -30,16 +30,24 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from app.extensions import db
 
+PLACING = (
+    "work_units_part_of_id_part_of_kind_code_fkey",
+    "work_units_kind_code_part_of_kind_code_fkey",
+)
+"""The keys that place a Work Unit in another, checked at each statement
+unless a transaction defers them."""
+
 
 class WorkUnit(db.Model):  # type: ignore[name-defined]
     """A piece of work the labeller recognised, at any level its Work Unit
     Kinds declare, by the labeller's `key`, which is the same at every
     relabel.
 
-    `part_of_kind_code` is the kind of the unit it sits in, so that it sits
-    there only where a Work Unit Kind Nesting pairs the two kinds, its own as
-    inner (DB 551). That no unit is part of itself or occasioned by itself
-    through others (DB 552) is the writer's to keep.
+    `part_of_kind_code` is the kind of the unit it sits in, and follows that
+    unit's kind, so that it sits there only where a Work Unit Kind Nesting
+    pairs the two kinds, its own as inner (DB 551). That no unit is part of
+    itself or occasioned by itself through others (DB 552) is the writer's to
+    keep.
     """
 
     __tablename__ = "work_units"
@@ -49,6 +57,9 @@ class WorkUnit(db.Model):  # type: ignore[name-defined]
         ForeignKeyConstraint(
             ["part_of_id", "part_of_kind_code"],
             ["work_units.id", "work_units.kind_code"],
+            name=PLACING[0],
+            onupdate="CASCADE",
+            deferrable=True,
         ),
         ForeignKeyConstraint(
             ["kind_code", "part_of_kind_code"],
@@ -56,6 +67,8 @@ class WorkUnit(db.Model):  # type: ignore[name-defined]
                 "work_unit_kind_nestings.inner_code",
                 "work_unit_kind_nestings.outer_code",
             ],
+            name=PLACING[1],
+            deferrable=True,
         ),
         CheckConstraint(
             "(part_of_id IS NULL) = (part_of_kind_code IS NULL)",

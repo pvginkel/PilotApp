@@ -18,6 +18,7 @@ import pytest
 from pilot_collection.publication import PublicationSchema
 from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session as DbSession
+from sqlalchemy.orm import aliased
 
 from app.exceptions import PublicationInvalidException
 from app.models import (
@@ -57,7 +58,14 @@ from tests.support.publications import (
     whole,
 )
 from tests.support.transcripts import STARTED, SUB_AGENT
-from tests.support.vocabularies import VERSION, lists, vocabularies
+from tests.support.vocabularies import (
+    NESTING,
+    VERSION,
+    listed,
+    lists,
+    nesting,
+    vocabularies,
+)
 
 LOGGER = "app.services.publication_service"
 
@@ -72,11 +80,12 @@ OPENING = (
 SUITE = "RecipeBox/backend/test"
 JOB = "RecipeBox/Build-Main"
 DEPLOY = "RecipeBox/Deploy"
-MENU, STARTERS, SOUP, AGAIN = (
+MENU, STARTERS, SOUP, AGAIN, BREAD = (
     "spring",
     "spring|starters",
     "spring|starters|soup",
     "spring|starters|soup.2",
+    "spring|starters|bread",
 )
 
 
@@ -292,6 +301,52 @@ def _labelling(**overrides: Any) -> dict[str, Any]:
         ],
     }
     return labelling(**values | overrides)
+
+
+def _rekinded(*, starters: str, dish: str = "dish") -> list[dict[str, Any]]:
+    """`_units` with the starters of the kind `starters` and the soups of
+    the kind `dish`."""
+    units = _units()
+    units[1]["kind"] = starters
+    for unit in units[2:]:
+        unit["kind"] = dish
+    return units
+
+
+def _bread(*, kind: str = "dish", starters: str = "course") -> PublicationSchema:
+    """A sub-agent's thread whose labelling places the bread, a unit of the
+    kind `kind`, among the starters, of the kind `starters`."""
+    units = _rekinded(starters=starters)[:2] + [
+        {"key": BREAD, "kind": kind, "part_of": STARTERS, "title": "Bread"}
+    ]
+    return sub_agent(calls=[call(1)], labelling=labelling(units=units))
+
+
+def _declare_sides(container: ServiceContainer, *pairs: tuple[str, str]) -> None:
+    """The invented declaration with the kinds `side` and `garnish`, a side
+    in a menu, and `pairs`."""
+    container.vocabulary_service().declare(
+        vocabularies(
+            lists=lists(
+                work_unit_kind=listed("menu", "course", "dish", "side", "garnish")
+            ),
+            nesting=nesting(*NESTING, ("side", "menu"), *pairs),
+        )
+    )
+
+
+def _placed(db: DbSession) -> dict[str, tuple[str, str | None, str | None]]:
+    """Each Work Unit's kind, the key of the unit it sits in and that unit's
+    kind as the unit holds it, by its key."""
+    outer = aliased(WorkUnit)
+    return {
+        key: (kind, part_of, part_of_kind)
+        for key, kind, part_of, part_of_kind in db.execute(
+            select(
+                WorkUnit.key, WorkUnit.kind_code, outer.key, WorkUnit.part_of_kind_code
+            ).outerjoin(outer, outer.id == WorkUnit.part_of_id)
+        )
+    }
 
 
 @pytest.fixture
@@ -665,6 +720,77 @@ class TestRelabelled:
             ).one()
             == "sent_back"
         )
+
+    def test_a_unit_given_another_kind_takes_the_units_in_it_along(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        publications: PublicationService,
+    ) -> None:
+        """A unit sits in another as the kind that one has now (DB 551),
+        whichever transcript's labelling placed it."""
+        _declare_sides(container, ("dish", "side"))
+        publications.publish(_published(labelling=_labelling()))
+        publications.publish(_bread())
+
+        publications.publish(
+            _published(labelling=_labelling(units=_rekinded(starters="side")))
+        )
+
+        assert _placed(session) == {
+            MENU: ("menu", None, None),
+            STARTERS: ("side", MENU, "menu"),
+            SOUP: ("dish", STARTERS, "side"),
+            AGAIN: ("dish", STARTERS, "side"),
+            BREAD: ("dish", STARTERS, "side"),
+        }
+
+    def test_units_given_other_kinds_together_stand_as_the_labelling_places_them(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        publications: PublicationService,
+    ) -> None:
+        """No nesting pairs a `dish` in a `side`: the starters and the
+        dishes in them change their kinds in one write."""
+        _declare_sides(container, ("garnish", "side"))
+        publications.publish(_published(labelling=_labelling()))
+
+        publications.publish(
+            _published(
+                labelling=_labelling(units=_rekinded(starters="side", dish="garnish"))
+            )
+        )
+
+        assert _placed(session) == {
+            MENU: ("menu", None, None),
+            STARTERS: ("side", MENU, "menu"),
+            SOUP: ("garnish", STARTERS, "side"),
+            AGAIN: ("garnish", STARTERS, "side"),
+        }
+
+    def test_a_unit_no_nesting_lets_follow_sits_nowhere_until_its_labelling_places_it(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        publications: PublicationService,
+    ) -> None:
+        """Another transcript's `dish` cannot sit in a `side` (DB 551): it
+        sits in no unit until that transcript's labelling places it again."""
+        _declare_sides(container, ("garnish", "side"))
+        publications.publish(_published(labelling=_labelling()))
+        publications.publish(_bread())
+
+        publications.publish(
+            _published(
+                labelling=_labelling(units=_rekinded(starters="side", dish="garnish"))
+            )
+        )
+        stranded = _placed(session)[BREAD]
+        publications.publish(_bread(kind="garnish", starters="side"))
+
+        assert stranded == ("dish", None, None)
+        assert _placed(session)[BREAD] == ("garnish", STARTERS, "side")
 
     def test_a_test_run_of_another_suite_takes_its_failures_anew(
         self, session: DbSession, publications: PublicationService

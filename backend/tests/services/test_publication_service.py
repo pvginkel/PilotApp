@@ -3824,7 +3824,7 @@ class TestAdopted:
         turn_at(session, project_session, _at_time(0) - timedelta(seconds=4))
 
         with caplog.at_level(logging.WARNING, logger=PLACEMENT_LOGGER):
-            thread = publications.publish(_grown())
+            thread = publications.publish(_camp(group=group(), labelling=labelling()))
 
         assert thread.adopted_project_id == adopted
         assert _ran(session) == [(None, None), (None, None)]
