@@ -1,7 +1,8 @@
-"""The collector's routes (F152.2, F152.3, F152.14):
-`GET /api/collector/inventory`, `POST /api/collector/publications` and
-`POST /api/collector/walks` under the collector's bearer, outside the
-sign-in gate, each answer pinned beside the protocol's version."""
+"""The collector's routes (F152.2, F152.3, F152.6, F152.14):
+`GET /api/collector/inventory`, `POST /api/collector/publications`,
+`PUT /api/collector/vocabularies` and `POST /api/collector/walks` under the
+collector's bearer, outside the sign-in gate, each answer pinned beside the
+protocol's version."""
 
 import json
 import logging
@@ -20,7 +21,17 @@ from sqlalchemy.orm import Session as DbSession
 from werkzeug.test import TestResponse
 
 from app import models
-from app.models import Call, Project, ToolCall, Transcript, User, Walk
+from app.models import (
+    Call,
+    FileClass,
+    Project,
+    ToolCall,
+    Transcript,
+    User,
+    Walk,
+    WorkUnitKind,
+    WorkUnitKindNesting,
+)
 from app.models.reference import ProjectState
 from app.services.container import ServiceContainer
 from app.services.publication_service import (
@@ -45,10 +56,12 @@ from tests.support.publications import (
     whole,
 )
 from tests.support.transcripts import CAMP, OTHER, SUB_AGENT
+from tests.support.vocabularies import VERSION, declared, lists, nesting, value
 
 URL = "/api/collector/publications"
 INVENTORY = "/api/collector/inventory"
 WALKS = "/api/collector/walks"
+VOCABULARIES = "/api/collector/vocabularies"
 LOGGER = "app.services.publication_service"
 
 
@@ -485,6 +498,160 @@ class TestEndWalk:
     def test_no_other_method_is_served(self, client: FlaskClient) -> None:
         for method in ("GET", "PUT", "DELETE"):
             response = client.open(WALKS, method=method, headers=collector_headers())
+            assert response.status_code == 405
+
+
+class TestDeclareVocabularies:
+    def _put(
+        self,
+        client: FlaskClient,
+        body: dict[str, Any],
+        headers: dict[str, str] | None = None,
+    ) -> TestResponse:
+        return client.put(
+            VOCABULARIES,
+            json=body,
+            headers=collector_headers() if headers is None else headers,
+        )
+
+    def test_a_declaration_is_204_and_pilot_holds_its_lists(
+        self, session: DbSession, client: FlaskClient
+    ) -> None:
+        response = self._put(client, declared())
+
+        assert (response.status_code, response.data) == (204, b"")
+        assert session.scalars(
+            select(WorkUnitKind.code).order_by(WorkUnitKind.position)
+        ).all() == ["menu", "course", "dish"]
+        recipe = session.get(FileClass, "recipe")
+        assert recipe is not None
+        assert (recipe.name, recipe.position, recipe.counted) == ("Recipe", 1, True)
+        assert session.execute(
+            select(
+                WorkUnitKindNesting.inner_code, WorkUnitKindNesting.outer_code
+            ).order_by(WorkUnitKindNesting.inner_code)
+        ).all() == [("course", "menu"), ("dish", "course")]
+
+    def test_the_same_declaration_again_writes_nothing(
+        self, session: DbSession, client: FlaskClient
+    ) -> None:
+        assert self._put(client, declared()).status_code == 204
+
+        with writes(session) as wrote:
+            response = self._put(client, declared())
+
+        assert response.status_code == 204
+        assert wrote == {}
+
+    def test_a_list_the_record_has_no_place_for_is_400(
+        self, session: DbSession, client: FlaskClient
+    ) -> None:
+        body = declared(
+            lists=lists() | {"batchable_condition": [value("alone", 1)]},
+            groups=[],
+        )
+
+        with writes(session) as wrote:
+            response = self._put(client, body)
+
+        assert response.status_code == 400
+        assert {tuple(fault["loc"]) for fault in response.json} == {
+            ("lists", "batchable_condition"),
+            ("groups",),
+        }
+        assert wrote == {}
+
+    def test_a_body_that_is_not_json_is_400(
+        self, session: DbSession, client: FlaskClient
+    ) -> None:
+        with writes(session) as wrote:
+            response = client.put(
+                VOCABULARIES, data=b"no vocabularies", headers=collector_headers()
+            )
+
+        assert response.status_code == 400
+        assert wrote == {}
+
+    def test_a_call_that_contradicts_itself_is_400_with_every_fault_named(
+        self, session: DbSession, client: FlaskClient
+    ) -> None:
+        body = declared(
+            lists=lists(rework_kind=[value("recooked", 1), value("recooked", 2)]),
+            nesting=nesting(("pudding", "menu")),
+        )
+
+        with writes(session) as wrote:
+            response = self._put(client, body)
+
+        assert response.status_code == 400
+        assert response.json["code"] == "VALIDATION_FAILED"
+        assert response.json["error"] == (
+            f"Cannot take the vocabularies of the labeller {VERSION} because"
+            " `rework_kind`: the code `recooked` is declared 2 times;"
+            " the nesting of `pudding` in `menu`: `pudding` is no Work Unit Kind"
+            " the call declares"
+        )
+        assert wrote == {}
+
+    def test_a_call_without_the_bearer_is_401(
+        self, session: DbSession, client: FlaskClient
+    ) -> None:
+        headers = {**collector_headers(), "Authorization": "Bearer another-token"}
+
+        with writes(session) as wrote:
+            response = self._put(client, declared(), headers)
+
+        assert response.status_code == 401
+        assert response.json["code"] == "AUTHENTICATION_REQUIRED"
+        assert wrote == {}
+
+    def test_every_call_is_401_while_the_token_is_empty(
+        self, session: DbSession, container: ServiceContainer, client: FlaskClient
+    ) -> None:
+        _configure(container, "")
+
+        with writes(session) as wrote:
+            for bearer in (f"Bearer {COLLECTOR_TOKEN}", "Bearer ", "Bearer"):
+                headers = {**collector_headers(), "Authorization": bearer}
+                assert self._put(client, declared(), headers).status_code == 401
+
+        assert wrote == {}
+
+    @pytest.mark.parametrize("version", ["0", "2", None])
+    def test_a_version_outside_the_range_is_426_with_the_range(
+        self, session: DbSession, client: FlaskClient, version: str | None
+    ) -> None:
+        headers = collector_headers()
+        if version is None:
+            del headers["X-Pilot-Collector-Protocol"]
+        else:
+            headers["X-Pilot-Collector-Protocol"] = version
+
+        with writes(session) as wrote:
+            response = self._put(client, declared(), headers)
+
+        assert response.status_code == 426
+        assert response.json == {
+            "min": COLLECTOR_PROTOCOL_MIN,
+            "max": COLLECTOR_PROTOCOL_MAX,
+        }
+        assert wrote == {}
+
+    def test_the_route_is_outside_the_oidc_gate(
+        self, session: DbSession, oidc_app: Flask, oidc_client: FlaskClient
+    ) -> None:
+        assert oidc_app.container.config().oidc_enabled
+
+        response = self._put(oidc_client, declared())
+
+        assert response.status_code == 204
+        assert session.get(WorkUnitKind, "menu") is not None
+
+    def test_no_other_method_is_served(self, client: FlaskClient) -> None:
+        for method in ("GET", "POST", "DELETE"):
+            response = client.open(
+                VOCABULARIES, method=method, headers=collector_headers()
+            )
             assert response.status_code == 405
 
 

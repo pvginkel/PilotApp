@@ -73,6 +73,23 @@ from app.models.transcript import (
 )
 from app.models.usage import QuotaWeek, UsageReading, WindowShare
 from app.models.user import User
+from app.models.vocabulary import (
+    AskCategory,
+    AvoidableKind,
+    BuildResult,
+    CallClass,
+    CommandClass,
+    FileClass,
+    ReworkKind,
+    Rule,
+    SegmentKind,
+    ToolEffectKind,
+    UnitMeasure,
+    UnitOutcome,
+    WaitCause,
+    WorkUnitKind,
+    WorkUnitKindNesting,
+)
 from app.models.wait import CardTransition, Wait, WaitFiring
 from app.models.work import (
     ClaimAssignment,

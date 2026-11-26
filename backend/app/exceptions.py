@@ -138,6 +138,19 @@ class PublicationInvalidException(ValidationException):
         )
 
 
+class VocabulariesInvalidException(ValidationException):
+    """Raised when a collector's declaration of the labeller's vocabularies
+    contradicts itself; `faults` names each one, and nothing of the call is
+    written."""
+
+    def __init__(self, version: str, faults: list[str]) -> None:
+        self.faults = faults
+        super().__init__(
+            f"Cannot take the vocabularies of the labeller {version} because "
+            + "; ".join(faults)
+        )
+
+
 class PublicationNotAppendableException(InvalidOperationException):
     """Raised when an appended publication does not continue what Pilot
     holds of its Transcript; `causes` names each reason, and nothing of the

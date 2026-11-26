@@ -1,5 +1,6 @@
-"""The collector's routes (F152.2, F152.3, F152.14): Pilot's inventory, a
-publication of one transcript and a walk's end, under the collector's bearer.
+"""The collector's routes (F152.2, F152.3, F152.6, F152.14): Pilot's
+inventory, a publication of one transcript, the labeller's vocabularies and a
+walk's end, under the collector's bearer.
 
 Registered on the app, not on `api_bp`, so the OIDC gate never sees them:
 the caller is a collector, which signs in to nothing, and every call passes
@@ -13,12 +14,14 @@ from dependency_injector.wiring import Provide, inject
 from flask import Blueprint, Response, g, jsonify, request
 from pilot_collection.inventory import InventorySchema
 from pilot_collection.publication import CollectorProtocolRangeSchema, PublicationSchema
+from pilot_collection.vocabularies import VocabulariesSchema
 from spectree import Response as SpectreeResponse
 
 from app.exceptions import CollectorProtocolUnsupportedException
 from app.schemas.common import ApiErrorResponseSchema
 from app.services.container import ServiceContainer
 from app.services.publication_service import PublicationService
+from app.services.vocabulary_service import VocabularyService
 from app.services.walk_service import WalkService
 from app.utils.auth import public
 from app.utils.spectree_config import api
@@ -152,6 +155,60 @@ def publish(
     """
     publication = PublicationSchema.model_validate(request.get_json())
     publication_service.publish(publication)
+    return Response(status=204)
+
+
+@collector_bp.route("/vocabularies", methods=["PUT"])
+@public
+@api.validate(
+    json=VocabulariesSchema,
+    resp=SpectreeResponse(
+        HTTP_204=None,
+        HTTP_400=ApiErrorResponseSchema,
+        HTTP_401=ApiErrorResponseSchema,
+        HTTP_413=ApiErrorResponseSchema,
+        HTTP_426=CollectorProtocolRangeSchema,
+    ),
+)
+@inject
+def declare_vocabularies(
+    vocabulary_service: VocabularyService = Provide[
+        ServiceContainer.vocabulary_service
+    ],
+) -> Any:
+    """The labeller's vocabularies, whole, as the labeller declares them:
+    every list a label takes its value from, by the reference entity it
+    fills, each value with its code, its name, its line, its place and the
+    fact about its category where it has one; the Work Unit Kinds' nestings;
+    and the labeller's version that declared them. One call, one
+    transaction.
+
+    Headers: `Authorization`, `Bearer` and the setting `COLLECTOR_TOKEN`;
+    `X-Pilot-Collector-Protocol`, the protocol version the collector speaks.
+
+    Each answer is the call's outcome, and all but the first leave the record
+    as it was:
+
+    - 204: Pilot holds every list and every nesting as the call declares
+      them. A value or a nesting the call no longer declares is gone where
+      no row names it, and kept where one does, a value with no place. The
+      collector's values of Event Kind and Context Part Kind stand as they
+      are.
+    - 401: the call does not carry the collector's bearer, and every call
+      while `COLLECTOR_TOKEN` is empty.
+    - 426, with the range `{min, max}`: the call names a protocol version
+      outside it, or none.
+    - 400: the call does not validate, every fault named at once: the fields
+      that are not the call's shape, a list the record has no place for among
+      them, or, in `error`, what in the call contradicts itself: a code or a
+      place given twice in a list, an Event Kind another entity records, or
+      a nesting given twice or naming a Work Unit Kind the call does not
+      declare. The same call is refused again.
+    - 413: the body is over `MAX_UPLOAD_SIZE_MB`. The same call is refused
+      again.
+    """
+    vocabularies = VocabulariesSchema.model_validate(request.get_json())
+    vocabulary_service.declare(vocabularies)
     return Response(status=204)
 
 

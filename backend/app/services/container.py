@@ -108,6 +108,7 @@ from app.services.tree_read_service import TreeReadService
 from app.services.turn_end_read_service import TurnEndReadService
 from app.services.usage_halts import UsageHalts, UsageWatcher
 from app.services.usage_service import UsageService
+from app.services.vocabulary_service import VocabularyService
 from app.services.wait_batcher import WaitBatcher
 from app.services.wait_service import WaitService
 from app.services.wait_timer import WaitTimer
@@ -725,6 +726,11 @@ class ServiceContainer(containers.DeclarativeContainer):
         adoption_service=adoption_service,
         fleet_consumer=fleet_consumer,
         catalogue_service=catalogue_service,
+    )
+
+    # The labeller's vocabularies, as a collector declares them (F152.6)
+    vocabulary_service = providers.Factory(
+        VocabularyService, db=db_session, catalogue_service=catalogue_service
     )
 
     # A walk's end, its event and the collector's readiness check (F152.14)

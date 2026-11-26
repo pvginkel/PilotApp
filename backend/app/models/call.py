@@ -4,7 +4,8 @@ what each request did, as a collector's publication gives it (DB decisions 79
 and 81).
 
 The reference entities here are the collector's: a row is written when a
-publication first names its code, and no revision writes one (DB §7.2).
+publication first names its code, and no revision writes one (DB §7.2). Event
+Kind and Context Part Kind hold the labeller's values beside them.
 """
 
 import uuid
@@ -31,6 +32,7 @@ from sqlalchemy import (
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.extensions import db
+from app.models.vocabulary import declared_value_args
 
 CONTEXT_TOKENS = (
     "input_tokens + cache_write_5m_tokens + cache_write_1h_tokens + cache_read_tokens"
@@ -319,13 +321,30 @@ Hook Run record, and no Event (DB 560)."""
 
 class EventKind(db.Model):  # type: ignore[name-defined]
     """A kind of occurrence the screen marks; `is_error` whether it counts as
-    an error."""
+    an error.
+
+    The collector's values are met by a publication and hold a code, a name
+    and `is_error` alone. The labeller's are declared (`app.models.vocabulary`)
+    and hold their `description` and `position` too, a `position` none once
+    the labeller no longer declares the value (DB 585).
+    """
 
     __tablename__ = "event_kinds"
+    __table_args__ = declared_value_args(
+        "event_kinds",
+        # A value with a place in the labeller's list is one it declared,
+        # which names its line.
+        CheckConstraint(
+            "position IS NULL OR description IS NOT NULL",
+            name="ck_event_kinds_described",
+        ),
+    )
 
     code: Mapped[str] = mapped_column(Text, primary_key=True)
     name: Mapped[str] = mapped_column(Text)
     is_error: Mapped[bool] = mapped_column(Boolean)
+    description: Mapped[str | None] = mapped_column(Text)
+    position: Mapped[int | None] = mapped_column(Integer)
 
 
 class Event(db.Model):  # type: ignore[name-defined]
@@ -351,12 +370,25 @@ class Event(db.Model):  # type: ignore[name-defined]
 
 
 class ContextPartKind(db.Model):  # type: ignore[name-defined]
-    """A kind of component of a Call's context."""
+    """A kind of component of a Call's context: the collector's, a code and
+    a name, and the labeller's, with their `description` and `position` too,
+    as Event Kind's are."""
 
     __tablename__ = "context_part_kinds"
+    __table_args__ = declared_value_args(
+        "context_part_kinds",
+        # A value with a place in the labeller's list is one it declared,
+        # which names its line.
+        CheckConstraint(
+            "position IS NULL OR description IS NOT NULL",
+            name="ck_context_part_kinds_described",
+        ),
+    )
 
     code: Mapped[str] = mapped_column(Text, primary_key=True)
     name: Mapped[str] = mapped_column(Text)
+    description: Mapped[str | None] = mapped_column(Text)
+    position: Mapped[int | None] = mapped_column(Integer)
 
 
 class ContextPart(db.Model):  # type: ignore[name-defined]

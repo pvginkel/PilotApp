@@ -963,8 +963,11 @@ class PublicationService:
         unmet = sorted(named - met)
         if unmet:
             after_commit(self.catalogue_service.drop)
+            # The code is the arbiter: Event Kind's and Context Part Kind's
+            # place in the labeller's list is unique and deferrable, which no
+            # ON CONFLICT takes as one.
             self.db.execute(
-                pg_insert(entity).on_conflict_do_nothing(),
+                pg_insert(entity).on_conflict_do_nothing(index_elements=["code"]),
                 [
                     {"code": code, "name": code} | (facts[code] if facts else {})
                     for code in unmet

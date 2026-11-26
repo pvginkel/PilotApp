@@ -11,6 +11,7 @@ import pytest
 from pilot_collection.inventory import InventorySchema
 from pilot_collection.publication import PublicationSchema
 from pilot_collection.reading import ReadingSchema, ToolCallBlockSchema
+from pilot_collection.vocabularies import VocabulariesSchema
 from pydantic import ValidationError
 
 
@@ -64,6 +65,49 @@ class TestThePackage:
         (held,) = inventory.transcripts
         assert (held.file_size, held.replayed_size) == (2_048, 1_024)
         assert held.file_modified_at.microsecond == 123_456
+
+    def test_the_vocabularies_are_read_by_the_shape_a_collector_declares(
+        self,
+    ) -> None:
+        def listed(*codes: str, **facts: Any) -> list[dict[str, Any]]:
+            return [
+                {"code": code, "name": code, "description": code, "position": place}
+                | facts
+                for place, code in enumerate(codes, start=1)
+            ]
+
+        vocabularies = VocabulariesSchema.model_validate(
+            {
+                "version": "1.0.1",
+                "lists": {
+                    "work_unit_kind": listed("tour", "leg"),
+                    "unit_outcome": listed("arrived"),
+                    "rework_kind": listed("detour"),
+                    "unit_measure": listed("stops", unit="stops"),
+                    "segment_kind": listed("drive", "rest"),
+                    "wait_cause": listed("ferry"),
+                    "call_class": listed("steer"),
+                    "avoidable_kind": listed("wrong_turn"),
+                    "command_class": listed("refuel"),
+                    "build_result": listed("ARRIVED"),
+                    "file_class": listed("map", counted=True),
+                    "tool_effect_kind": listed("postcard_sent"),
+                    "rule": listed("no_speeding", home="/road/RULES.md"),
+                    "ask_category": listed("route_question"),
+                    "event_kind": listed("flat_tyre", is_error=True),
+                    "context_part_kind": listed("road_sign"),
+                },
+                "nesting": [{"inner": "leg", "outer": "tour"}],
+            }
+        )
+
+        assert [kind.position for kind in vocabularies.lists.work_unit_kind] == [1, 2]
+        assert vocabularies.lists.file_class[0].counted is True
+        assert vocabularies.lists.event_kind[0].is_error is True
+        assert (vocabularies.nesting[0].inner, vocabularies.nesting[0].outer) == (
+            "leg",
+            "tour",
+        )
 
     def test_a_reading_is_read_by_the_shape_a_collector_serves(self) -> None:
         at = "2026-11-12T09:30:04.250Z"

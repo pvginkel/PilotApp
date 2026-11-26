@@ -24721,6 +24721,442 @@
         "title": "RowsDimensionSchema",
         "type": "object"
       },
+      "VocabulariesSchema.573c352": {
+        "additionalProperties": false,
+        "description": "The labeller's vocabularies, whole: what Pilot holds of them after\nthe call.",
+        "properties": {
+          "lists": {
+            "$ref": "#/components/schemas/VocabulariesSchema.573c352.DeclaredListsSchema",
+            "description": "Every list, by its entity"
+          },
+          "nesting": {
+            "description": "Every pairing of Work Unit Kinds the labeller allows",
+            "items": {
+              "$ref": "#/components/schemas/VocabulariesSchema.573c352.DeclaredNestingSchema"
+            },
+            "title": "Nesting",
+            "type": "array"
+          },
+          "version": {
+            "description": "The labeller's own version that declared them",
+            "examples": [
+              "1.0.1"
+            ],
+            "minLength": 1,
+            "title": "Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "version",
+          "lists",
+          "nesting"
+        ],
+        "title": "VocabulariesSchema",
+        "type": "object"
+      },
+      "VocabulariesSchema.573c352.DeclaredEventKindSchema": {
+        "additionalProperties": false,
+        "description": "An Event Kind of the labeller's, beside the collector's.",
+        "properties": {
+          "code": {
+            "description": "The value's code, which a label names it by",
+            "minLength": 1,
+            "title": "Code",
+            "type": "string"
+          },
+          "description": {
+            "description": "The one line that says what it is",
+            "minLength": 1,
+            "title": "Description",
+            "type": "string"
+          },
+          "is_error": {
+            "description": "Whether it counts as an error",
+            "title": "Is Error",
+            "type": "boolean"
+          },
+          "name": {
+            "description": "Its name, to be read",
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "position": {
+            "description": "Its place in its list, from 1, unique within the list",
+            "maximum": 2147483647,
+            "minimum": 1,
+            "title": "Position",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "code",
+          "name",
+          "description",
+          "position",
+          "is_error"
+        ],
+        "title": "DeclaredEventKindSchema",
+        "type": "object"
+      },
+      "VocabulariesSchema.573c352.DeclaredFileClassSchema": {
+        "additionalProperties": false,
+        "description": "A File Class, a kind of file by what it is for.",
+        "properties": {
+          "code": {
+            "description": "The value's code, which a label names it by",
+            "minLength": 1,
+            "title": "Code",
+            "type": "string"
+          },
+          "counted": {
+            "description": "Whether its Files are written work, which the figures count",
+            "title": "Counted",
+            "type": "boolean"
+          },
+          "description": {
+            "description": "The one line that says what it is",
+            "minLength": 1,
+            "title": "Description",
+            "type": "string"
+          },
+          "name": {
+            "description": "Its name, to be read",
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "position": {
+            "description": "Its place in its list, from 1, unique within the list",
+            "maximum": 2147483647,
+            "minimum": 1,
+            "title": "Position",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "code",
+          "name",
+          "description",
+          "position",
+          "counted"
+        ],
+        "title": "DeclaredFileClassSchema",
+        "type": "object"
+      },
+      "VocabulariesSchema.573c352.DeclaredListsSchema": {
+        "additionalProperties": false,
+        "description": "Every list the record keeps of the labeller's, by the reference\nentity it fills.",
+        "properties": {
+          "ask_category": {
+            "description": "The Ask Categories",
+            "items": {
+              "$ref": "#/components/schemas/VocabulariesSchema.573c352.DeclaredValueSchema"
+            },
+            "title": "Ask Category",
+            "type": "array"
+          },
+          "avoidable_kind": {
+            "description": "The Avoidable Kinds",
+            "items": {
+              "$ref": "#/components/schemas/VocabulariesSchema.573c352.DeclaredValueSchema"
+            },
+            "title": "Avoidable Kind",
+            "type": "array"
+          },
+          "build_result": {
+            "description": "The Build Results",
+            "items": {
+              "$ref": "#/components/schemas/VocabulariesSchema.573c352.DeclaredValueSchema"
+            },
+            "title": "Build Result",
+            "type": "array"
+          },
+          "call_class": {
+            "description": "The Call Classes",
+            "items": {
+              "$ref": "#/components/schemas/VocabulariesSchema.573c352.DeclaredValueSchema"
+            },
+            "title": "Call Class",
+            "type": "array"
+          },
+          "command_class": {
+            "description": "The Command Classes",
+            "items": {
+              "$ref": "#/components/schemas/VocabulariesSchema.573c352.DeclaredValueSchema"
+            },
+            "title": "Command Class",
+            "type": "array"
+          },
+          "context_part_kind": {
+            "description": "The labeller's Context Part Kinds, beside the collector's",
+            "items": {
+              "$ref": "#/components/schemas/VocabulariesSchema.573c352.DeclaredValueSchema"
+            },
+            "title": "Context Part Kind",
+            "type": "array"
+          },
+          "event_kind": {
+            "description": "The labeller's Event Kinds, beside the collector's",
+            "items": {
+              "$ref": "#/components/schemas/VocabulariesSchema.573c352.DeclaredEventKindSchema"
+            },
+            "title": "Event Kind",
+            "type": "array"
+          },
+          "file_class": {
+            "description": "The File Classes",
+            "items": {
+              "$ref": "#/components/schemas/VocabulariesSchema.573c352.DeclaredFileClassSchema"
+            },
+            "title": "File Class",
+            "type": "array"
+          },
+          "rework_kind": {
+            "description": "The Rework Kinds",
+            "items": {
+              "$ref": "#/components/schemas/VocabulariesSchema.573c352.DeclaredValueSchema"
+            },
+            "title": "Rework Kind",
+            "type": "array"
+          },
+          "rule": {
+            "description": "The Rules",
+            "items": {
+              "$ref": "#/components/schemas/VocabulariesSchema.573c352.DeclaredRuleSchema"
+            },
+            "title": "Rule",
+            "type": "array"
+          },
+          "segment_kind": {
+            "description": "The Segment Kinds",
+            "items": {
+              "$ref": "#/components/schemas/VocabulariesSchema.573c352.DeclaredValueSchema"
+            },
+            "title": "Segment Kind",
+            "type": "array"
+          },
+          "tool_effect_kind": {
+            "description": "The Tool Effect Kinds",
+            "items": {
+              "$ref": "#/components/schemas/VocabulariesSchema.573c352.DeclaredValueSchema"
+            },
+            "title": "Tool Effect Kind",
+            "type": "array"
+          },
+          "unit_measure": {
+            "description": "The Unit Measures",
+            "items": {
+              "$ref": "#/components/schemas/VocabulariesSchema.573c352.DeclaredUnitMeasureSchema"
+            },
+            "title": "Unit Measure",
+            "type": "array"
+          },
+          "unit_outcome": {
+            "description": "The Unit Outcomes",
+            "items": {
+              "$ref": "#/components/schemas/VocabulariesSchema.573c352.DeclaredValueSchema"
+            },
+            "title": "Unit Outcome",
+            "type": "array"
+          },
+          "wait_cause": {
+            "description": "The Wait Causes",
+            "items": {
+              "$ref": "#/components/schemas/VocabulariesSchema.573c352.DeclaredValueSchema"
+            },
+            "title": "Wait Cause",
+            "type": "array"
+          },
+          "work_unit_kind": {
+            "description": "The Work Unit Kinds",
+            "items": {
+              "$ref": "#/components/schemas/VocabulariesSchema.573c352.DeclaredValueSchema"
+            },
+            "title": "Work Unit Kind",
+            "type": "array"
+          }
+        },
+        "required": [
+          "work_unit_kind",
+          "unit_outcome",
+          "rework_kind",
+          "unit_measure",
+          "segment_kind",
+          "wait_cause",
+          "call_class",
+          "avoidable_kind",
+          "command_class",
+          "build_result",
+          "file_class",
+          "tool_effect_kind",
+          "rule",
+          "ask_category",
+          "event_kind",
+          "context_part_kind"
+        ],
+        "title": "DeclaredListsSchema",
+        "type": "object"
+      },
+      "VocabulariesSchema.573c352.DeclaredNestingSchema": {
+        "additionalProperties": false,
+        "description": "A pairing of two Work Unit Kinds: units of `inner` may sit in units\nof `outer`.",
+        "properties": {
+          "inner": {
+            "description": "The inner Work Unit Kind's code",
+            "minLength": 1,
+            "title": "Inner",
+            "type": "string"
+          },
+          "outer": {
+            "description": "The outer Work Unit Kind's code",
+            "minLength": 1,
+            "title": "Outer",
+            "type": "string"
+          }
+        },
+        "required": [
+          "inner",
+          "outer"
+        ],
+        "title": "DeclaredNestingSchema",
+        "type": "object"
+      },
+      "VocabulariesSchema.573c352.DeclaredRuleSchema": {
+        "additionalProperties": false,
+        "description": "A Rule, one convention the sessions are held to.",
+        "properties": {
+          "code": {
+            "description": "The value's code, which a label names it by",
+            "minLength": 1,
+            "title": "Code",
+            "type": "string"
+          },
+          "description": {
+            "description": "The one line that says what it is",
+            "minLength": 1,
+            "title": "Description",
+            "type": "string"
+          },
+          "home": {
+            "description": "The file that states it",
+            "minLength": 1,
+            "title": "Home",
+            "type": "string"
+          },
+          "name": {
+            "description": "Its name, to be read",
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "position": {
+            "description": "Its place in its list, from 1, unique within the list",
+            "maximum": 2147483647,
+            "minimum": 1,
+            "title": "Position",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "code",
+          "name",
+          "description",
+          "position",
+          "home"
+        ],
+        "title": "DeclaredRuleSchema",
+        "type": "object"
+      },
+      "VocabulariesSchema.573c352.DeclaredUnitMeasureSchema": {
+        "additionalProperties": false,
+        "description": "A Unit Measure, a kind of figure read for a Work Unit.",
+        "properties": {
+          "code": {
+            "description": "The value's code, which a label names it by",
+            "minLength": 1,
+            "title": "Code",
+            "type": "string"
+          },
+          "description": {
+            "description": "The one line that says what it is",
+            "minLength": 1,
+            "title": "Description",
+            "type": "string"
+          },
+          "name": {
+            "description": "Its name, to be read",
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "position": {
+            "description": "Its place in its list, from 1, unique within the list",
+            "maximum": 2147483647,
+            "minimum": 1,
+            "title": "Position",
+            "type": "integer"
+          },
+          "unit": {
+            "description": "What it counts",
+            "examples": [
+              "phases"
+            ],
+            "minLength": 1,
+            "title": "Unit",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "name",
+          "description",
+          "position",
+          "unit"
+        ],
+        "title": "DeclaredUnitMeasureSchema",
+        "type": "object"
+      },
+      "VocabulariesSchema.573c352.DeclaredValueSchema": {
+        "additionalProperties": false,
+        "description": "One value of a list, as the labeller declares it.",
+        "properties": {
+          "code": {
+            "description": "The value's code, which a label names it by",
+            "minLength": 1,
+            "title": "Code",
+            "type": "string"
+          },
+          "description": {
+            "description": "The one line that says what it is",
+            "minLength": 1,
+            "title": "Description",
+            "type": "string"
+          },
+          "name": {
+            "description": "Its name, to be read",
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "position": {
+            "description": "Its place in its list, from 1, unique within the list",
+            "maximum": 2147483647,
+            "minimum": 1,
+            "title": "Position",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "code",
+          "name",
+          "description",
+          "position"
+        ],
+        "title": "DeclaredValueSchema",
+        "type": "object"
+      },
       "WebPushSetupSchema.efd40b8": {
         "description": "What a browser needs to turn its notifications on.",
         "properties": {
@@ -26097,6 +26533,70 @@
           }
         },
         "summary": "A collector's publication of one transcript, a main thread's or one sub-agent's: one call, one transaction.",
+        "tags": []
+      }
+    },
+    "/api/collector/vocabularies": {
+      "put": {
+        "description": "Headers: `Authorization`, `Bearer` and the setting `COLLECTOR_TOKEN`; `X-Pilot-Collector-Protocol`, the protocol version the collector speaks.\n\nEach answer is the call's outcome, and all but the first leave the record as it was:\n\n- 204: Pilot holds every list and every nesting as the call declares   them. A value or a nesting the call no longer declares is gone where   no row names it, and kept where one does, a value with no place. The   collector's values of Event Kind and Context Part Kind stand as they   are. - 401: the call does not carry the collector's bearer, and every call   while `COLLECTOR_TOKEN` is empty. - 426, with the range `{min, max}`: the call names a protocol version   outside it, or none. - 400: the call does not validate, every fault named at once: the fields   that are not the call's shape, a list the record has no place for among   them, or, in `error`, what in the call contradicts itself: a code or a   place given twice in a list, an Event Kind another entity records, or   a nesting given twice or naming a Work Unit Kind the call does not   declare. The same call is refused again. - 413: the body is over `MAX_UPLOAD_SIZE_MB`. The same call is refused   again.",
+        "operationId": "put__api_collector_vocabularies",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VocabulariesSchema.573c352"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Content Too Large"
+          },
+          "426": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CollectorProtocolRangeSchema.9ed0c05"
+                }
+              }
+            },
+            "description": "Upgrade Required"
+          }
+        },
+        "summary": "The labeller's vocabularies, whole, as the labeller declares them: every list a label takes its value from, by the reference entity it fills, each value with its code, its name, its line, its place and the fact about its category where it has one; the Work Unit Kinds' nestings; and the labeller's version that declared them. One call, one transaction.",
         "tags": []
       }
     },
