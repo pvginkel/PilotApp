@@ -80,8 +80,12 @@ def inventory(
     - 200: every transcript Pilot holds, a main thread's and a sub-agent's,
       each by its `session_id` and `agent_id` with its last publication's
       `file_size`, `file_modified_at` and collector's version, which are what
-      an appended publication of it builds on, and its `replayed_size`; and
-      the walk's two settings, `COLLECTOR_WALK_INTERVAL_SECONDS` and
+      an appended publication of it builds on, its `replayed_size`, and the
+      labeller's version and stamp its labels were written under, none for
+      one published with no labelling; every conversation a Session of
+      Pilot's ran, collected or not, with what the labeller is handed with
+      it, its Sessions with their Holds and Turns and the Documents they
+      put; and the walk's two settings, `COLLECTOR_WALK_INTERVAL_SECONDS` and
       `COLLECTOR_SETTLING_SECONDS`. A transcript the home has and the answer
       lacks, or holds at another size, time or version, is one to publish;
       one whose `replayed_size` is short of its `file_size`, its file

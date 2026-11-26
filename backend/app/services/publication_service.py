@@ -146,6 +146,7 @@ from app.models import (
 )
 from app.models import Session as AgentSession
 from app.models.call import RECORDED_ELSEWHERE
+from app.services import labeller_context
 from app.services.adoption_service import AdoptionService, group_faults
 from app.services.call_caches import caches, hold_sub_agents_calls
 from app.services.environment_service import reported_columns
@@ -461,10 +462,14 @@ class PublicationService:
             )
 
     def inventory(self) -> InventorySchema:
-        """What Pilot holds, for a walk to compare the home against (F152.2):
-        every Transcript with its collection record, in one read, by
-        `session_id`, a main thread before its sub-agents', and the walk's
+        """What Pilot holds, for a walk to compare the home against and to
+        hand the labeller (F152.2): every Transcript with its collection
+        record and the labeller's version and stamp its labels were written
+        under, in one read, by `session_id`, a main thread before its
+        sub-agents'; every conversation a Session of Pilot's ran, with what
+        the labeller is handed with it (`labeller_context`); and the walk's
         two settings."""
+        labeller = aliased(ComponentVersion)
         held = self.db.execute(
             select(
                 Transcript.session_id,
@@ -473,8 +478,11 @@ class PublicationService:
                 Transcript.file_modified_at,
                 Transcript.replayed_size,
                 ComponentVersion.version.label("collector"),
+                labeller.version.label("labeller"),
+                Transcript.records_stamp.label("stamp"),
             )
             .join(ComponentVersion, ComponentVersion.id == Transcript.read_under_id)
+            .outerjoin(labeller, labeller.id == Transcript.labelled_under_id)
             .order_by(Transcript.session_id, Transcript.agent_id.nulls_first())
         )
         return InventorySchema(
@@ -484,6 +492,7 @@ class PublicationService:
                 HeldTranscriptSchema.model_validate(row, from_attributes=True)
                 for row in held
             ],
+            conversations=labeller_context.conversations(self.db),
         )
 
     def publish(self, publication: PublicationSchema) -> Transcript:

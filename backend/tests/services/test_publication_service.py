@@ -4133,6 +4133,8 @@ class TestInventory:
             "file_modified_at": STARTED + timedelta(minutes=30),
             "replayed_size": 48_112,
             "collector": "1.0.0",
+            "labeller": None,
+            "stamp": None,
         }
         [replayed] = publications.inventory().transcripts
         assert replayed.model_dump() == {
@@ -4142,11 +4144,15 @@ class TestInventory:
             "file_modified_at": later,
             "replayed_size": 70_000,
             "collector": "1.1.0",
+            "labeller": None,
+            "stamp": None,
         }
 
-    def test_the_inventory_is_one_read_however_many_transcripts_and_versions(
+    def test_the_transcripts_are_one_read_however_many_transcripts_and_versions(
         self, session: DbSession, publications: PublicationService
     ) -> None:
+        """The labeller half's reads, which read no Transcript, are
+        `test_labeller_context.py`'s."""
         publications.publish(_camp())
         publications.publish(sub_agent())
         publications.publish(_camp(session_id=OTHER, collector={"version": "1.1.0"}))
@@ -4155,7 +4161,7 @@ class TestInventory:
             inventory = publications.inventory()
 
         assert len(inventory.transcripts) == 3
-        assert len(each.texts) == 1
+        assert [text for text in each.texts if "transcripts" in text] == [each.texts[0]]
 
     def test_the_walks_settings_are_the_servers(
         self, session: DbSession, container: ServiceContainer

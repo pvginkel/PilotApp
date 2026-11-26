@@ -23,16 +23,19 @@ from werkzeug.test import TestResponse
 from app import models
 from app.models import (
     Call,
+    Document,
     FileClass,
+    Hold,
     Project,
     ToolCall,
     Transcript,
+    Turn,
     User,
     Walk,
     WorkUnitKind,
     WorkUnitKindNesting,
 )
-from app.models.reference import ProjectState
+from app.models.reference import HoldKind, ProjectState, SessionState, TurnCause
 from app.services.container import ServiceContainer
 from app.services.publication_service import (
     COLLECTOR_PROTOCOL_MAX,
@@ -44,6 +47,7 @@ from tests.support.adoption import FIRST_MENUS
 from tests.support.database import writes
 from tests.support.publications import (
     COLLECTOR_TOKEN,
+    STAMP,
     appended,
     builds_on,
     call,
@@ -57,7 +61,15 @@ from tests.support.publications import (
     whole,
 )
 from tests.support.transcripts import CAMP, OTHER, SUB_AGENT
-from tests.support.vocabularies import VERSION, declared, lists, nesting, value
+from tests.support.vocabularies import (
+    VERSION,
+    declared,
+    lists,
+    nesting,
+    value,
+    vocabularies,
+)
+from tests.support.working_on import Camp
 
 URL = "/api/collector/publications"
 INVENTORY = "/api/collector/inventory"
@@ -263,6 +275,7 @@ class TestInventory:
             "walk_interval_seconds": 30.0,
             "settling_seconds": 600.0,
             "transcripts": [],
+            "conversations": [],
         }
 
     def test_each_transcript_pilot_holds_is_named_as_its_last_publication_left_it(
@@ -296,6 +309,8 @@ class TestInventory:
                 "file_modified_at": "2026-11-12T10:00:00Z",
                 "replayed_size": 48_112,
                 "collector": "1.0.0",
+                "labeller": None,
+                "stamp": None,
             },
             {
                 "session_id": CAMP,
@@ -304,6 +319,8 @@ class TestInventory:
                 "file_modified_at": "2026-11-12T09:42:00Z",
                 "replayed_size": 48_112,
                 "collector": "1.0.0",
+                "labeller": None,
+                "stamp": None,
             },
             {
                 "session_id": OTHER,
@@ -312,7 +329,84 @@ class TestInventory:
                 "file_modified_at": "2026-11-12T10:02:03.456789Z",
                 "replayed_size": 912,
                 "collector": "1.1.0",
+                "labeller": None,
+                "stamp": None,
             },
+        ]
+
+    def test_a_labelled_transcript_and_a_conversation_pilot_ran_are_named_so(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        client: FlaskClient,
+        person: User,
+    ) -> None:
+        """The labeller half's shape: a main thread labelled under the
+        labeller's version and stamp, and its conversation, which a worker's
+        run held for a slot ran, with the document it registered."""
+        container.vocabulary_service().declare(vocabularies())
+        camp = Camp(container, session)
+        worker = camp.worker(state=SessionState.HELD, conversation=CAMP)
+        worker.created_at = datetime(2026, 11, 12, 9, 0, tzinfo=UTC)
+        session.add_all(
+            [
+                Hold(
+                    session_id=worker.id,
+                    kind_code=HoldKind.SLOT,
+                    started_at=datetime(2026, 11, 12, 9, 0, 1, tzinfo=UTC),
+                ),
+                Turn(
+                    session_id=worker.id,
+                    seq=1,
+                    message="Survey the lake.",
+                    started_at=datetime(2026, 11, 12, 9, 0, 5, 250_000, tzinfo=UTC),
+                    cause_code=TurnCause.BRIEF,
+                ),
+            ]
+        )
+        survey = camp.registered(worker, read=False)
+        source_path = session.get_one(Document, survey.id).source_path
+        assert _post(client, _body(whole(labelling=labelling()))).status_code == 204
+
+        response = client.get(INVENTORY, headers=collector_headers())
+
+        assert response.status_code == 200
+        [held] = response.json["transcripts"]
+        assert (held["labeller"], held["stamp"]) == (VERSION, STAMP)
+        assert response.json["conversations"] == [
+            {
+                "session_id": CAMP,
+                "sessions": [
+                    {
+                        "id": str(worker.id),
+                        "kind": "work",
+                        "created_at": "2026-11-12T09:00:00Z",
+                        "brief": "Survey the lake.",
+                        "repo": "example/Camp",
+                        "clarification": False,
+                        "holds": [
+                            {
+                                "kind": "slot",
+                                "started_at": "2026-11-12T09:00:01Z",
+                                "ended_at": None,
+                            }
+                        ],
+                        "turns": [
+                            {
+                                "started_at": "2026-11-12T09:00:05.250000Z",
+                                "cause": "brief",
+                            }
+                        ],
+                    }
+                ],
+                "documents": [
+                    {
+                        "id": str(survey.id),
+                        "session": str(worker.id),
+                        "source_path": source_path,
+                    }
+                ],
+            }
         ]
 
     def test_the_walks_settings_are_the_servers(
@@ -326,6 +420,7 @@ class TestInventory:
             "walk_interval_seconds": 300.0,
             "settling_seconds": 0.0,
             "transcripts": [],
+            "conversations": [],
         }
 
     def test_the_inventory_writes_nothing(

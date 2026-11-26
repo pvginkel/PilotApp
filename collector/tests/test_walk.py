@@ -49,16 +49,45 @@ def _held(
         "file_modified_at": STOOD.isoformat(),
         "replayed_size": 61_000,
         "collector": VERSION,
+        "labeller": "1.0.0",
+        "stamp": "1:Qm9hdHMgb24gdGhlIGxha2U",
     }
     return held | facts
 
 
 def _inventory(*held: dict[str, Any]) -> InventorySchema:
+    """Pilot's inventory holding `held`, with the conversation of `SESSION`
+    that a Session of Pilot's ran."""
     return InventorySchema.model_validate(
         {
             "walk_interval_seconds": 30.0,
             "settling_seconds": SETTLING,
             "transcripts": list(held),
+            "conversations": [
+                {
+                    "session_id": SESSION,
+                    "sessions": [
+                        {
+                            "id": "0b6f3c2a-8d41-4e7a-9c15-2f8e6d4a7b30",
+                            "kind": "work",
+                            "created_at": (STOOD - timedelta(hours=1)).isoformat(),
+                            "brief": "Survey the lake.",
+                            "repo": "example/Camp",
+                            "clarification": False,
+                            "holds": [],
+                            "turns": [
+                                {
+                                    "started_at": (
+                                        STOOD - timedelta(minutes=59)
+                                    ).isoformat(),
+                                    "cause": "brief",
+                                }
+                            ],
+                        }
+                    ],
+                    "documents": [],
+                }
+            ],
         }
     )
 

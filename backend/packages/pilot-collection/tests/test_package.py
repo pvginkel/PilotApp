@@ -57,6 +57,43 @@ class TestThePackage:
                         "file_modified_at": "2026-11-12T09:30:00.123456Z",
                         "replayed_size": 1_024,
                         "collector": "1.0.0",
+                        "labeller": "1.2.0",
+                        "stamp": "1:Qm9hdHMgb24gdGhlIGxha2U",
+                    }
+                ],
+                "conversations": [
+                    {
+                        "session_id": "5e7f9a10-1c2d-4e3f-8a4b-6c7d8e9f0a1b",
+                        "sessions": [
+                            {
+                                "id": "0b6f3c2a-8d41-4e7a-9c15-2f8e6d4a7b30",
+                                "kind": "work",
+                                "created_at": "2026-11-12T09:00:00Z",
+                                "brief": "Survey the lake.",
+                                "repo": "example/Camp",
+                                "clarification": False,
+                                "holds": [
+                                    {
+                                        "kind": "slot",
+                                        "started_at": "2026-11-12T09:00:01Z",
+                                        "ended_at": None,
+                                    }
+                                ],
+                                "turns": [
+                                    {
+                                        "started_at": "2026-11-12T09:00:05Z",
+                                        "cause": "brief",
+                                    }
+                                ],
+                            }
+                        ],
+                        "documents": [
+                            {
+                                "id": "e2d9a7c4-5b13-4f60-8a2e-9c7b1d4f6a08",
+                                "session": "0b6f3c2a-8d41-4e7a-9c15-2f8e6d4a7b30",
+                                "source_path": "/work/Camp/docs/survey.md",
+                            }
+                        ],
                     }
                 ],
             }
@@ -65,6 +102,13 @@ class TestThePackage:
         (held,) = inventory.transcripts
         assert (held.file_size, held.replayed_size) == (2_048, 1_024)
         assert held.file_modified_at.microsecond == 123_456
+        assert (held.labeller, held.stamp) == ("1.2.0", "1:Qm9hdHMgb24gdGhlIGxha2U")
+        ((run,), (document,)) = (
+            inventory.conversations[0].sessions,
+            inventory.conversations[0].documents,
+        )
+        assert (run.holds[0].ended_at, run.turns[0].cause) == (None, "brief")
+        assert document.session == run.id
 
     def test_the_vocabularies_are_read_by_the_shape_a_collector_declares(
         self,

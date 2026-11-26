@@ -5983,6 +5983,14 @@
       "InventorySchema.be59cad": {
         "description": "What Pilot holds, whole, and the walk's two settings.",
         "properties": {
+          "conversations": {
+            "description": "Every conversation a Session of Pilot's ran, collected or not, by `session_id`: their ids are the conversations the labeller's `pilot` header names; one not here Pilot ran no Session on",
+            "items": {
+              "$ref": "#/components/schemas/InventorySchema.be59cad.HeldConversationSchema"
+            },
+            "title": "Conversations",
+            "type": "array"
+          },
           "settling_seconds": {
             "description": "Seconds a file stands unchanged before a Transcript whose `replayed_size` is short of its `file_size` is published whole, its replay at rest",
             "title": "Settling Seconds",
@@ -6005,13 +6013,164 @@
         "required": [
           "walk_interval_seconds",
           "settling_seconds",
-          "transcripts"
+          "transcripts",
+          "conversations"
         ],
         "title": "InventorySchema",
         "type": "object"
       },
+      "InventorySchema.be59cad.HeldConversationSchema": {
+        "description": "What the labeller is handed with one conversation Pilot ran.",
+        "properties": {
+          "documents": {
+            "description": "The Documents those Sessions put, in the order they were made",
+            "items": {
+              "$ref": "#/components/schemas/InventorySchema.be59cad.HeldDocumentSchema"
+            },
+            "title": "Documents",
+            "type": "array"
+          },
+          "session_id": {
+            "description": "Claude Code's id of the conversation's main thread",
+            "minLength": 1,
+            "title": "Session Id",
+            "type": "string"
+          },
+          "sessions": {
+            "description": "Pilot's Sessions on it, in `created_at` order",
+            "items": {
+              "$ref": "#/components/schemas/InventorySchema.be59cad.HeldSessionSchema"
+            },
+            "title": "Sessions",
+            "type": "array"
+          }
+        },
+        "required": [
+          "session_id",
+          "sessions",
+          "documents"
+        ],
+        "title": "HeldConversationSchema",
+        "type": "object"
+      },
+      "InventorySchema.be59cad.HeldDocumentSchema": {
+        "description": "A Document a Session of the conversation put: one it registered, or\none of Pilot's own it added.",
+        "properties": {
+          "id": {
+            "description": "Pilot's id of the Document",
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "session": {
+            "description": "The Session that put it",
+            "format": "uuid",
+            "title": "Session",
+            "type": "string"
+          },
+          "source_path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Where it was registered from, none for one of Pilot's own",
+            "title": "Source Path"
+          }
+        },
+        "required": [
+          "id",
+          "session",
+          "source_path"
+        ],
+        "title": "HeldDocumentSchema",
+        "type": "object"
+      },
+      "InventorySchema.be59cad.HeldSessionSchema": {
+        "description": "A Session of Pilot's on a conversation, as the labeller is handed it.",
+        "properties": {
+          "brief": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The first 400 characters of its first Turn that no person wrote; none while it has none",
+            "title": "Brief"
+          },
+          "clarification": {
+            "description": "Whether its Work is a Clarification Run",
+            "title": "Clarification",
+            "type": "boolean"
+          },
+          "created_at": {
+            "description": "When Pilot made it",
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "holds": {
+            "description": "Its Holds, in the order they started",
+            "items": {
+              "$ref": "#/components/schemas/InventorySchema.be59cad.SessionHoldSchema"
+            },
+            "title": "Holds",
+            "type": "array"
+          },
+          "id": {
+            "description": "Pilot's id of the Session",
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "kind": {
+            "description": "Its Session Kind's code",
+            "minLength": 1,
+            "title": "Kind",
+            "type": "string"
+          },
+          "repo": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Its Work's repository, else its Project's; none where neither has one",
+            "title": "Repo"
+          },
+          "turns": {
+            "description": "Its Turns, in the order sent",
+            "items": {
+              "$ref": "#/components/schemas/InventorySchema.be59cad.SessionTurnSchema"
+            },
+            "title": "Turns",
+            "type": "array"
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "created_at",
+          "brief",
+          "repo",
+          "clarification",
+          "holds",
+          "turns"
+        ],
+        "title": "HeldSessionSchema",
+        "type": "object"
+      },
       "InventorySchema.be59cad.HeldTranscriptSchema": {
-        "description": "A Transcript as Pilot holds it: what an appended publication of its\nfile builds on, and how much of the file its last whole one read.",
+        "description": "A Transcript as Pilot holds it: what an appended publication of its\nfile builds on, how much of the file its last whole one read, and what\nits labels were written under.",
         "properties": {
           "agent_id": {
             "anyOf": [
@@ -6045,6 +6204,22 @@
             "title": "File Size",
             "type": "integer"
           },
+          "labeller": {
+            "anyOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The labeller's own version that wrote its labels, whole; none while no labelling was published for it",
+            "examples": [
+              "1.0.0"
+            ],
+            "title": "Labeller"
+          },
           "replayed_size": {
             "description": "The file's size in bytes at its last whole publication: short of `file_size` while appended publications were taken since",
             "maximum": 9007199254740991,
@@ -6057,6 +6232,19 @@
             "minLength": 1,
             "title": "Session Id",
             "type": "string"
+          },
+          "stamp": {
+            "anyOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The labeller's stamp handed back with its labels, of all it read for them besides the file; none where its last publication carried no labelling",
+            "title": "Stamp"
           }
         },
         "required": [
@@ -6065,9 +6253,71 @@
           "file_size",
           "file_modified_at",
           "replayed_size",
-          "collector"
+          "collector",
+          "labeller",
+          "stamp"
         ],
         "title": "HeldTranscriptSchema",
+        "type": "object"
+      },
+      "InventorySchema.be59cad.SessionHoldSchema": {
+        "description": "A period in which Pilot kept a Session from running.",
+        "properties": {
+          "ended_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "When it ended, none while it holds",
+            "title": "Ended At"
+          },
+          "kind": {
+            "description": "Its Hold Kind's code",
+            "minLength": 1,
+            "title": "Kind",
+            "type": "string"
+          },
+          "started_at": {
+            "description": "When it started",
+            "format": "date-time",
+            "title": "Started At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "started_at",
+          "ended_at"
+        ],
+        "title": "SessionHoldSchema",
+        "type": "object"
+      },
+      "InventorySchema.be59cad.SessionTurnSchema": {
+        "description": "A message Pilot sent a Session.",
+        "properties": {
+          "cause": {
+            "description": "Its Turn Cause's code",
+            "minLength": 1,
+            "title": "Cause",
+            "type": "string"
+          },
+          "started_at": {
+            "description": "When it was sent",
+            "format": "date-time",
+            "title": "Started At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "started_at",
+          "cause"
+        ],
+        "title": "SessionTurnSchema",
         "type": "object"
       },
       "ItemDocumentSchema.1fdd8ae": {
@@ -27393,7 +27643,7 @@
     },
     "/api/collector/inventory": {
       "get": {
-        "description": "Headers: `Authorization`, `Bearer` and the setting `COLLECTOR_TOKEN`; `X-Pilot-Collector-Protocol`, the protocol version the collector speaks.\n\n- 200: every transcript Pilot holds, a main thread's and a sub-agent's,   each by its `session_id` and `agent_id` with its last publication's   `file_size`, `file_modified_at` and collector's version, which are what   an appended publication of it builds on, and its `replayed_size`; and   the walk's two settings, `COLLECTOR_WALK_INTERVAL_SECONDS` and   `COLLECTOR_SETTLING_SECONDS`. A transcript the home has and the answer   lacks, or holds at another size, time or version, is one to publish;   one whose `replayed_size` is short of its `file_size`, its file   unchanged for the settling time, is published whole once. - 401: the call does not carry the collector's bearer, and every call   while `COLLECTOR_TOKEN` is empty. - 426, with the range `{min, max}`: the call names a protocol version   outside it, or none.",
+        "description": "Headers: `Authorization`, `Bearer` and the setting `COLLECTOR_TOKEN`; `X-Pilot-Collector-Protocol`, the protocol version the collector speaks.\n\n- 200: every transcript Pilot holds, a main thread's and a sub-agent's,   each by its `session_id` and `agent_id` with its last publication's   `file_size`, `file_modified_at` and collector's version, which are what   an appended publication of it builds on, its `replayed_size`, and the   labeller's version and stamp its labels were written under, none for   one published with no labelling; every conversation a Session of   Pilot's ran, collected or not, with what the labeller is handed with   it, its Sessions with their Holds and Turns and the Documents they   put; and the walk's two settings, `COLLECTOR_WALK_INTERVAL_SECONDS` and   `COLLECTOR_SETTLING_SECONDS`. A transcript the home has and the answer   lacks, or holds at another size, time or version, is one to publish;   one whose `replayed_size` is short of its `file_size`, its file   unchanged for the settling time, is published whole once. - 401: the call does not carry the collector's bearer, and every call   while `COLLECTOR_TOKEN` is empty. - 426, with the range `{min, max}`: the call names a protocol version   outside it, or none.",
         "operationId": "get__api_collector_inventory",
         "parameters": [],
         "responses": {
