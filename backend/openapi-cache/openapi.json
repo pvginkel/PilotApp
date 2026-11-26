@@ -10451,6 +10451,19 @@
       "LanesResponseSchema.b67cf98.LaneSchema": {
         "description": "A lane: a row of the By that holds Calls in the window and the scope.",
         "properties": {
+          "at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The instant its value is at, where the By's values have one: a Pilot session's or a Pilot turn's start, a conversation's first Call, a Call's end; null for another By and on the row of none",
+            "title": "At"
+          },
           "ends_at": {
             "anyOf": [
               {
@@ -10620,6 +10633,7 @@
           "marks",
           "key",
           "label",
+          "at",
           "focus",
           "marked",
           "starts_at",
@@ -17662,6 +17676,19 @@
       "RowsResponseSchema.b67cf98.ByRowSchema": {
         "description": "A row of the By.",
         "properties": {
+          "at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The instant its value is at, where the By's values have one: a Pilot session's or a Pilot turn's start, a conversation's first Call, a Call's end; null for another By and on the row of none",
+            "title": "At"
+          },
           "focus": {
             "description": "Whether it holds the view's focus",
             "title": "Focus",
@@ -17789,6 +17816,7 @@
           "marks",
           "key",
           "label",
+          "at",
           "focus",
           "marked"
         ],
@@ -18845,6 +18873,19 @@
       "SeriesResponseSchema.b67cf98.ByRowSchema": {
         "description": "A row of the By.",
         "properties": {
+          "at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The instant its value is at, where the By's values have one: a Pilot session's or a Pilot turn's start, a conversation's first Call, a Call's end; null for another By and on the row of none",
+            "title": "At"
+          },
           "focus": {
             "description": "Whether it holds the view's focus",
             "title": "Focus",
@@ -18972,6 +19013,7 @@
           "marks",
           "key",
           "label",
+          "at",
           "focus",
           "marked"
         ],
@@ -19415,6 +19457,19 @@
       "SeriesResponseSchema.b67cf98.PointSchema": {
         "description": "A point of a series, a row of the dimension it asks.",
         "properties": {
+          "at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The instant its value is at, where the By's values have one: a Pilot session's or a Pilot turn's start, a conversation's first Call, a Call's end; null for another By and on the row of none",
+            "title": "At"
+          },
           "axis": {
             "anyOf": [
               {
@@ -19581,6 +19636,7 @@
           "marks",
           "key",
           "label",
+          "at",
           "focus",
           "marked",
           "axis",

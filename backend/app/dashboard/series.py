@@ -291,6 +291,7 @@ class _Drawer:
             marks=row.marks,
             key=row.key,
             label=row.label,
+            at=row.at,
             focus=row.focus,
             marked=row.marked,
             axis=axis,

@@ -713,6 +713,7 @@ class TestGetRows:
         assert body["rows"][0] == {
             "key": str(worked.project.id),
             "label": "Recipe box",
+            "at": None,
             "focus": False,
             "values": [2.6, 2.0],
             "n": [5, 2],
@@ -737,6 +738,21 @@ class TestGetRows:
         assert rows[str(worked.work.id)]["marks"] == [1.0]
         assert rows[str(worked.chat.id)]["marks"] == [0.0]
         assert body["all"]["marks"] == [1.0]
+
+    def test_a_part_of_pilots_work_has_its_name_and_its_time_as_an_instant(
+        self, client: FlaskClient, worked: Record
+    ) -> None:
+        body = client.get(ROWS, query_string={"state": "t=all&by=pturn"}).get_json()
+
+        rows = {row["key"]: row for row in body["rows"]}
+        assert (
+            rows[worked.work_turn.id]["label"],
+            rows[worked.work_turn.id]["at"],
+        ) == (
+            "Turn 1 · brief",
+            "2026-11-12T09:29:00Z",
+        )
+        assert (rows[None]["label"], rows[None]["at"]) == ("(No Pilot turn)", None)
 
     def test_a_time_key_is_an_instant(
         self, client: FlaskClient, worked: Record
@@ -884,6 +900,7 @@ class TestGetSeries:
         assert body["points"][0] == {
             "key": "2026-11-12",
             "label": None,
+            "at": None,
             "focus": False,
             "values": [2.6, 1.75],
             "n": [5, 2],
@@ -913,7 +930,7 @@ class TestGetSeries:
         assert items["dots"][0] == {
             "point": 0,
             "key": str(worked.thread.id),
-            "label": None,
+            "label": "Main thread",
             "value": 1.75,
             "at": "2026-11-12T09:31:00Z",
             "focus": False,
@@ -1254,7 +1271,7 @@ class TestGetItems:
         assert body["total"] == 3
         assert body["items"][0] == {
             "key": str(worked.thread.id),
-            "label": None,
+            "label": "Main thread",
             "first": "2026-11-12T09:31:00Z",
             "last": "2026-11-12T09:33:00Z",
             "values": [3.0, 1.75, 166_488.0, 1.0, 1.0, 52_626.0],

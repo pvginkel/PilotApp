@@ -49,11 +49,13 @@ from app.models import (
     Component,
     ComponentVersion,
     Environment,
+    Item,
     LaunchComponent,
     Project,
     QuotaWeek,
     Repository,
     Session,
+    SessionKind,
     Transcript,
     Turn,
     User,
@@ -354,9 +356,11 @@ FROM (
 """
 
 _session = Session.__table__.alias("session")
+_session_kind = SessionKind.__table__.alias("session_kind")
 _turn = Turn.__table__.alias("pturn")
 _author = User.__table__.alias("author")
 _work = Work.__table__.alias("work")
+_item = Item.__table__.alias("item")
 _chat = Chat.__table__.alias("chat")
 _clarification = ClarificationRun.__table__.alias("clarification")
 _thread = Transcript.__table__.alias("thread")
@@ -380,6 +384,11 @@ def own_joins(sitting_gap: timedelta) -> tuple[Join, ...]:
     return (
         Join("session", _session, lambda row: _session.c.id == row["session_id"]),
         Join(
+            "session_kind",
+            _session_kind,
+            lambda row: _session_kind.c.code == row.to("session").c.kind_code,
+        ),
+        Join(
             "turn",
             _turn,
             lambda row: and_(
@@ -393,6 +402,8 @@ def own_joins(sitting_gap: timedelta) -> tuple[Join, ...]:
             lambda row: _author.c.id == row.to("turn").c.author_user_id,
         ),
         Join("work", _work, lambda row: _work.c.id == row["session_id"]),
+        # A Work is its Item, by its id.
+        Join("item", _item, lambda row: _item.c.id == row.to("work").c.id),
         Join("chat", _chat, lambda row: _chat.c.id == row["session_id"]),
         Join(
             "clarification",

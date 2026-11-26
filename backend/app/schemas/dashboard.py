@@ -565,6 +565,13 @@ class ByRowSchema(LineSchema):
     label: str | None = Field(
         description="Its label; null where the key is its own, as a date or a time"
     )
+    at: datetime | None = Field(
+        description=(
+            "The instant its value is at, where the By's values have one: a "
+            "Pilot session's or a Pilot turn's start, a conversation's first "
+            "Call, a Call's end; null for another By and on the row of none"
+        )
+    )
     focus: bool = Field(description="Whether it holds the view's focus")
     marked: bool = Field(
         description=(

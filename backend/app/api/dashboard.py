@@ -1093,6 +1093,7 @@ def _by_row(row: ByRow) -> dict[str, Any]:
         **_line(row),
         "key": row.key,
         "label": row.label,
+        "at": row.at,
         "focus": row.focus,
         "marked": row.marked,
     }
