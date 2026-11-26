@@ -7,7 +7,7 @@ conversation's calls (F165), and a conversation's reading in the reader
 under the size rule (F154.7), each a route of its own."""
 
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from typing import Any
 
 from dependency_injector.wiring import Provide, inject
@@ -84,6 +84,7 @@ from app.schemas.dashboard import (
     PanelSchema,
     PlacedBlockSchema,
     PointSchema,
+    QuotaWeekSchema,
     RatioSchema,
     ReaderBlockSchema,
     ReaderCallSchema,
@@ -115,6 +116,7 @@ from app.schemas.dashboard import (
 from app.services.base_task import BaseTask
 from app.services.container import ServiceContainer
 from app.services.dashboard_store_service import DashboardStoreService
+from app.services.quota_week_service import Period, label, quota_weeks
 from app.services.task_service import TaskService
 from app.utils.auth import get_auth_context
 from app.utils.spectree_config import api
@@ -144,9 +146,10 @@ def get_catalogue(
     """Read one part of what a view of the dashboard may name: its
     dimensions, each with its closed list of values where it has one; its
     measures, the facts, figures, aggregates, grains and ratios, built in
-    and stored; its time, the ranges, the zone and the sitting's gap; or
-    what it stores, the saved views, each with its address, the quick
-    filters and the stored ratios, each with whether the catalogue offers it.
+    and stored; its time, the ranges, the quota weeks as the record holds
+    them at the call, the zone and the sitting's gap; or what it stores, the
+    saved views, each with its address, the quick filters and the stored
+    ratios, each with whether the catalogue offers it.
 
     Returns:
         200: The part asked for
@@ -157,7 +160,9 @@ def get_catalogue(
     catalogue = catalogue_service.catalogue(db)
     if query.part == "stored":
         return _stored(catalogue, dashboard_store_service).model_dump(mode="json")
-    part = {"dimensions": _dimensions, "measures": _measures, "time": _time}[query.part]
+    if query.part == "time":
+        return _time(catalogue, quota_weeks(db)).model_dump(mode="json")
+    part = {"dimensions": _dimensions, "measures": _measures}[query.part]
     return part(catalogue).model_dump()
 
 
@@ -1214,15 +1219,35 @@ def _measures(catalogue: Catalogue) -> CatalogueResponseSchema:
     )
 
 
-def _time(catalogue: Catalogue) -> CatalogueResponseSchema:
+def _time(catalogue: Catalogue, weeks: tuple[Period, ...]) -> CatalogueResponseSchema:
     return CatalogueResponseSchema(
         part="time",
         ranges=[
             TimeRangeSchema(key=range_.key, label=range_.label, line=range_.line)
             for range_ in catalogue.ranges
         ],
+        quota_weeks=[
+            _quota_week(week, running=index == 0)
+            for index, week in enumerate(reversed(weeks))
+        ],
         zone=catalogue.zone,
         sitting_gap_seconds=catalogue.sitting_gap.total_seconds(),
+    )
+
+
+def _quota_week(week: Period, *, running: bool) -> QuotaWeekSchema:
+    labelled = label(week.starts_at, week.ends_at)
+    if isinstance(labelled, date):
+        year, number, starts_on = None, None, labelled
+    else:
+        (year, number), starts_on = labelled, None
+    return QuotaWeekSchema(
+        starts_at=week.starts_at,
+        ends_at=week.ends_at,
+        year=year,
+        week=number,
+        starts_on=starts_on,
+        running=running,
     )
 
 

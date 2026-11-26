@@ -1835,6 +1835,22 @@
             "description": "`stored`: every quick filter, in the order they were made",
             "title": "Quick Filters"
           },
+          "quota_weeks": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/CatalogueResponseSchema.b67cf98.QuotaWeekSchema"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "`time`: every quota week the record holds, newest first, the running one first",
+            "title": "Quota Weeks"
+          },
           "ranges": {
             "anyOf": [
               {
@@ -2546,6 +2562,90 @@
           "offered"
         ],
         "title": "QuickFilterSchema",
+        "type": "object"
+      },
+      "CatalogueResponseSchema.b67cf98.QuotaWeekSchema": {
+        "description": "A quota week, from one reset of the subscription's seven-day window\nto the next. It is labelled by the ISO week of its Thursday, the first\nin UTC it holds a moment of; a week cut short with no Thursday in it, by\nthe date in UTC it starts on. Two weeks may share a label.",
+        "properties": {
+          "ends_at": {
+            "description": "When it ends, exclusive: where the next starts, or for the running week the reset its latest reading names",
+            "examples": [
+              "2026-11-19T10:00:00Z"
+            ],
+            "format": "date-time",
+            "title": "Ends At",
+            "type": "string"
+          },
+          "running": {
+            "description": "Whether it is the running week, the latest",
+            "title": "Running",
+            "type": "boolean"
+          },
+          "starts_at": {
+            "description": "When it starts: its key, which a state names it by",
+            "examples": [
+              "2026-11-12T10:00:00Z"
+            ],
+            "format": "date-time",
+            "title": "Starts At",
+            "type": "string"
+          },
+          "starts_on": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The date in UTC it starts on, for a week cut short with no Thursday in it, which that date labels; null for a week labelled by `week`",
+            "examples": [
+              null
+            ],
+            "title": "Starts On"
+          },
+          "week": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The ISO week it is labelled by; null for a week labelled by `starts_on`",
+            "examples": [
+              46
+            ],
+            "title": "Week"
+          },
+          "year": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The ISO year of the week it is labelled by; null with `week`",
+            "examples": [
+              2026
+            ],
+            "title": "Year"
+          }
+        },
+        "required": [
+          "starts_at",
+          "ends_at",
+          "year",
+          "week",
+          "starts_on",
+          "running"
+        ],
+        "title": "QuotaWeekSchema",
         "type": "object"
       },
       "CatalogueResponseSchema.b67cf98.RatioSchema": {
@@ -27053,7 +27153,7 @@
             "BearerAuth": []
           }
         ],
-        "summary": "Read one part of what a view of the dashboard may name: its dimensions, each with its closed list of values where it has one; its measures, the facts, figures, aggregates, grains and ratios, built in and stored; its time, the ranges, the zone and the sitting's gap; or what it stores, the saved views, each with its address, the quick filters and the stored ratios, each with whether the catalogue offers it.",
+        "summary": "Read one part of what a view of the dashboard may name: its dimensions, each with its closed list of values where it has one; its measures, the facts, figures, aggregates, grains and ratios, built in and stored; its time, the ranges, the quota weeks as the record holds them at the call, the zone and the sitting's gap; or what it stores, the saved views, each with its address, the quick filters and the stored ratios, each with whether the catalogue offers it.",
         "tags": [],
         "x-required-role": "editor"
       }

@@ -295,6 +295,43 @@ class TimeRangeSchema(BaseModel):
     line: str = Field(description="What it holds")
 
 
+class QuotaWeekSchema(BaseModel):
+    """A quota week, from one reset of the subscription's seven-day window
+    to the next. It is labelled by the ISO week of its Thursday, the first
+    in UTC it holds a moment of; a week cut short with no Thursday in it, by
+    the date in UTC it starts on. Two weeks may share a label."""
+
+    starts_at: datetime = Field(
+        description="When it starts: its key, which a state names it by",
+        examples=["2026-11-12T10:00:00Z"],
+    )
+    ends_at: datetime = Field(
+        description=(
+            "When it ends, exclusive: where the next starts, or for the running "
+            "week the reset its latest reading names"
+        ),
+        examples=["2026-11-19T10:00:00Z"],
+    )
+    year: int | None = Field(
+        description="The ISO year of the week it is labelled by; null with `week`",
+        examples=[2026],
+    )
+    week: int | None = Field(
+        description=(
+            "The ISO week it is labelled by; null for a week labelled by `starts_on`"
+        ),
+        examples=[46],
+    )
+    starts_on: date | None = Field(
+        description=(
+            "The date in UTC it starts on, for a week cut short with no Thursday "
+            "in it, which that date labels; null for a week labelled by `week`"
+        ),
+        examples=[None],
+    )
+    running: bool = Field(description="Whether it is the running week, the latest")
+
+
 class CatalogueResponseSchema(BaseModel):
     """One part of the catalogue: the fields of the part asked for are set,
     the others null."""
@@ -318,6 +355,13 @@ class CatalogueResponseSchema(BaseModel):
         description="`measures`: the built-in ratios, then the stored ones",
     )
     ranges: list[TimeRangeSchema] | None = Field(default=None, description="`time`")
+    quota_weeks: list[QuotaWeekSchema] | None = Field(
+        default=None,
+        description=(
+            "`time`: every quota week the record holds, newest first, the running "
+            "one first"
+        ),
+    )
     zone: str | None = Field(
         default=None,
         description="`time`: the zone the day, the weekday and the hour are derived in",

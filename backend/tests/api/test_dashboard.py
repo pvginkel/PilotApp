@@ -21,7 +21,7 @@ from dependency_injector import providers
 from flask import Flask
 from flask.testing import FlaskClient
 from pilot_collection.reading import ReadingSchema
-from sqlalchemy import Engine, text
+from sqlalchemy import Engine, delete, text
 from sqlalchemy.orm import Session as DbSession
 
 from app import models
@@ -35,6 +35,7 @@ from app.models import (
     EventKind,
     Project,
     QuickFilter,
+    QuotaWeek,
     SavedView,
     User,
 )
@@ -49,6 +50,12 @@ from tests.support.transcripts import OPUS, STARTED, reference
 
 CATALOGUE = "/api/dashboard/catalogue"
 SAVED_AT = datetime(2026, 11, 20, 9, 30, tzinfo=UTC)
+HOUR = timedelta(hours=1)
+DAY = timedelta(days=1)
+# The starts of weeks 44 to 46 of 2026, a Thursday 10:00 UTC each.
+WEEK_44 = datetime(2026, 10, 29, 10, tzinfo=UTC)
+WEEK_45 = WEEK_44 + 7 * DAY
+WEEK_46 = WEEK_45 + 7 * DAY
 
 
 def _part(client: FlaskClient, part: str) -> dict[str, Any]:
@@ -69,7 +76,7 @@ class TestGetCatalogue:
         fields = {
             "dimensions": {"dimensions", "markers"},
             "measures": {"facts", "figures", "aggregates", "grains", "ratios"},
-            "time": {"ranges", "zone", "sitting_gap_seconds"},
+            "time": {"ranges", "quota_weeks", "zone", "sitting_gap_seconds"},
             "stored": {"saved_views", "quick_filters", "custom_ratios"},
         }
 
@@ -305,6 +312,89 @@ class TestGetCatalogue:
             "l4",
             "l8",
             "all",
+        ]
+
+    def test_the_quota_weeks_newest_first_each_with_its_label(
+        self, client: FlaskClient, session: DbSession
+    ) -> None:
+        session.execute(delete(QuotaWeek))
+        session.add_all(
+            QuotaWeek(starts_at=starts_at, ends_at=ends_at)
+            for starts_at, ends_at in [
+                # Weeks 44 and 45, Thursday 10:00 UTC to the next.
+                (WEEK_44, WEEK_45),
+                (WEEK_45, WEEK_46),
+                # Resets cut the next two weeks short, each holding Thursday
+                # 12 November, so both are week 46; the one after them,
+                # Friday to Tuesday, holds no Thursday.
+                (WEEK_46, WEEK_46 + 2 * HOUR),
+                (WEEK_46 + 2 * HOUR, WEEK_46 + DAY + 2 * HOUR),
+                (WEEK_46 + DAY + 2 * HOUR, WEEK_46 + 5 * DAY),
+            ]
+        )
+        session.flush()
+
+        weeks = _part(client, "time")["quota_weeks"]
+
+        assert weeks == [
+            {
+                "starts_at": "2026-11-13T12:00:00Z",
+                "ends_at": "2026-11-17T10:00:00Z",
+                "year": None,
+                "week": None,
+                "starts_on": "2026-11-13",
+                "running": True,
+            },
+            {
+                "starts_at": "2026-11-12T12:00:00Z",
+                "ends_at": "2026-11-13T12:00:00Z",
+                "year": 2026,
+                "week": 46,
+                "starts_on": None,
+                "running": False,
+            },
+            {
+                "starts_at": "2026-11-12T10:00:00Z",
+                "ends_at": "2026-11-12T12:00:00Z",
+                "year": 2026,
+                "week": 46,
+                "starts_on": None,
+                "running": False,
+            },
+            {
+                "starts_at": "2026-11-05T10:00:00Z",
+                "ends_at": "2026-11-12T10:00:00Z",
+                "year": 2026,
+                "week": 45,
+                "starts_on": None,
+                "running": False,
+            },
+            {
+                "starts_at": "2026-10-29T10:00:00Z",
+                "ends_at": "2026-11-05T10:00:00Z",
+                "year": 2026,
+                "week": 44,
+                "starts_on": None,
+                "running": False,
+            },
+        ]
+
+    def test_the_quota_weeks_are_read_at_each_call(
+        self, client: FlaskClient, session: DbSession
+    ) -> None:
+        session.execute(delete(QuotaWeek))
+        session.add(QuotaWeek(starts_at=WEEK_44, ends_at=WEEK_45))
+        session.flush()
+        assert [week["week"] for week in _part(client, "time")["quota_weeks"]] == [44]
+
+        # The weeks follow the usage readings, the catalogue held meanwhile.
+        session.add(QuotaWeek(starts_at=WEEK_45, ends_at=WEEK_46))
+        session.flush()
+
+        weeks = _part(client, "time")["quota_weeks"]
+        assert [(week["week"], week["running"]) for week in weeks] == [
+            (45, True),
+            (44, False),
         ]
 
     def test_what_it_stores(self, client: FlaskClient, session: DbSession) -> None:
