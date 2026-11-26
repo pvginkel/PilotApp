@@ -5,41 +5,8 @@ the KubeCoder fleet, and the operator decides and does only what their hands mus
 timeline per managed project shows its work, its decision documents and their asks; a side chat
 talks to Pilot's brain, a headless Claude Code session in a store environment.
 
-**Its first screens are in**: the handle step, the project list, a project's head and its timeline,
-its work items, its documents in tabs beside the side panel, on the record's schema, the engine
-behind it (`backend/app/engine/`), the sync of the store's tree, the server's jobs on the KubeCoder
-controller, Pilot's MCP server with the worker's round trip, the project's chat in the side panel,
-with the brain's tools, a new project: the plus, its definition chat and draft, Create project and
-its setup, Pilot's jobs after a worker's turn and an item of its own done, the pass's claims and its
-questions to the writer, the switch's dialog and the archive question, and the notifications
-through web push, a project's and the alarms, with a browser's switch, the offer and the online
-status, and the usage limits: the halts, the overrule, the halt file, the hard stop, the nudge and each
-turn's tokens, and the store's update: its command, its hold, its sequence and its retry, and the
-phone's layout: its home, its tabs at the bottom and its views, and the waits: their firings by
-YouTrack's posts, the due time and a request, and the run per batch, and an ask Pilot is working
-on: its line, the read-only strip with Stop and take over, a held block's line, the hand-back and
-the Cancel, and the projects surface: the service user, `pilot-projects` and its tools, and the
-profile's join switch, and the debrief: a repeat round's why under its step, the Debrief on a done
-work item, the debrief and the full debrief, the pass reading it, and the debrief's notice, one per
-slice at its run's end, with its Read, and the collection: the collector, a pod beside each stage's
-fleet's home that walks it every 30 s, the transcripts it publishes through its door, whole or
-appended, the walk's end and its event, the reading it serves the backend, a launch of Pilot's on its
-Session, the adopted project a group names, and the invented scenario that drives it in the suite,
-and the conversation: a session outside Pilot talking to it through the projects surface, its long
-poll and its Conversations tab, and a work item placed in a named environment, and Pilot's note on a
-block: what only Pilot knows inside an ask left to a person, its take and its offer that starts
-Pilot's work, its note on a document, its alert for what a Send starts, and an item turned urgent
-alerting again, and the journal: the project's account the pass keeps from each stage's full
-debrief, its row in the Documents tab, and Pilot's notable events with the stages' times in the
-debrief's notice, placed once the pass has ended, and the time a running work item still takes: a
-step's kind and its timing, the seed's tool, and the server's estimate as a badge on the head and
-the running work item, opening its figures on hover or press, and the dashboard's query engine: a
-view's state as its address, checked whole, its answers read from the record at the query under its
-bounds, the two counts as tasks, a conversation's reading kept on scratch storage, a call's cost
-and caches and the quota weeks beneath them, and the views, quick filters, ratios and favourites it
-stores. Every green build of
-`main` deploys itself to the dev stage at `https://pilot-dev.home`, and production at
-`https://pilot.ginbov.nl` runs what the operator promotes from there
+Every green build of `main` deploys itself to the dev stage at `https://pilot-dev.home`, and
+production at `https://pilot.ginbov.nl` runs what the operator promotes from there
 ([`docs/deployment.md`](docs/deployment.md)). Version 1 is built from the design record in
 `../PilotAppSpecs/design/` (start at its README), along the steps of its `implementation-plan.md`.
 Its `features.md` is the version-1 scope, and
@@ -119,150 +86,13 @@ template-owned file to add app behaviour; use the extension points instead:
 | Settings of the Playwright backends | `loadAppBackendEnv()` in `frontend/tests/support/backend-env-extensions.ts` |
 | Steps of the Playwright run's setup | `loadAppGlobalSetup()` in `frontend/tests/support/global-setup-extensions.ts` |
 
-Template-owned code is improved in this repo, not in the template repos (D018): what the template
-gets wrong, or does less well than the work needs, is changed here, with no need to stay backwards
-compatible, in a commit of its own, and listed here as a standing edit, so that a `copier update`
-that conflicts on it resolves to this repo's side; an agent merges it into ModernAppTemplate.
-Twenty-eight stand today: the `Jenkinsfile`, the app's own as a whole, which tags its images `dev-<n>` and
-`dev-latest` and pins `dev-<n>` into PilotDeploy's `config/dev` and `prd-<n>` into its `config/prd`
-in one commit, where the template's tags `<n>` and `latest` and pins production alone, and which
-carries the sidecar's `golang` container and its `Test sidecar` and `Build pilot-sync image` stages,
-and the collector's `Test collector` stage in the pod's `modern-app-toolchain` container, its
-`Build pilot-collector image` stage, built from the root with the root's `.dockerignore`, and its pin
-`images.collector`, which the template, rendering no `sidecar/` or `collector/`, has no place for
-(D008), and which copies the
-backend's OpenAPI cache into the `pilot-ui` build context, where `frontend/openapi-cache` is a
-symlink to `backend/openapi-cache`, and which writes the commit to `frontend/git-rev` at checkout,
-where the template wrote it for the image alone, so that the suite's tree, which holds no `.git`,
-has it too; the page head of
-`frontend/index.html`, which names the page "Pilot - AI powered work orchestration", links the PWA's
-`/manifest.json`, sets three `theme-color`s by `media`, the bottom tabs' tint in each scheme on a
-phone and the top bar's blue off one, and gives the viewport `interactive-widget=resizes-content`, so that a phone's keyboard shrinks the app rather
-than panning it, which no app-owned file can; the cache rule of `frontend/nginx.conf`, which keeps the year-long immutable
-cache to the build's hashed `/assets/` and has the root's files — the icons, the logo, the manifest,
-the worker — revalidated on every load, so that a changed icon shows under its name; the `/api/`
-location of `frontend/nginx.conf`, a `^~` prefix, so that nginx tries no regex location on an
-`/api/` path, where the template's plain prefix let the cache rule's regex answer an `/api/` path
-ending in `.js` or `.png`, and this repo's `.json`, from the static root
-(`tests/infrastructure/nginx.spec.ts` pins it); the Playwright dev servers' dependency caches,
-one per server: `frontend/tests/support/process/servers.ts` gives each its own `VITE_CACHE_DIR`,
-`node_modules/.tmp/vite-playwright/<port>`, removed when it stops, and `frontend/vite.config.ts`
-reads it as `cacheDir`, where the template's `scripts/testing-server.sh` set a variable nothing
-read, so that its servers shared `node_modules/.vite` and swapped its `deps/` under each other's
-first pages on a cold start (`tests/infrastructure/dev-server.spec.ts` pins it); the app's Vite
-plugins, which `frontend/vite.config.ts` appends from `loadAppPlugins()` in the app-owned
-`frontend/vite-plugin-extensions.ts`, as it merges the proxies of `vite-proxy-extensions.ts`, where
-the template gives an app no place for a plugin; the Playwright backends' own settings, which
-`frontend/tests/support/process/servers.ts` merges over the template's from `loadAppBackendEnv()`
-in the app-owned `frontend/tests/support/backend-env-extensions.ts`, given the backend's URL, where
-the template gives an app no place for a backend setting under Playwright: this app's runs each
-backend in a local stage, whatever the run's own, points its controller at the fake it serves
-itself, and its chats at a store environment in that fake, and its collector at the fake collector it serves itself, and gives each backend a VAPID key of its own, minted at its start, and holds its waits'
-batcher off for a day; the Playwright run's own setup, which `frontend/tests/support/global-setup.ts`
-runs from `loadAppGlobalSetup()` in the app-owned `frontend/tests/support/global-setup-extensions.ts`
-in the runner's process, before it seeds the run's database, where the template gives an app no
-place for a step of a run's setup: this app's takes the test suite lock, one run at a time across
-the project's environments, held until the runner ends; a Playwright test's budget, 60 s in
-`frontend/playwright.config.ts`, where the template leaves Playwright's 30 s, which the longest
-specs outrun on a node other environments load; a passing Playwright test's output, which
-`preserveOutput: 'failures-only'` in `frontend/playwright.config.ts` removes, where the template
-kept every test's folder, each with a `backend.log` holding its worker's whole log so far, so that
-`test-results/` grew with the square of the test count, some 500 MB a run, and a copy of it under
-a size cap left out the failing test's own log, the HTML report keeping every test's logs as
-attachments; a test's service logs, which the log collector's `stop` in
-`frontend/tests/support/process/backend-logs.ts` attaches only to a test that did not end as
-expected, where the template attached them to every test, so that the HTML reporter held each body,
-a replay of its worker's whole log so far, in the runner, its memory growing with the square of a
-worker's test count until the `modern-app` container was OOMKilled at 8Gi;
-the detect-flakes mode of a session's runs, which `frontend/playwright.config.ts`
-takes from `detectFlakes()` in the app-owned `frontend/tests/support/detect-flakes.ts`: in a run
-that takes the test suite lock, two retries, `failOnFlakyTests` and, before the list reporter, the
-reporter that takes a failing test's retries away past the cap of 10 failed tests a run, where the
-template retries nothing, so that a session's run names each test that passed only on a rerun and
-stays red (F122.7), CI's run keeping the template's settings
-(`tests/infrastructure/detect-flakes.spec.ts` pins it); a worker's service start in
-`frontend/tests/support/process/servers.ts` and `frontend/tests/support/fixtures-infrastructure.ts`,
-which attaches the service's output to the worker's log from the spawn on and puts it in a failed
-start's error, where the template attached it once the service was ready, so that a start that
-failed said nothing of why (`tests/infrastructure/server-start.spec.ts` pins it); a worker's
-frontend start in `frontend/tests/support/process/servers.ts`, which, refused its port, picks
-another and starts again, up to five ports, where the template's failed, so that a port another
-process took between its pick and the dev server's bind, `get-port`'s lock holding within one
-process alone, failed the worker's specs unrun (`tests/infrastructure/server-start.spec.ts` pins
-it); a Playwright page's motion in `frontend/tests/support/fixtures-infrastructure.ts`, the reduced-motion setting
-alone, where the template also added a style tag setting every transition and animation to 0 s to
-the page before its first `goto`, which replaced the page and the tag with it, so that the tag
-reached no page; `run-suite`'s Playwright worker count,
-which `tools/suite_runner/local.py` reads from `PLAYWRIGHT_WORKERS` when no `--workers` is given,
-where the library's `modernApp.test` fixes run-suite's flags and so left CI on the Playwright
-config's count; `run-suite`'s frontend run, which `tools/suite_runner/local.py` builds once with
-`VITE_TEST_MODE=true`, `pnpm build` with its check, and runs once on that build under
-`PLAYWRIGHT_PREVIEW_MODE=true`, the whole suite or the selection `--frontend-args` gives it, its
-report `frontend.xml`, the comments of `frontend/tests/infrastructure/sse/sse-auth-recovery.spec.ts`
-and `sse-connectivity.spec.ts` saying so, where the template's built plain, ran the suite on the
-dev servers, then built again in test mode and ran the `@preview` specs alone into
-`frontend-preview.xml`, so that CI runs the suite once, on a production build, its four workers
-peaking at 4.0 to 4.3 GiB where the dev servers' peaked at 6.0 to 6.3; the completion of
-`useSSETask` in `frontend/src/hooks/use-sse-task.ts`, which
-takes a `task_completed` as the task's result unless the result says it failed, with `success` false
-or an `error_message`, where the template's took one without `success: true` as failed, and so
-failed every task whose result is a plain model, as the backend's `TaskService` sends one; a
-task's progress update, `TaskProgressUpdate.data` in `backend/app/schemas/task_schema.py`, which
-`send_progress` takes in `backend/app/services/base_task.py` and `task_service.py`, what the task
-has answered so far, where the template's carried a text and a fraction alone, so that a page shows
-a task's answer as it comes, By's counts a fact's at a time; the
-generated mutation hooks of `frontend/scripts/generate-api.js`, which name the page in each write's
-`X-Sender` header, `SENDER`, exported from the generated hooks, where the template's named none, so
-that a page leaves the `project_changed` its own write committed to the read of every query that
-write's hook makes, and a click reads each query once, and which run a caller's `onSuccess` beside
-that read and return both, where the template's let a caller's replace it; the live stream, which
-names its heartbeat's cadence in `ready` and sends `heartbeat` as a named event every 5 s
-(`backend/app/api/sse.py`, `backend/app/config.py`), is timed by the browser, which counts it gone
-after two silent beats, retries it at most 5 s apart and at once back online, a refusal whose
-session check failed included, and toasts no reload (`frontend/src/workers/sse-worker.ts`,
-`frontend/src/contexts/sse-context-base.ts` and `sse-context-provider.tsx`,
-`tests/infrastructure/sse/sse-auth-recovery.spec.ts` pinning the retry), with its testing outage
-(`backend/app/api/testing_sse.py`, `backend/app/schemas/testing_sse.py`,
-`backend/app/services/testing_service.py`) and the generated client's fetch, `fetch: appFetch` in
-`generate-api.js`, which times a slow request, where the template's stream retried up to 60 s apart,
-gave up on a refusal behind a toast and sent its heartbeat as a comment the browser never sees, so
-that a dropped connection went unseen ([`docs/ui.md`](docs/ui.md)); the
-app's height, `h-dvh` on the root layout of `frontend/src/routes/__root.tsx` and on the auth gate's
-screens in `frontend/src/components/auth/auth-gate.tsx`, where the template's `h-screen`, `100vh`,
-which a phone's Chrome measures with its URL bar hidden, cut off the app's foot by the bar's
-height, the app scrolling inside itself so that the bar never hides; the
-type size of the toast's title, `text-base` in `frontend/src/components/primitives/toast.tsx`, and of
-the auth gate's messages, `text-base` in `frontend/src/components/auth/auth-gate.tsx`, where the
-template's `text-sm` stood a step below the mockup's base, the toast's action taking a small
-button's `text-sm` from the app-owned `frontend/src/styles/toast.ts`; the
-new-version feature's setting, `NEW_VERSION` in the app-owned `frontend/src/lib/config/new-version.ts`,
-which `frontend/src/contexts/deployment-context-provider.tsx` reads: `banner`, the template's
-banner, or `reload`, this app's, which reloads the page by itself once the reload takes nothing
-being typed in, no field holding words it would put out of sight but one marked
-`data-survives-reload`, no write on its way, and no field with the focus but as the tab comes back
-into view, where the template raised the banner alone; under `reload`
-`frontend/tests/infrastructure/deployment/deployment-banner.spec.ts` skips, and
-`tests/shell/new-version.spec.ts` pins the reload; the
-docstring of `scoped_session` in `backend/app/database.py`, which says that a nested call on the
-same thread hands back the outer session and commits and closes it, where the template's warns only
-of a request's session; the run of the after-commit callbacks, `run_after_commit_callbacks` in
-`backend/app/utils/after_commit.py`, which takes them off the list before the first runs, where the
-template's cleared the list only once they had run, so that a callback whose own commit ran them, a
-`scoped_session` it opened, ran itself again at that commit, without end
-(`tests/utils/test_after_commit.py` pins it); the app's engine, which `create_app()` in `backend/app/__init__.py`
-hands to `configure_engine()` in the app-owned `backend/app/startup.py` before anything connects,
-where the template gives an app no place for a listener on its engine: this app's turns
-PostgreSQL's JIT off in every transaction; the readiness check's migration lookup,
-`get_pending_migrations` in `backend/app/database.py`, which reads the current revision on the
-connection it holds, where the template's opened a second one beside it, as the pool guard showed
-in every Playwright spec; and the five INFO lines that name the signed-in caller, in `backend/app/utils/auth.py`
-(every authenticated request, and after a refresh), `backend/app/services/auth_service.py` (token validation)
-and `backend/app/api/auth.py` (`/api/auth/self` and the callback), which log the subject and the roles
-and no email, where the template's log the address too, so that a caller's sign-in name stays out of the
-pod's log (`tests/test_editor_gate.py` pins it). uv, the migration that keeps the app's loggers,
-the masked database URL in `backend/app/cli.py` and the declarative `Jenkinsfile` on the library's
-`modernApp.test` are the template's own since root v0.2.0 and backend v0.14.0, and
-`backend/scripts/init-dev-database.py` (production's locale) since backend v0.15.0.
+Template-owned code is improved in this repo, not in the template repos (D018): where the template
+gets something wrong, or does less well than the work needs, the file is changed here, with no need
+to stay backwards compatible, in a commit of its own that says why. Nothing tracks those edits, in
+this file or any other (D283). The sync with ModernAppTemplate has an agent read every
+template-owned file against the template at the version `.copier-answers.yml` names, and `git log`
+and `git diff` on the file give the why; that is also how a `copier update` that conflicts on one
+is resolved.
 
 ## Architecture model
 
@@ -326,62 +156,29 @@ Issue tracking follows the host convention: this project is **`PilotApp`** on th
 - [`docs/change-discipline.md`](docs/change-discipline.md): the rules every change obeys.
 - [`docs/slice-test-plan.md`](docs/slice-test-plan.md): how a slice is verified.
 - [`docs/slice-doc-plan.md`](docs/slice-doc-plan.md): which doc surfaces a shipped slice updates.
-- [`docs/deployment.md`](docs/deployment.md): the dev and prd stages, how a change reaches each,
-  and what runs there.
-- [`docs/sign-in.md`](docs/sign-in.md): who can use Pilot: the `editor` role the API requires, a
-  signed-in test's session included, the person on the record, with the handle they choose, and the
-  service user a session outside Pilot calls as.
-- [`docs/ui.md`](docs/ui.md), [`docs/projects.md`](docs/projects.md),
-  [`docs/timeline.md`](docs/timeline.md), [`docs/documents.md`](docs/documents.md): the UI's shell,
-  tokens, motion, shared pieces and links in text, the phone's frame, its home and the drawer, a
-  dropped connection, the buttons that write or start work and the drawn scrollbar; the projects' API and
-  screens, a project's address, the plus and Create project, a project on a phone, its home, tabs and views; the timeline's
-  API, live event and screens, the fold, a one-ask item's Send, Pilot's note on an ask and its alert, and the done lines' marks; a document read alone, the handbook and the journal, a draft's asks, the attachments, the tabs, the
-  tab line and the side panel with a draft's Draft tab.
-- [`docs/record.md`](docs/record.md), [`docs/block-dsl.md`](docs/block-dsl.md),
-  [`docs/projection.md`](docs/projection.md), [`docs/engine.md`](docs/engine.md): the record's
-  schema and the dev seed, the block DSL, the store's tree and its files, and the engine between
-  them.
-- [`docs/sync.md`](docs/sync.md): the sync protocol and `pilot-sync`, the sidecar that keeps the
-  store's tree in step with the record, and its write lock, through which each save is a session's.
-- [`docs/collection.md`](docs/collection.md), [`docs/collector.md`](docs/collector.md): the
-  transcripts a collector publishes: its door and bearer, the inventory, a publication whole or
-  appended, a walk's end, its event and readiness, a launch of Pilot's on its Session and a round
-  under a continuation, a call's cost and caches, the adopted project, and the invented scenario with its load and its files; and the collector: its process
-  and settings, the home, the walk, a transcript's lines and facts, the carry, the reading it
-  serves, its image and its tests.
-- [`docs/jobs.md`](docs/jobs.md), [`docs/controller.md`](docs/controller.md),
-  [`docs/sessions.md`](docs/sessions.md), [`docs/work.md`](docs/work.md): the supervisor that runs
-  the server's long-lived jobs; the KubeCoder controller's client, its outage, its fleet stream,
-  environments on demand and Pilot's own, with its fake; the sessions, the gate, its slot and the
-  jobs' queue, a Turn's cause, the holds, their records, relay and live stream, Stop, Resume, Close and Retry; a work item's status,
-  its line, its progress, the time it still takes and its figures, its debrief and the debrief's notice, its session log and its close for good, and Pilot's own work: its jobs, their briefs, Retry.
-- [`docs/mcp.md`](docs/mcp.md), [`docs/round-trip.md`](docs/round-trip.md),
-  [`docs/chats.md`](docs/chats.md): Pilot's MCP server, handed to every session it creates, the
-  worker's tools and the brain's, and its projects surface, any session's, with its door and its
-  service user; a registered document's read at the run's end, what of it is
-  Pilot's, a claimed or researched block held through its run, Stop and take over and the Cancel,
-  the clarification run, its write-back and the run's continuation; a project's chat and a draft's
-  definition chat, its start in the store, its brief, the project's state every brief of the
-  brain's carries, its Stop, its close, `chat.md`, and its Chat tab, composer, Discuss and *In the
-  chat*.
-- [`docs/conversations.md`](docs/conversations.md): a conversation with Pilot, a session outside
-  Pilot's: whose it is, its routes, its opening, messages and reply, its interrupt, end and close,
-  its brief, and the Conversations tab.
-- [`docs/notifications.md`](docs/notifications.md): the notifications through web push, a browser's
-  subscription, its switch, the offer and sign-out, the service worker, the online status and the
-  closing on the device, a project's per member for what they have not been shown and the alarms,
-  their reconcile, spacing and turn, and the fake push service.
-- [`docs/usage.md`](docs/usage.md): the usage limits: the reading, the week's and the five-hour
-  halts and their settings, the overrule, the halt file, the hard stop, a run halted at its turn's
-  end, the nudge, the quota wall, the quota weeks, and each turn's tokens and cost.
-- [`docs/store-update.md`](docs/store-update.md): the store's update: `update-store`, the hold at the
-  gate and on a chat's message, the stop, the reset, the reconcile, the retry and the lift, and its
-  testing route.
-- [`docs/dashboard.md`](docs/dashboard.md): the dashboard's query engine: the catalogue, a view's
-  state and its refusal, the answers, the bounds, the two counts as tasks, a conversation's reading
-  and the fake collector, what the dashboard stores with its system views and the workflow's load,
-  and the timing.
-- [`docs/waits.md`](docs/waits.md): the brain's card and timed waits: the tracker-events endpoint
-  and YouTrack's token, the due timer, a person's request, the batcher, the wait's run and its
-  resume, the close and the testing routes.
+- [`docs/deployment.md`](docs/deployment.md): the dev and prd stages and how a change reaches each.
+- [`docs/sign-in.md`](docs/sign-in.md): who can use Pilot and how they sign in.
+- [`docs/ui.md`](docs/ui.md): the UI's shell, tokens, motion and shared pieces.
+- [`docs/projects.md`](docs/projects.md): the projects, their list, head and screens.
+- [`docs/timeline.md`](docs/timeline.md): a project's timeline.
+- [`docs/documents.md`](docs/documents.md): a project's documents, its tabs and the side panel.
+- [`docs/record.md`](docs/record.md): the record's schema and the dev seed.
+- [`docs/block-dsl.md`](docs/block-dsl.md): the block DSL.
+- [`docs/projection.md`](docs/projection.md): the store's tree and its files.
+- [`docs/engine.md`](docs/engine.md): the engine between the record and the store's tree.
+- [`docs/sync.md`](docs/sync.md): the sync protocol and `pilot-sync`, the store's sidecar.
+- [`docs/collection.md`](docs/collection.md): the transcripts a collector publishes.
+- [`docs/collector.md`](docs/collector.md): the collector.
+- [`docs/jobs.md`](docs/jobs.md): the supervisor of the server's long-lived jobs.
+- [`docs/controller.md`](docs/controller.md): the KubeCoder controller's client and its fake.
+- [`docs/sessions.md`](docs/sessions.md): the sessions Pilot runs and the gate they pass.
+- [`docs/work.md`](docs/work.md): the work items and Pilot's own work.
+- [`docs/mcp.md`](docs/mcp.md): Pilot's MCP server and its projects surface.
+- [`docs/round-trip.md`](docs/round-trip.md): a registered document's round trip.
+- [`docs/chats.md`](docs/chats.md): a project's chat and a draft's definition chat.
+- [`docs/conversations.md`](docs/conversations.md): a conversation with Pilot from outside it.
+- [`docs/notifications.md`](docs/notifications.md): the notifications through web push.
+- [`docs/usage.md`](docs/usage.md): the usage limits and each turn's tokens and cost.
+- [`docs/store-update.md`](docs/store-update.md): the store's update.
+- [`docs/dashboard.md`](docs/dashboard.md): the dashboard's query engine.
+- [`docs/waits.md`](docs/waits.md): the brain's card and timed waits.

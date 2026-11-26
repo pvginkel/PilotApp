@@ -44,15 +44,17 @@ corrects it.
 
 ### 3. `README.md`
 
-The public face: what Pilot is, its shape and its status. A slice that changes any of those three
-(above all the status line, and later how to run or deploy it) keeps it true.
+The public face: what Pilot is and its shape. A slice that changes either (a part added or gone, or
+how Pilot is run or deployed) keeps it true. Its status line is no slice's to change.
 
 ### 4. `CLAUDE.md`
 
 Loaded every turn by every agent the pipeline spawns, so it stays at about one screen and states
-each fact once. When a new standing rule belongs there, something else moves out to a `docs/` topic
-doc so that the file does not grow. Nothing the pipeline reads by machine goes in it; that is
-`.aiworkflowrc`'s job.
+each fact once. This phase leaves it alone unless a standing rule it states changes, or a new
+topic doc takes its one line under Key documentation: what a slice built goes into a `docs/` topic
+doc, never into `CLAUDE.md`. When a new standing rule belongs there, something else moves out to a
+`docs/` topic doc so that the file does not grow. Nothing the pipeline reads by machine goes in it;
+that is `.aiworkflowrc`'s job.
 
 ### 5. Consumers in other repos
 
@@ -106,6 +108,10 @@ merged tree does not go in.
 
 **Nothing private goes in.** No excerpt of a real project, chat, transcript or decision document,
 and no secret: examples are invented.
+
+**No slice keeps a status line**, in `README.md`, `CLAUDE.md` or the design record: what a slice
+built is stated in the topic doc that describes it, and a list of what is in, appended to at each
+slice, is a live snapshot on a standing page, which `CLAUDE.md`'s rule on corrections drops.
 
 ## Gates
 
