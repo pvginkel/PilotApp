@@ -1,5 +1,6 @@
 /* The dashboard (PilotAppSpecs design/mockup/dashboard/dashboard.css), loaded with its screen's
-   module: the global toolbar and the one view's tab, the banner, the main area and the view's card,
+   module: the line of view tabs, the global toolbar and the one view's tab, the new tab's panel,
+   the banner, the main area and the view's card,
    the legend and the Rows presentation's chart, its text, lines and surfaces on the app's tokens.
    The one palette the app has no token for is the categorical one, --series-0 to --series-19 and
    --series-other, the color's values: dark's set is brighter and more saturated than light's, to
@@ -37,8 +38,16 @@
     padding: 0 24px;
     box-shadow: inset 0 -1px 0 hsl(var(--border));
   }
+  /* The line of view tabs is the document tabs' line (project-head.css, .doc-tabs and .dtab) in the
+     toolbar's margins, on the page's colour and 36px high. Its icon buttons, Close all and the new
+     view, stand where the new view's stands at the toolbar's end while one view is open. */
+  .dash .dash-tabs { height: 36px; margin-top: 6px; padding: 0 24px; background: none; }
+  .dash .dash-tabs > .btn-icon { flex: none; align-self: center; position: relative; top: -2px; }
+  .dash .dash-bar .grow { flex: 1; }
+
   /* The one view, with no line: a tab at the toolbar's left, a small button high, the tab's own
-     look without the line's primary: its icon and its name, cut short past 300px. */
+     look without the line's primary: its icon, its name cut short past 300px, its square-x; the
+     middle button closes it too. */
   .dash .dash-onetab {
     flex: 0 1 auto;
     display: inline-flex;
@@ -48,7 +57,7 @@
     max-width: 300px;
     height: 28px;
     margin-right: 6px;
-    padding: 0 10px;
+    padding: 0 3px 0 10px;
     border: 1px solid hsl(var(--border));
     border-radius: var(--radius);
     background: hsl(var(--background));
@@ -57,6 +66,69 @@
   }
   .dash .dash-onetab > .icon { flex: none; }
   .dash .dash-onetab .t { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .dash .dash-onetab .dtab-x { margin-right: 0; }
+
+  /* The new tab's panel (views-panel.tsx), in the view's place: its block centred in its height, the
+     head row of the find and Start from scratch, then the two lists side by side, a line between
+     them, each a 274px column of titles at the body's size, scrolling on its own under its heading,
+     at most half the window high or 400px where that is more. A panel 760px wide or less stacks
+     them, System views first, and scrolls them as one. A row's title runs to its right edge but for
+     what shows at its right, so it gives way on hover; a hairline under a list's heading shows while
+     the list is scrolled from its top. A rename is typed in the title's place, the row as tall as it
+     was; a name taken is said under it. */
+  .dash .dash-panel { flex: 1; min-height: 0; display: flex; flex-direction: column; container-type: inline-size; }
+  .dash .dash-views { flex: 1; min-height: 0; display: flex; flex-direction: column; justify-content: center; padding: 31px 0; }
+  .dash .dash-views-top { flex: none; display: flex; align-items: center; gap: 8px; width: min(570px, 100% - 48px); margin: 0 auto 13px; }
+  .dash .dash-views-find { flex: 1; min-width: 0; width: auto; height: 34px; border-width: 5px 1px; }
+  .dash .dash-views-top .btn { flex: none; }
+  .dash .dash-views-cols { flex: 0 1 auto; min-height: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 285px)); grid-template-rows: minmax(0, 1fr); justify-content: center; padding: 0 24px; }
+  .dash .dash-views-part { min-width: 0; min-height: 0; display: flex; flex-direction: column; padding-right: 11px; }
+  .dash .dash-views-part + .dash-views-part { padding: 0 0 0 10px; border-left: 1px solid hsl(var(--border)); }
+  .dash .dash-views-list, .dash .dash-views-cols { scrollbar-width: thin; scrollbar-color: hsl(var(--muted-foreground) / 0.4) transparent; }
+  .dash .dash-views-list { flex: 0 1 auto; min-height: 0; max-height: max(50vh, 400px); overflow-y: auto; }
+  @container (max-width: 760px) {
+    .dash .dash-views-top { flex-wrap: wrap; width: min(274px, 100% - 48px); }
+    .dash .dash-views-find { flex-basis: 100%; }
+    .dash .dash-views-cols { display: block; overflow-y: auto; }
+    .dash .dash-views-part, .dash .dash-views-part + .dash-views-part { max-width: 274px; margin: 0 auto; padding: 0; border: 0; }
+    .dash .dash-views-part + .dash-views-part { margin-top: 15px; }
+    .dash .dash-views-list { max-height: none; overflow: visible; }
+  }
+  .dash .dash-views-head { flex: none; margin: 0; padding: 0 7px 3px; border-bottom: 1px solid transparent; font-size: var(--text-sm); font-weight: 600; color: hsl(var(--muted-foreground)); }
+  .dash .dash-views-part.scrolled .dash-views-head { border-bottom-color: hsl(var(--border)); }
+  .dash .dash-views-none { margin: 3px 7px; font-size: var(--text-base); color: hsl(var(--muted-foreground)); }
+  .dash .dash-viewrow { position: relative; }
+  .dash .dash-view {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    width: 100%;
+    padding: 3.5px 7px;
+    border: 0;
+    border-radius: var(--radius);
+    background: none;
+    color: inherit;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+  }
+  .dash .dash-view:hover, .dash .dash-viewrow:focus-within .dash-view { background: hsl(var(--accent)); }
+  .dash .dash-view > .icon { flex: none; width: 16px; height: 16px; color: hsl(var(--muted-foreground)); }
+  .dash .dash-view .txt { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+  .dash .dash-view .name { overflow: hidden; font-size: var(--text-base); line-height: 1.4; text-overflow: ellipsis; white-space: nowrap; }
+  .dash .dash-view .what { margin-top: 1px; font-size: var(--text-sm); color: hsl(var(--destructive-text)); }
+  .dash .dash-viewrow.fav .dash-view, .dash .dash-viewrow.system:hover .dash-view, .dash .dash-viewrow.system:focus-within .dash-view { padding-right: 40px; }
+  .dash .dash-viewrow:not(.system, .renaming):hover .dash-view, .dash .dash-viewrow:not(.system, .renaming):focus-within .dash-view { padding-right: 100px; }
+  .dash .dash-view-acts { position: absolute; top: 50%; right: 8px; display: flex; gap: 2px; transform: translateY(-50%); }
+  .dash .dash-view-acts .btn { opacity: 0; }
+  .dash .dash-viewrow:hover .dash-view-acts .btn, .dash .dash-viewrow:focus-within .dash-view-acts .btn, .dash .dash-view-acts .dash-view-star.on { opacity: 1; }
+  .dash .dash-view-acts .btn:hover:not(:disabled) { background: hsl(var(--foreground) / 0.08); }
+  .dash .dash-view-x:hover:not(:disabled) { color: hsl(var(--destructive-text)); }
+  .dash .dash-view-star { color: hsl(var(--foreground)); }
+  .dash .dash-view-star.on .icon { fill: currentColor; }
+  .dash .dash-viewrow.renaming .dash-view { align-items: flex-start; background: hsl(var(--accent)); cursor: default; }
+  .dash .dash-viewrow.renaming .dash-view > .icon { margin-top: calc((var(--text-base) * 1.4 - 16px) / 2); }
+  .dash .dash-view-name { display: block; width: 100%; max-width: 420px; height: 26px; margin: calc((var(--text-base) * 1.4 - 26px) / 2) 0 calc((var(--text-base) * 1.4 - 26px) / 2) -9px; padding: 0 8px; border-width: 1px; line-height: 24px; }
 
   /* What failed, under the toolbar until it is closed. */
   .dash .dash-banner {

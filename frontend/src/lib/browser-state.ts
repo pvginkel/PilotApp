@@ -65,6 +65,28 @@ export interface KeptLine {
   seen: readonly string[];
 }
 
+/** A view tab of the dashboard as the person left it (F161.1): what it holds of its view. */
+export interface KeptViewTab {
+  /** Its id in the dashboard's address, letters and digits. */
+  id: string;
+  /** The saved view it opened from: its id, and its name as last read; none from scratch or a link. */
+  view: { id: string; name: string } | null;
+  /** The state it opened with, as an address carries it; none before it had one. */
+  opened: string | null;
+  /** Its state now, as an address carries it; none while it shows the new tab's panel. */
+  now: string | null;
+  /** Where its main area was scrolled to. */
+  scroll: number;
+}
+
+/** The dashboard's view tabs as the person left them (F161.1, F160.10). */
+export interface KeptViewTabs {
+  /** The open tabs, in the order they opened. */
+  tabs: readonly KeptViewTab[];
+  /** Their ids in the order they last showed, the latest first. */
+  seen: readonly string[];
+}
+
 interface BrowserState {
   theme: Theme;
   /** The project last on screen, which the bare address opens (F1.6). */
@@ -76,6 +98,8 @@ interface BrowserState {
   panelWidths: PanelWidths;
   /** Each project's tab line, by the project's id, while a tab of it is open (F1.6, F28.8). */
   lines: Record<string, KeptLine>;
+  /** The dashboard's view tabs, written whole by the window that changed them, never merged with another's. */
+  viewTabs: KeptViewTabs;
   /**
    * The gold bar's offer of this browser's notifications answered (F146.2): its Turn on or its Not
    * now tapped, or the profile page's switch having turned them on.
@@ -99,6 +123,7 @@ function load(): BrowserState {
     panels: loadPanels(saved.panels),
     panelWidths: loadPanelWidths(saved.panelWidths),
     lines: loadLines(saved.lines),
+    viewTabs: loadViewTabs(saved.viewTabs),
     notificationsOffered: saved.notificationsOffered === true,
     subscribedFor: typeof saved.subscribedFor === 'string' ? saved.subscribedFor : null,
   };
@@ -149,6 +174,34 @@ function docTabOf(tab: unknown): DocTab[] {
   return [{ key, kind: of, id, documentId, path: at }];
 }
 
+const TAB_ID = /^[A-Za-z0-9]+$/;
+
+function loadViewTabs(saved: unknown): KeptViewTabs {
+  const { tabs, seen } = (typeof saved === 'object' && saved !== null ? saved : {}) as Partial<Record<keyof KeptViewTabs, unknown>>;
+  const kept = Array.isArray(tabs) ? tabs.flatMap(viewTabOf) : [];
+  const ids = new Set(kept.map((tab) => tab.id));
+  const shown = Array.isArray(seen) ? seen.filter((id): id is string => typeof id === 'string' && ids.has(id)) : [];
+  return { tabs: kept, seen: shown };
+}
+
+/** The tab as kept, none where it is no tab. */
+function viewTabOf(tab: unknown): KeptViewTab[] {
+  if (typeof tab !== 'object' || tab === null) return [];
+  const { id, view, opened, now, scroll } = tab as Partial<Record<keyof KeptViewTab, unknown>>;
+  if (typeof id !== 'string' || !TAB_ID.test(id)) return [];
+  const text = (value: unknown) => (typeof value === 'string' ? value : null);
+  const { id: viewId, name } = (typeof view === 'object' && view !== null ? view : {}) as Record<string, unknown>;
+  return [
+    {
+      id,
+      view: typeof viewId === 'string' && typeof name === 'string' ? { id: viewId, name } : null,
+      opened: text(opened),
+      now: text(now),
+      scroll: typeof scroll === 'number' && scroll > 0 ? scroll : 0,
+    },
+  ];
+}
+
 let state = load();
 const listeners = new Set<() => void>();
 
@@ -179,6 +232,11 @@ export function rememberLine(projectId: string, line: KeptLine): void {
   if (line.tabs.length === 0) delete lines[projectId];
   else lines[projectId] = { tabs: line.tabs, seen: line.seen };
   rememberInBrowser({ lines });
+}
+
+/** Keeps the dashboard's view tabs as this window has them, over what another window kept of them. */
+export function rememberViewTabs(viewTabs: KeptViewTabs): void {
+  rememberInBrowser({ viewTabs });
 }
 
 function subscribe(listener: () => void): () => void {

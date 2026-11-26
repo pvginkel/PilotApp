@@ -8,20 +8,25 @@
  */
 
 import { useState } from 'react';
-import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-query';
+import { keepPreviousData, useQuery, useQueryClient, type UseQueryResult } from '@tanstack/react-query';
 import { addressQuery, rowsQuery, stateOf } from '@/lib/dashboard/queries';
 import type { Rows } from '@/lib/dashboard/rows-layout';
 import { readState, withoutLook } from '@/lib/dashboard/state';
 import { useUiStateInstrumentation } from '@/lib/test/ui-state';
 
-/** A read that failed: what it said, when, and its Retry. */
+/** What failed: what it said, when, and a read's Retry; a write has none. */
 export interface Failure {
   error: Error;
   at: number;
-  retry: () => void;
+  retry?: () => void;
 }
 
-export interface DashboardView {
+/** A read's failure, with its Retry; none where it has not failed. */
+export function failureOf(query: UseQueryResult<unknown>): Failure | null {
+  return query.isError ? { error: query.error, at: query.errorUpdatedAt, retry: () => void query.refetch() } : null;
+}
+
+interface DashboardView {
   /** The answer drawn: the state's, else the last one drawn; none before the first. */
   rows: Rows | undefined;
   /** Whether Relative reads the figures drawn (`rel=1`), a look-only part. */
@@ -53,14 +58,10 @@ export function useDashboardView(written: string | null): DashboardView {
   const [drawn, setDrawn] = useState<Rows | undefined>(undefined);
   if (rows.data !== undefined && rows.data !== drawn) setDrawn(rows.data);
 
-  const failed = address.isError ? address : rows.isError ? rows : null;
   return {
     rows: drawn,
     relative: state?.relative ?? false,
     changing: rows.isPlaceholderData || (written !== null && address.isPending),
-    failure:
-      failed === null
-        ? null
-        : { error: failed.error, at: failed.errorUpdatedAt, retry: () => void failed.refetch() },
+    failure: failureOf(address) ?? failureOf(rows),
   };
 }

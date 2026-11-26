@@ -114,7 +114,7 @@ type Chip =
   | { kind: 'outliers'; marked: boolean };
 
 /** A view's whole state, every part as the page reads it. */
-interface ViewState {
+export interface ViewState {
   time: Time;
   by: string;
   presentation: Presentation;

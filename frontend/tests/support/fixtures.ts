@@ -19,7 +19,8 @@
  * shows, the notifications standing there and the page's visibility,
  * `storeUpdate` makes the store's update and asks its lift, lifting one a spec left standing, and
  * `waits` adds the brain's waits, fires them, places their runs and closes them. `dashboard` is the
- * dashboard, the screen beside Projects, and `dashboardBounds` sets its engine's timeout.
+ * dashboard, the screen beside Projects, `dashboardBounds` sets its engine's timeout and
+ * `savedViews` saves and removes its views through the API.
  * `conditions`, the worker's, reads what the gold bar reads, and `warmFrontend` has the worker's dev
  * server serve the app once before the worker's first test. `poolGuard` fails a test where a thread of
  * the worker's backend checked out a second connection of its pool while it held one, and
@@ -57,6 +58,7 @@ import { ShellPage } from './page-objects/shell-page';
 import { TimelinePage } from './page-objects/timeline-page';
 import { People } from './people';
 import { Projects } from './projects';
+import { SavedViews } from './saved-views';
 import { StoreUpdate } from './store-update';
 import { Waits } from './waits';
 
@@ -91,6 +93,7 @@ interface DomainFixtures {
   waits: Waits;
   dashboard: DashboardPage;
   dashboardBounds: DashboardBounds;
+  savedViews: SavedViews;
   poolGuard: void;
   statementCap: void;
 }
@@ -232,6 +235,9 @@ export const test = infrastructureFixtures.extend<DomainFixtures, DomainWorkerFi
     const dashboardBounds = new DashboardBounds(page, backendUrl);
     await use(dashboardBounds);
     await dashboardBounds.set({});
+  },
+  savedViews: async ({ page, backendUrl }, use) => {
+    await use(new SavedViews(page, backendUrl));
   },
   // The nestings the backend's pool guard kept (backend/app/utils/pool_guard.py), taken once the
   // test and the fixtures it used are done: the test's, its fixtures', or those of a thread a test

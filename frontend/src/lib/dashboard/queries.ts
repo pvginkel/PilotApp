@@ -8,6 +8,9 @@
  * A state from outside the page, a link opened cold, is read through the server's normal form
  * first (`GET /api/dashboard/address`), since the page reads the server's forms alone: the
  * address of a text is the server's at the page's first read of it, and a normal form is its own.
+ *
+ * What a view may name, the catalogue's parts, and the person's favourites are no figures: the
+ * walk's event leaves them. A write of the dashboard's reads again what it changed, and no more.
  */
 
 import { queryOptions, type QueryClient } from '@tanstack/react-query';
@@ -17,11 +20,19 @@ import type { components } from '@/lib/api/generated/types';
 import type { Rows } from './rows-layout';
 
 type Address = components['schemas']['AddressResponseSchema.b67cf98'];
+export type Catalogue = components['schemas']['CatalogueResponseSchema.b67cf98'];
+export type Favourites = components['schemas']['FavouritesSchema.ddf95d6'];
+export type SavedView = components['schemas']['CatalogueResponseSchema.b67cf98.SavedViewSchema'];
+type CataloguePart = Catalogue['part'];
 
 /** The first part of the key of every query of the record's figures. */
 export const FIGURES = 'dashboard';
 
 const ADDRESS = 'dashboard.address';
+
+const CATALOGUE = 'dashboard.catalogue';
+
+const FAVOURITES = 'dashboard.favourites';
 
 const PREFIX = '#dash/';
 
@@ -54,5 +65,31 @@ export function rowsQuery(key: string) {
     },
     staleTime: Infinity,
     refetchOnWindowFocus: false,
+  });
+}
+
+/** A part of the catalogue: `stored`, what the dashboard stores, is everyone's and changes under the page. */
+export function catalogueQuery(part: CataloguePart) {
+  return queryOptions({
+    queryKey: [CATALOGUE, part],
+    queryFn: async ({ signal }): Promise<Catalogue> => {
+      const { data, error, response } = await api.GET('/api/dashboard/catalogue', { params: { query: { part } }, signal });
+      if (error !== undefined) throw toApiError(error, response.status);
+      return data;
+    },
+    staleTime: Infinity,
+  });
+}
+
+/** The signed-in person's favourites: the views they starred, in the order starred, and their dimensions. */
+export function favouritesQuery() {
+  return queryOptions({
+    queryKey: [FAVOURITES],
+    queryFn: async ({ signal }): Promise<Favourites> => {
+      const { data, error, response } = await api.GET('/api/dashboard/favourites', { signal });
+      if (error !== undefined) throw toApiError(error, response.status);
+      return data;
+    },
+    staleTime: Infinity,
   });
 }

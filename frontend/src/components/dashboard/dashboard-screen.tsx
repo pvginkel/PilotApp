@@ -5,52 +5,88 @@
  * under it is out of view (`ScreenInView`); it keeps its scroll and its answers, and reads again
  * on the walk's event whichever screen shows (`use-walk-reads.ts`).
  *
- * Top to bottom (the mockup's `frame.js`): the global toolbar, the view's tab at its left; the
- * banner, what failed; the main area, which scrolls, holding the view's card. The view is the
- * state the address names (`address.ts`), read off the hash as the browser holds it; an address
- * that names none, `#dash`, finds the view as it was left.
+ * Top to bottom (the mockup's `frame.js`): the line of view tabs, while more than one is open
+ * (`view-tabs.tsx`); then the tab at hand: on the new tab's panel (`views-panel.tsx`), or its
+ * view, the global toolbar, with one view its tab at the toolbar's left and copy-plus at its end;
+ * the banner, what failed; the main area, which scrolls, holding the view's card. The tabs follow
+ * the address (`use-view-tabs.ts`), read off the hash as the browser holds it; `#dash` names none
+ * and shows the tab at hand as it was left, the panel at the first opening.
+ *
+ * Each tab's answers are kept for as long as the tab (F160.6): a tab out of sight holds its view's
+ * queries without reading them, so that the walk's event leaves them stale and they are read
+ * again as the tab is brought into view. Its scroll is kept with it in the browser (F160.10).
  */
 
-import { useState } from 'react';
+import { useLayoutEffect, useRef, useState, type RefObject } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useRouterState } from '@tanstack/react-router';
-import { ChartBar, RefreshCw, X } from 'lucide-react';
-import { useDashboardView, type DashboardView, type Failure } from '@/hooks/use-dashboard-view';
+import { useDashboardView, type Failure } from '@/hooks/use-dashboard-view';
 import { ScreenInView } from '@/hooks/use-screens';
+import { keepScroll, scrollOf, useViewTabMoves, useViewTabs, useViewTabsAt, type ViewTab } from '@/hooks/use-view-tabs';
+import { WriteFailures } from '@/hooks/use-view-writes';
 import { useWalkReads } from '@/hooks/use-walk-reads';
-import { placeOf } from '@/lib/dashboard/address';
+import { addressQuery, rowsQuery, stateOf } from '@/lib/dashboard/queries';
+import { readState, withoutLook } from '@/lib/dashboard/state';
 import { hashOf } from '@/lib/screens';
+import { Banner, type Wrote } from './banner';
 import { RowsChart } from './rows-chart';
+import { NewViewButton, OneTab, ViewTabLine } from './view-tabs';
+import { ViewsPanel } from './views-panel';
 import './dashboard.css';
 
 export function DashboardScreen({ shown }: { shown: boolean }) {
   useWalkReads();
   const href = useRouterState({ select: (state) => state.location.href });
-  // The state the address names while the dashboard shows; out of sight it keeps the one it had.
-  const named = shown ? placeOf(hashOf(href)).state : null;
-  const [written, setWritten] = useState<string | null>(null);
-  if (named !== null && named !== written) setWritten(named);
-  const view = useDashboardView(written);
+  useViewTabsAt(shown, hashOf(href));
+  const { tabs, at } = useViewTabs();
+  const moves = useViewTabMoves();
+  // A write's failure, until its banner is closed.
+  const [failed, setFailed] = useState<Failure | null>(null);
+  const wrote = { failure: failed, close: () => setFailed(null) };
   return (
     <ScreenInView value={shown}>
       <section className={shown ? 'dash' : 'dash away'} inert={!shown} aria-label="Dashboard" data-testid="dashboard">
-        {written !== null && <View view={view} />}
+        {/* eslint-disable-next-line no-restricted-properties -- a real timestamp: when the write failed, set against a read's errorUpdatedAt */}
+        <WriteFailures.Provider value={(error) => setFailed({ error, at: Date.now() })}>
+          {at !== null && (
+            <>
+              {tabs.length > 1 && <ViewTabLine tabs={tabs} at={at} moves={moves} />}
+              {at.now === null ? (
+                <ViewsPanel key={at.id} tab={at} moves={moves} wrote={wrote} />
+              ) : (
+                <View key={at.id} tab={at} now={at.now} one={tabs.length === 1} moves={moves} wrote={wrote} />
+              )}
+              {tabs.map((tab) => tab !== at && tab.now !== null && <KeptView key={tab.id} now={tab.now} />)}
+            </>
+          )}
+        </WriteFailures.Provider>
       </section>
     </ScreenInView>
   );
 }
 
-function View({ view }: { view: DashboardView }) {
+interface ViewProps {
+  tab: ViewTab;
+  now: string;
+  /** It is the one view: its tab stands at the toolbar's left, copy-plus at its end. */
+  one: boolean;
+  moves: ReturnType<typeof useViewTabMoves>;
+  wrote: Wrote;
+}
+
+function View({ tab, now, one, moves, wrote }: ViewProps) {
+  const view = useDashboardView(now);
   const { rows } = view;
+  const main = useKeptScroll(tab.id);
   return (
     <>
       <div className="dash-bar" role="toolbar" aria-label="Dashboard" data-testid="dashboard.toolbar">
-        <span className="dash-onetab" title={rows?.by.label} data-testid="dashboard.tab">
-          <ChartBar className="icon" aria-hidden="true" />
-          <span className="t">{rows?.by.label}</span>
-        </span>
+        {one && <OneTab tab={tab} moves={moves} />}
+        <span className="grow" />
+        {one && <NewViewButton moves={moves} />}
       </div>
-      {view.failure !== null && <Banner failure={view.failure} />}
-      <div className="dash-main" data-testid="dashboard.main">
+      <Banner failures={[view.failure, wrote.failure]} onClose={(failure) => failure === wrote.failure && wrote.close()} />
+      <div ref={main} className="dash-main" data-testid="dashboard.main">
         <section className={view.changing ? 'dash-card changing' : 'dash-card'} aria-label="View" aria-busy={view.changing} data-testid="dashboard.card">
           <div className="dash-chart">
             {rows === undefined ? <p className="empty">Loading the view…</p> : <RowsChart rows={rows} relative={view.relative} />}
@@ -61,29 +97,50 @@ function View({ view }: { view: DashboardView }) {
   );
 }
 
-/** What failed, under the toolbar until it is closed or a read of its own goes well: its reason, and Retry. */
-function Banner({ failure }: { failure: Failure }) {
-  const [closed, setClosed] = useState<number | null>(null);
-  if (closed === failure.at) return null;
-  return (
-    <div className="dash-banner" role="status" data-testid="dashboard.banner">
-      <div className="text" data-testid="dashboard.banner.text">
-        {failure.error.message}
-      </div>
-      <button
-        type="button"
-        className="btn btn-sm"
-        onClick={() => {
-          setClosed(failure.at);
-          failure.retry();
-        }}
-        data-testid="dashboard.banner.retry"
-      >
-        <RefreshCw className="icon" aria-hidden="true" /> Retry
-      </button>
-      <button type="button" className="btn btn-ghost btn-sm btn-icon" title="Close" aria-label="Close" onClick={() => setClosed(failure.at)} data-testid="dashboard.banner.close">
-        <X className="icon" aria-hidden="true" />
-      </button>
-    </div>
-  );
+/**
+ * The main area of the tab `id` set back to where it was left as its view is drawn, the view
+ * growing to it, until the person scrolls; where it is scrolled to kept with the tab, a moment
+ * after a scroll and as the tab leaves the screen.
+ */
+function useKeptScroll(id: string): RefObject<HTMLDivElement | null> {
+  const main = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    const element = main.current!;
+    let owed = scrollOf(id);
+    let set = -1;
+    let last = owed;
+    const restore = () => {
+      if (owed === 0) return;
+      element.scrollTop = owed;
+      set = element.scrollTop;
+      if (set === owed) owed = 0;
+    };
+    restore();
+    const growing = new ResizeObserver(restore);
+    for (const child of element.children) growing.observe(child);
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const onScroll = () => {
+      if (element.scrollTop !== set) owed = 0;
+      last = element.scrollTop;
+      clearTimeout(timer);
+      timer = setTimeout(() => keepScroll(id, last), 200);
+    };
+    element.addEventListener('scroll', onScroll, { passive: true });
+    return () => {
+      growing.disconnect();
+      element.removeEventListener('scroll', onScroll);
+      clearTimeout(timer);
+      keepScroll(id, last);
+    };
+  }, [id]);
+  return main;
+}
+
+/** A tab out of sight: its view's answers held, never read, so that they stay for as long as the tab. */
+function KeptView({ now }: { now: string }) {
+  const queryClient = useQueryClient();
+  const address = useQuery({ ...addressQuery(queryClient, now), enabled: false });
+  const key = address.data === undefined ? null : withoutLook(readState(stateOf(address.data.address)));
+  useQuery({ ...rowsQuery(key ?? ''), enabled: false });
+  return null;
 }
