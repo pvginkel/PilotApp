@@ -35,6 +35,19 @@ class TestTheSettings:
     def test_the_readings_are_served_on_port_3503(self) -> None:
         assert given().COLLECTOR_PORT == 3_503
 
+    def test_the_labeller_is_the_installed_copys_given_a_minute_a_call(
+        self,
+    ) -> None:
+        """The command `labeller.md` § Running it names."""
+        settings = given()
+
+        assert settings.COLLECTOR_LABELLER == [
+            "python3",
+            "-B",
+            "{install_path}/tools/labeller.py",
+        ]
+        assert settings.COLLECTOR_LABELLER_SECONDS == 60.0
+
     def test_each_is_read_from_the_environment(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -45,6 +58,8 @@ class TestTheSettings:
         monkeypatch.setenv("COLLECTOR_CARRY_TRANSCRIPTS", "40")
         monkeypatch.setenv("COLLECTOR_CARRY_BYTES", "0")
         monkeypatch.setenv("COLLECTOR_PORT", "8088")
+        monkeypatch.setenv("COLLECTOR_LABELLER", '["/srv/loom/label", "--quiet"]')
+        monkeypatch.setenv("COLLECTOR_LABELLER_SECONDS", "4.5")
 
         settings = Settings()
 
@@ -56,6 +71,8 @@ class TestTheSettings:
         assert settings.COLLECTOR_CARRY_TRANSCRIPTS == 40
         assert settings.COLLECTOR_CARRY_BYTES == 0
         assert settings.COLLECTOR_PORT == 8_088
+        assert settings.COLLECTOR_LABELLER == ["/srv/loom/label", "--quiet"]
+        assert settings.COLLECTOR_LABELLER_SECONDS == 4.5
 
     @pytest.mark.parametrize("missing", sorted(WALKS))
     def test_pilots_address_the_bearer_and_the_home_have_no_default(
@@ -113,3 +130,11 @@ class TestTheSettings:
     def test_a_port_that_is_none_is_refused(self, port: int, fault: str) -> None:
         with pytest.raises(ValidationError, match=fault):
             given(COLLECTOR_PORT=port)
+
+    def test_a_labeller_command_of_no_word_is_refused(self) -> None:
+        with pytest.raises(ValidationError, match="at least 1 item"):
+            given(COLLECTOR_LABELLER=[])
+
+    def test_a_labellers_time_of_none_is_refused(self) -> None:
+        with pytest.raises(ValidationError, match="greater than 0"):
+            given(COLLECTOR_LABELLER_SECONDS=0)
