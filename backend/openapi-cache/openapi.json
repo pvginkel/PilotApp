@@ -15020,6 +15020,44 @@
         "title": "PublishedCallSchema",
         "type": "object"
       },
+      "PublicationSchema.9ed0c05.PublishedCommitSchema": {
+        "additionalProperties": false,
+        "description": "A commit a Tool Call made, as its command and its output show it,\nheld with no lines until its Repository gives them.",
+        "properties": {
+          "repository": {
+            "description": "The name of the checkout the commit was made in",
+            "minLength": 1,
+            "title": "Repository",
+            "type": "string"
+          },
+          "sha": {
+            "anyOf": [
+              {
+                "pattern": "^[0-9a-f]{4,64}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Its hash as the call showed it, abbreviated or whole; none where none showed",
+            "title": "Sha"
+          },
+          "subject": {
+            "description": "Its message's first line",
+            "minLength": 1,
+            "title": "Subject",
+            "type": "string"
+          }
+        },
+        "required": [
+          "repository",
+          "subject"
+        ],
+        "title": "PublishedCommitSchema",
+        "type": "object"
+      },
       "PublicationSchema.9ed0c05.PublishedCompactionSchema": {
         "additionalProperties": false,
         "description": "A compaction of the Transcript's context.",
@@ -15215,6 +15253,46 @@
           "at"
         ],
         "title": "PublishedEventSchema",
+        "type": "object"
+      },
+      "PublicationSchema.9ed0c05.PublishedFileEditSchema": {
+        "additionalProperties": false,
+        "description": "An edit of one file a Repository keeps by a successful Edit or Write,\nwith its lines.",
+        "properties": {
+          "lines_added": {
+            "description": "The lines it added",
+            "maximum": 2147483647,
+            "minimum": 0,
+            "title": "Lines Added",
+            "type": "integer"
+          },
+          "lines_removed": {
+            "description": "The lines it removed",
+            "maximum": 2147483647,
+            "minimum": 0,
+            "title": "Lines Removed",
+            "type": "integer"
+          },
+          "path": {
+            "description": "The file's path within that checkout",
+            "pattern": "^[^/]",
+            "title": "Path",
+            "type": "string"
+          },
+          "repository": {
+            "description": "The name of the checkout that holds it",
+            "minLength": 1,
+            "title": "Repository",
+            "type": "string"
+          }
+        },
+        "required": [
+          "repository",
+          "path",
+          "lines_added",
+          "lines_removed"
+        ],
+        "title": "PublishedFileEditSchema",
         "type": "object"
       },
       "PublicationSchema.9ed0c05.PublishedGroupSchema": {
@@ -15573,6 +15651,14 @@
         "additionalProperties": false,
         "description": "A call of one tool a Call requested, with its result.",
         "properties": {
+          "commits": {
+            "description": "The commits it made, in the order its output shows them",
+            "items": {
+              "$ref": "#/components/schemas/PublicationSchema.9ed0c05.PublishedCommitSchema"
+            },
+            "title": "Commits",
+            "type": "array"
+          },
           "denial_kind": {
             "anyOf": [
               {
@@ -15611,6 +15697,14 @@
             "description": "Whether the result was an error",
             "title": "Failed",
             "type": "boolean"
+          },
+          "file_edits": {
+            "description": "What a successful Edit or Write changed of each file a Repository keeps; none for another call",
+            "items": {
+              "$ref": "#/components/schemas/PublicationSchema.9ed0c05.PublishedFileEditSchema"
+            },
+            "title": "File Edits",
+            "type": "array"
           },
           "first_argument": {
             "anyOf": [

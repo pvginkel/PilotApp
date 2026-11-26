@@ -83,6 +83,28 @@ def tool_call(place: int, **overrides: Any) -> dict[str, Any]:
     return values | overrides
 
 
+def commit(**overrides: Any) -> dict[str, Any]:
+    """A commit a Tool Call made in the invented checkout, its hash
+    abbreviated as git's own line shows it."""
+    values: dict[str, Any] = {
+        "repository": "RecipeBox",
+        "subject": "Scale the stew for six",
+        "sha": "3f9a2c1",
+    }
+    return values | overrides
+
+
+def file_edit(**overrides: Any) -> dict[str, Any]:
+    """An edit of a recipe in the invented checkout."""
+    values: dict[str, Any] = {
+        "repository": "RecipeBox",
+        "path": "recipes/stew.md",
+        "lines_added": 3,
+        "lines_removed": 1,
+    }
+    return values | overrides
+
+
 def event(**overrides: Any) -> dict[str, Any]:
     values: dict[str, Any] = {
         "kind": "api_error",

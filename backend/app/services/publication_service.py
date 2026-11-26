@@ -62,6 +62,11 @@ its facts and leaves every label Pilot holds of it as it stands, its adoption
 included, and its stamp none, so that the labeller's next answer differs from
 it (F152.2, F152.6).
 
+A Tool Call is written with the commits it made, each held at once with its
+Repository, its subject and its hash as the call showed it and no lines, and
+with its file edits (`commit_write`; DB §2.9): facts of the Tool Call, which
+go with it, but for what a read of its Repository gave a Commit, which stays.
+
 A main thread whose labelling names a group is adopted by the group's adopted
 Project, which the call makes where Pilot has none (`adoption_service`;
 F152.8), and by none where its labelling names none: the label is the
@@ -120,6 +125,7 @@ from app.exceptions import (
 )
 from app.models import (
     Call,
+    Commit,
     Compaction,
     CompactionTrigger,
     Component,
@@ -130,6 +136,7 @@ from app.models import (
     Environment,
     Event,
     EventKind,
+    FileEdit,
     HookRun,
     Launch,
     LaunchComponent,
@@ -137,7 +144,6 @@ from app.models import (
     Model,
     Prompt,
     PromptSource,
-    Repository,
     StepTranscript,
     StopReason,
     Tool,
@@ -149,6 +155,7 @@ from app.models.call import RECORDED_ELSEWHERE
 from app.services import labeller_context
 from app.services.adoption_service import AdoptionService, group_faults
 from app.services.call_caches import caches, hold_sub_agents_calls
+from app.services.commit_write import CommitWrite, made_faults
 from app.services.environment_service import reported_columns
 from app.services.fleet_consumer import FleetConsumer
 from app.services.label_write import (
@@ -213,8 +220,11 @@ _FACTS: tuple[type[Any], ...] = (
     ToolCall,
     Event,
     ContextPart,
+    Commit,
+    FileEdit,
 )
-"""The entities whose rows a publication writes under its Transcript."""
+"""The entities whose rows a publication writes under its Transcript, its
+Tool Calls' Commits and File Edits among them."""
 
 
 class _Replay:
@@ -325,6 +335,7 @@ def _faults(publication: PublicationSchema) -> list[str]:
     if publication.group is not None:
         found.extend(group_faults(publication.group.name, publication.group.summary))
     found.extend(labelling_faults(publication))
+    found.extend(made_faults(publication))
 
     released: dict[_Version, datetime] = {}
     for place, launch in enumerate(publication.launches, start=1):
@@ -430,6 +441,7 @@ class PublicationService:
         self.fleet_consumer = fleet_consumer
         self.catalogue_service = catalogue_service
         self._labels = LabelWrite(db)
+        self._commits = CommitWrite(db)
         self._replay: _Replay | None = None
 
     def admit(self, authorization: str | None, protocol: str | None) -> None:
@@ -516,7 +528,10 @@ class PublicationService:
         the call names none; after one with none it holds the labels it held
         and no stamp. After either, each Call's opening prompt's Context
         Part is what the collector counted less the Call's labelled Context
-        Parts. After either, each Call
+        Parts. After either, each Tool Call it carries holds the commits it
+        made and its file edits as the call names them, a Commit read from
+        its Repository keeping what the read gave it, and a commit whose hash
+        Pilot holds as another's not held again. After either, each Call
         it carries holds its cost at the Prices in force, none where a kind
         it counts tokens of has no Price, and its other caches
         (`call_caches`); the Transcript holds its first and its last Call's
@@ -570,9 +585,17 @@ class PublicationService:
         adopted_by = self._adopted_by(publication)
         self._meet_references(publication)
         versions = self._versions(publication)
-        thread = self._thread(publication, versions, adopted_by)
+        repositories = self._commits.repositories(publication)
+        thread = self._thread(publication, versions, repositories, adopted_by)
         with self._replayed(publication, held):
-            self._facts(thread, publication, versions, boundary, ids, (kept, carved))
+            self._facts(
+                thread,
+                publication,
+                (versions, repositories),
+                boundary,
+                ids,
+                (kept, carved),
+            )
             if labelling is not None:
                 self._labels.write(thread, labelling, ids, boundary)
         self._join(publication.session_id)
@@ -680,17 +703,20 @@ class PublicationService:
         self,
         thread: Transcript,
         publication: PublicationSchema,
-        versions: dict[_Version, int],
+        named: tuple[dict[_Version, int], dict[str, int]],
         boundary: PublishedBoundarySchema,
         ids: dict[str, int],
         carves: tuple[dict[str, int], dict[str, int]],
     ) -> None:
         """The rows under the Transcript from the boundary on as the call
-        has them, the Events and Context Parts the collector's alone. `ids`
+        has them, the Events and Context Parts the collector's alone, and
+        its Tool Calls' Commits and File Edits. `named` is the id of each
+        Component Version and of each Repository the call names. `ids`
         comes with the Calls before the boundary that the call's name as
         their predecessor. `carves` are the characters the labelled Context
         Parts carve out of each Call's opening prompt, by its `message_id`:
         those Pilot held, and those it holds after the call."""
+        versions, repositories = named
         surplus: _Surplus = {}
         prompts = self._launches(
             thread, publication.launches, versions, surplus, boundary
@@ -700,13 +726,14 @@ class PublicationService:
         )
         calls = publication.calls
         stale = self._calls(thread, calls, prompts, compactions, boundary, ids)
-        self._tool_calls(thread, calls, ids, boundary)
+        made = self._tool_calls(thread, calls, ids, boundary)
         # Must follow `_tool_calls`, which moves a Tool Call the call names
         # off a Call that goes here, and `_calls`, after which no Call the
         # call names points at a Call, a Prompt or a Compaction that goes.
         self._lose_calls(publication, stale)
         for entity, gone in surplus.items():
             self._remove(entity, [row.id for row in gone])
+        self._commits.write(calls, made, repositories, _name(publication))
         self._hung(
             Event,
             thread,
@@ -1154,20 +1181,6 @@ class PublicationService:
         )
         return {(row.component_code, row.version): row for row in rows}
 
-    def _repository(self, name: str) -> int:
-        """The id of the Repository of that checkout's name, written where
-        Pilot has none."""
-        held = select(Repository.id).where(Repository.name == name)
-        repository_id = self.db.scalar(held)
-        if repository_id is None:
-            self.db.execute(
-                pg_insert(Repository)
-                .values(name=name)
-                .on_conflict_do_nothing(index_elements=["name"])
-            )
-            repository_id = self.db.scalars(held).one()
-        return repository_id
-
     def _environment(self, env_id: str) -> None:
         """Write the Environment of that id where Pilot has none: as the
         fleet stream reports it, its name and exemption with it. One the
@@ -1194,6 +1207,7 @@ class PublicationService:
         self,
         publication: PublicationSchema,
         versions: dict[_Version, int],
+        repositories: dict[str, int],
         adopted_by: uuid.UUID | None,
     ) -> Transcript:
         """The Transcript's row as the call has it, its `replayed_size` its
@@ -1227,7 +1241,7 @@ class PublicationService:
         if publication.appended is None:
             facts["replayed_size"] = publication.file_size
         if publication.repository is not None:
-            facts["repository_id"] = self._repository(publication.repository)
+            facts["repository_id"] = repositories[publication.repository]
         if publication.environment is not None:
             self._environment(publication.environment)
             facts["environment_id"] = publication.environment
@@ -1542,10 +1556,11 @@ class PublicationService:
         calls: list[PublishedCallSchema],
         ids: dict[str, int],
         boundary: PublishedBoundarySchema,
-    ) -> None:
+    ) -> dict[str, int]:
         """The Tool Calls the call names, each under the Call that requested
         it; one held under a Call from the boundary on that it no longer
-        names is removed."""
+        names is removed. Returned is the id of each, by its
+        `tool_use_id`."""
         held = {
             row.tool_use_id: row
             for row in self.db.scalars(
@@ -1557,6 +1572,7 @@ class PublicationService:
                 )
             )
         }
+        named: dict[str, ToolCall] = {}
         for call in calls:
             for requested in call.tool_calls:
                 facts: dict[str, Any] = {
@@ -1574,23 +1590,21 @@ class PublicationService:
                 }
                 row = held.get(requested.tool_use_id)
                 if row is None:
-                    self.db.add(
-                        ToolCall(
-                            transcript_id=thread.id,
-                            tool_use_id=requested.tool_use_id,
-                            **facts,
-                        )
+                    row = ToolCall(
+                        transcript_id=thread.id,
+                        tool_use_id=requested.tool_use_id,
+                        **facts,
                     )
+                    self.db.add(row)
                 else:
                     _set(row, facts)
+                named[requested.tool_use_id] = row
         self.db.flush()
-        named = {
-            requested.tool_use_id for call in calls for requested in call.tool_calls
-        }
         self._remove(
             ToolCall,
             [row.id for tool_use_id, row in held.items() if tool_use_id not in named],
         )
+        return {tool_use_id: row.id for tool_use_id, row in named.items()}
 
     def _hung(
         self,
@@ -1707,9 +1721,13 @@ class PublicationService:
         """Delete the entity's rows of those ids, in one statement, so that
         rows that name each other go together. Its keys take what hangs on
         each: a Launch's versions and Prompts, a Prompt's Hook Runs, a Call's
-        Tool Calls, Events and Context Parts; a Tool Call that goes leaves
-        the sub-agent's thread it started with no spawning call."""
+        Tool Calls, Events and Context Parts, a Tool Call's File Edits; a Tool
+        Call that goes leaves the sub-agent's thread it started with no
+        spawning call, and a Commit read from its Repository with no Tool
+        Call. A Tool Call's Commit no read completed goes with it first."""
         if ids:
+            if entity is Call or entity is ToolCall:
+                self._commits.unmade(entity, ids)
             self.db.execute(
                 delete(entity).where(
                     entity.id == any_(literal(list(ids), ARRAY(BigInteger)))

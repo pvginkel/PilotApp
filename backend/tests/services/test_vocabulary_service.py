@@ -27,8 +27,10 @@ from app.models import (
     ContextPartKind,
     Event,
     EventKind,
+    File,
     FileClass,
     Model,
+    Repository,
     ReworkKind,
     Rule,
     SegmentKind,
@@ -386,6 +388,24 @@ class TestNoLongerDeclared:
         service.declare(vocabularies(lists=lists(wait_cause=listed("delivery"))))
 
         assert _places(session, WaitCause) == [("delivery", 1), ("oven", None)]
+
+    def test_a_file_class_a_file_has_stays_with_no_place(
+        self, session: DbSession, service: VocabularyService
+    ) -> None:
+        service.declare(vocabularies())
+        kept = Repository(name="RecipeBox")
+        session.add(kept)
+        session.flush()
+        session.add(
+            File(repository_id=kept.id, path="recipes/stew.md", class_code="recipe")
+        )
+        session.flush()
+
+        service.declare(
+            vocabularies(lists=lists(file_class=[value("menu", 1, counted=True)]))
+        )
+
+        assert _places(session, FileClass) == [("menu", 1), ("recipe", None)]
 
     def test_a_nesting_a_unit_sits_in_stays_and_its_kinds_with_it(
         self, session: DbSession, service: VocabularyService

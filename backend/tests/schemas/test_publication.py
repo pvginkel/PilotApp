@@ -13,9 +13,11 @@ from tests.support.publications import (
     appended,
     builds_on,
     call,
+    commit,
     compaction,
     context_part,
     event,
+    file_edit,
     group,
     hook_run,
     labelling,
@@ -380,6 +382,112 @@ class TestPublicationSchema:
         self, overrides: dict[str, Any], where: tuple[Any, ...]
     ) -> None:
         assert _refused(**overrides) == [where]
+
+
+def _requesting(**made: Any) -> list[dict[str, Any]]:
+    """A call's Calls: one, requesting a Tool Call that made those."""
+    return [call(1, tool_calls=[tool_call(1, **made)])]
+
+
+MADE = ("calls", 0, "tool_calls", 0)
+"""Where a call's first Tool Call stands."""
+
+
+class TestMadeSchema:
+    """What a Tool Call made: the commits it held at once and the file
+    edits it carries (F152.11, F158.4; P-348)."""
+
+    def test_a_tool_call_carries_none_unless_it_made_some(self) -> None:
+        requested = whole(calls=_requesting()).calls[0].tool_calls[0]
+
+        assert (requested.commits, requested.file_edits) == ([], [])
+
+    def test_a_tool_call_carries_its_commits_and_its_file_edits(self) -> None:
+        requested = (
+            whole(
+                calls=_requesting(
+                    commits=[commit(), commit(sha=None)], file_edits=[file_edit()]
+                )
+            )
+            .calls[0]
+            .tool_calls[0]
+        )
+
+        assert [
+            (made.repository, made.subject, made.sha) for made in requested.commits
+        ] == [
+            ("RecipeBox", "Scale the stew for six", "3f9a2c1"),
+            ("RecipeBox", "Scale the stew for six", None),
+        ]
+        edit = requested.file_edits[0]
+        assert (edit.repository, edit.path, edit.lines_added, edit.lines_removed) == (
+            "RecipeBox",
+            "recipes/stew.md",
+            3,
+            1,
+        )
+
+    @pytest.mark.parametrize(
+        "sha", ["3f9a", "3f9a2c1e7b04d6a51c8f2930d4e6b7a8c9d0e1f2", "a" * 64]
+    )
+    def test_a_hash_is_one_git_prints_whole_or_abbreviated(self, sha: str) -> None:
+        made = whole(calls=_requesting(commits=[commit(sha=sha)]))
+
+        assert made.calls[0].tool_calls[0].commits[0].sha == sha
+
+    @pytest.mark.parametrize("sha", ["", "3f9", "3F9A2C1", "3f9a2c1g", "a" * 65])
+    def test_a_hash_git_does_not_print_is_refused(self, sha: str) -> None:
+        assert _refused(calls=_requesting(commits=[commit(sha=sha)])) == [
+            (*MADE, "commits", 0, "sha")
+        ]
+
+    @pytest.mark.parametrize("fact", ["repository", "subject"])
+    def test_a_commit_names_its_repository_and_its_subject(self, fact: str) -> None:
+        made = commit()
+        del made[fact]
+
+        assert _refused(calls=_requesting(commits=[made])) == [
+            (*MADE, "commits", 0, fact)
+        ]
+        assert _refused(calls=_requesting(commits=[commit(**{fact: ""})])) == [
+            (*MADE, "commits", 0, fact)
+        ]
+
+    @pytest.mark.parametrize(
+        "fact", ["repository", "path", "lines_added", "lines_removed"]
+    )
+    def test_a_file_edit_names_its_file_and_its_lines(self, fact: str) -> None:
+        edit = file_edit()
+        del edit[fact]
+
+        assert _refused(calls=_requesting(file_edits=[edit])) == [
+            (*MADE, "file_edits", 0, fact)
+        ]
+
+    @pytest.mark.parametrize(
+        ("overrides", "fact"),
+        [
+            ({"repository": ""}, "repository"),
+            ({"path": ""}, "path"),
+            ({"path": "/work/RecipeBox/recipes/stew.md"}, "path"),
+            ({"lines_added": -1}, "lines_added"),
+            ({"lines_removed": 2_147_483_648}, "lines_removed"),
+        ],
+    )
+    def test_a_file_edits_path_is_within_its_checkout_and_its_lines_are_counts(
+        self, overrides: dict[str, Any], fact: str
+    ) -> None:
+        assert _refused(calls=_requesting(file_edits=[file_edit(**overrides)])) == [
+            (*MADE, "file_edits", 0, fact)
+        ]
+
+    def test_neither_takes_a_field_pilot_does_not_know(self) -> None:
+        assert _refused(
+            calls=_requesting(commits=[commit(message="Scale the stew\n\nFor six.")])
+        ) == [(*MADE, "commits", 0, "message")]
+        assert _refused(
+            calls=_requesting(file_edits=[file_edit(patch="@@ -1 +1 @@")])
+        ) == [(*MADE, "file_edits", 0, "patch")]
 
 
 def _labelled(**labels: list[dict[str, Any]]) -> dict[str, Any]:

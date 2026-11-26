@@ -21,6 +21,7 @@ from app.models.call import (
     ToolCall,
 )
 from app.models.chat import Chat, ChatRead
+from app.models.commit import Commit, File, FileChange, FileEdit
 from app.models.conversation import Conversation
 from app.models.dashboard import (
     CustomRatio,

@@ -2,7 +2,8 @@
 79 and 81; F152.3).
 
 One call is one Transcript, a main thread's or one sub-agent's, with every
-fact of DB §2.6 and §2.7 the collector read off its file. A reference value is
+fact of DB §2.6 and §2.7 the collector read off its file, and under each Tool
+Call the commits it made and the file it edited (§2.9). A reference value is
 named by its code, a row Pilot holds by what the file names it by: a Call by
 its `message_id`, a Tool Call by its `tool_use_id`, a Prompt and a Compaction
 by their place in the file. It carries nothing of the transcript's text (DB
@@ -42,6 +43,12 @@ rounded, through the JavaScript that writes it."""
 Place = Annotated[int, Field(ge=1, le=2_147_483_647)]
 """A row's place among its Transcript's rows of its entity, in the file's
 order, from 1."""
+
+Sha = Annotated[str, StringConstraints(pattern=r"^[0-9a-f]{4,64}$")]
+"""A commit's hash as git prints it, whole or abbreviated."""
+
+FilePath = Annotated[str, StringConstraints(pattern=r"^[^/]")]
+"""A file's path within the checkout that holds it."""
 
 CallTokenKind = Literal[
     "input", "cache_write_5m", "cache_write_1h", "cache_read", "output"
@@ -137,6 +144,33 @@ class PublishedCompactionSchema(_Published):
     )
 
 
+class PublishedCommitSchema(_Published):
+    """A commit a Tool Call made, as its command and its output show it,
+    held with no lines until its Repository gives them."""
+
+    repository: Name = Field(
+        description="The name of the checkout the commit was made in"
+    )
+    subject: Name = Field(description="Its message's first line")
+    sha: Sha | None = Field(
+        default=None,
+        description=(
+            "Its hash as the call showed it, abbreviated or whole; none where"
+            " none showed"
+        ),
+    )
+
+
+class PublishedFileEditSchema(_Published):
+    """An edit of one file a Repository keeps by a successful Edit or Write,
+    with its lines."""
+
+    repository: Name = Field(description="The name of the checkout that holds it")
+    path: FilePath = Field(description="The file's path within that checkout")
+    lines_added: Count = Field(description="The lines it added")
+    lines_removed: Count = Field(description="The lines it removed")
+
+
 class PublishedToolCallSchema(_Published):
     """A call of one tool a Call requested, with its result."""
 
@@ -175,6 +209,17 @@ class PublishedToolCallSchema(_Published):
     saved_characters: Count | None = Field(
         default=None,
         description="The output's full size, where it was saved to disk",
+    )
+    commits: list[PublishedCommitSchema] = Field(
+        default_factory=list,
+        description="The commits it made, in the order its output shows them",
+    )
+    file_edits: list[PublishedFileEditSchema] = Field(
+        default_factory=list,
+        description=(
+            "What a successful Edit or Write changed of each file a Repository"
+            " keeps; none for another call"
+        ),
     )
 
 
