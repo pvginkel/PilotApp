@@ -37337,7 +37337,7 @@
             "BearerAuth": []
           }
         ],
-        "summary": "Load an invented scenario: its conversations, each published whole through the service a collector's publication writes through, its last moment now, and what Pilot holds of those it ran, each on the project given for the scenario's: its Session and Turns, and its work item, job or chat (F122.6). The conversation the scenario names a group for is adopted by the group's adopted project, made where the record has none (F152.8). A second load replaces the first: the record holds the scenario once, as it was loaded last.",
+        "summary": "Load an invented scenario: its conversations, each published whole through the service a collector's publication writes through, its last moment now, and what Pilot holds of those it ran, each on the project given for the scenario's: its Session and Turns, and its work item, job or chat (F122.6). The conversation the scenario names a group for is adopted by the group's adopted project, made where the record has none (F152.8). A second load on the same projects replaces the first, the record holding the scenario there once, as it was loaded last; a load on other projects is a scenario of its own beside it.",
         "tags": [],
         "x-required-role": "editor"
       }
