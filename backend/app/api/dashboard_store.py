@@ -16,7 +16,7 @@ from app.api.caller import caller
 from app.dashboard.state import PREFIX
 from app.dashboard.views import SystemView
 from app.models import CustomRatio, QuickFilter, SavedView
-from app.models.reference import FavouriteMenu
+from app.models.reference import FavouriteMenu, NumberFormat
 from app.schemas.common import ApiErrorResponseSchema
 from app.schemas.dashboard import (
     CustomRatioSchema,
@@ -378,18 +378,26 @@ def add_custom_ratio(
     store: DashboardStoreService = Provide[ServiceContainer.dashboard_store_service],
 ) -> Any:
     """Make a ratio of two measures for everyone, its key made from its name
-    in a space no built-in or loaded ratio's key is in, and kept (F155.3).
+    in a space no built-in or loaded ratio's key is in, and kept (F155.3),
+    its numbers written in the format the person picked (DB 640).
 
     Returns:
         201: The ratio
-        400: No name, or a side missing; or a side has faults: the error
-            names every one of both, and ends on a correct example
+        400: No name, a side or the format missing, or a format not among
+            them; or a side has faults: the error names every one of both,
+            and ends on a correct example
         401: No one is signed in
         403: The caller lacks the editor role
         409: A ratio a person made has the name
     """
     body = CustomRatioWriteSchema.model_validate(request.get_json())
-    ratio = store.add_ratio(body.name, body.numerator, body.denominator, body.note)
+    ratio = store.add_ratio(
+        body.name,
+        body.numerator,
+        body.denominator,
+        NumberFormat(body.format),
+        body.note,
+    )
     return custom_ratio_response(ratio, offered=True).model_dump(mode="json"), 201
 
 
@@ -415,8 +423,9 @@ def edit_custom_ratio(
 
     Returns:
         200: The ratio, changed
-        400: No name, or a side missing; or a side has faults: the error
-            names every one of both, and ends on a correct example
+        400: No name, a side or the format missing, or a format not among
+            them; or a side has faults: the error names every one of both,
+            and ends on a correct example
         401: No one is signed in
         403: The caller lacks the editor role
         404: No stored ratio has the id
@@ -425,7 +434,12 @@ def edit_custom_ratio(
     """
     body = CustomRatioWriteSchema.model_validate(request.get_json())
     ratio = store.edit_ratio(
-        ratio_id, body.name, body.numerator, body.denominator, body.note
+        ratio_id,
+        body.name,
+        body.numerator,
+        body.denominator,
+        NumberFormat(body.format),
+        body.note,
     )
     return custom_ratio_response(ratio, offered=True).model_dump(mode="json")
 
@@ -568,6 +582,7 @@ def custom_ratio_response(ratio: CustomRatio, offered: bool) -> CustomRatioSchem
         name=ratio.name,
         numerator=ratio.numerator,
         denominator=ratio.denominator,
+        format=None if ratio.format_code is None else ratio.format_code.value,
         note=ratio.note,
         saved_at=ratio.saved_at,
         offered=offered,

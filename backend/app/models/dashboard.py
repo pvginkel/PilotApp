@@ -24,7 +24,14 @@ from sqlalchemy import (
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.extensions import db
-from app.models.reference import FAVOURITE_MENU, ORIGIN, FavouriteMenu, Origin
+from app.models.reference import (
+    FAVOURITE_MENU,
+    NUMBER_FORMAT,
+    ORIGIN,
+    FavouriteMenu,
+    NumberFormat,
+    Origin,
+)
 
 SYSTEM = "origin_code <> 'person'"
 """A row's `system`, carried from its Origin: whether that Origin is
@@ -128,7 +135,8 @@ class CustomRatio(db.Model):  # type: ignore[name-defined]
     `r:`, written there as it stands, so it is a word of lower-case letters,
     digits and underscores, a person's in `PERSON_KEYS` and a loaded one's
     outside it. `numerator` and `denominator` are measures as a view's state
-    writes them.
+    writes them. A person's has the Number Format they picked, a loaded one
+    none, its numbers written in the format its two measures give (DB 640).
     """
 
     __tablename__ = "custom_ratios"
@@ -138,6 +146,10 @@ class CustomRatio(db.Model):  # type: ignore[name-defined]
         CheckConstraint(
             f"(origin_code = 'person') = starts_with(key, '{PERSON_KEYS}')",
             name="ck_custom_ratios_key_space",
+        ),
+        CheckConstraint(
+            "(origin_code = 'person') = (format_code IS NOT NULL)",
+            name="ck_custom_ratios_format",
         ),
         UniqueConstraint("system", "name"),
     )
@@ -149,5 +161,6 @@ class CustomRatio(db.Model):  # type: ignore[name-defined]
     name: Mapped[str] = mapped_column(Text)
     numerator: Mapped[str] = mapped_column(Text)
     denominator: Mapped[str] = mapped_column(Text)
+    format_code: Mapped[NumberFormat | None] = mapped_column(NUMBER_FORMAT)
     note: Mapped[str | None] = mapped_column(Text)
     saved_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))

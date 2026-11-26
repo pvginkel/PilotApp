@@ -89,8 +89,9 @@ def _event_kinds(db: Session) -> tuple[Value, ...]:
 def ratio_format(
     catalogue: Catalogue, numerator: Simple, denominator: Simple
 ) -> Format:
-    """A stored ratio's format: a share of two measures of one format, else
-    its numerator's."""
+    """The format of a ratio no person picked one for, a loaded one's and a
+    state's inline one's: a share of two measures of one format, else its
+    numerator's (DB 640)."""
     above = catalogue.figure(numerator.figure).format
     below = catalogue.figure(denominator.figure).format
     return "share" if above == below else above
@@ -118,7 +119,9 @@ def _ratios(
                 key=row.key,
                 label=row.name,
                 line=row.note,
-                format=ratio_format(catalogue, numerator, denominator),
+                format=ratio_format(catalogue, numerator, denominator)
+                if row.format_code is None
+                else row.format_code.value,
                 numerator=row.numerator,
                 denominator=row.denominator,
                 origin=cast(RatioOrigin, row.origin_code.value),

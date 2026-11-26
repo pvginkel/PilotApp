@@ -1961,6 +1961,28 @@
             "title": "Denominator",
             "type": "string"
           },
+          "format": {
+            "anyOf": [
+              {
+                "enum": [
+                  "usd",
+                  "tokens",
+                  "count",
+                  "seconds",
+                  "share"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "How its numbers are written, as the person picked it; null for a loaded one, written in the format its two measures give: a share where their figures have one format, else its numerator's",
+            "examples": [
+              "count"
+            ],
+            "title": "Format"
+          },
           "id": {
             "format": "uuid",
             "title": "Id",
@@ -2036,6 +2058,7 @@
           "name",
           "numerator",
           "denominator",
+          "format",
           "note",
           "saved_at",
           "offered"
@@ -3689,6 +3712,28 @@
             "title": "Denominator",
             "type": "string"
           },
+          "format": {
+            "anyOf": [
+              {
+                "enum": [
+                  "usd",
+                  "tokens",
+                  "count",
+                  "seconds",
+                  "share"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "How its numbers are written, as the person picked it; null for a loaded one, written in the format its two measures give: a share where their figures have one format, else its numerator's",
+            "examples": [
+              "count"
+            ],
+            "title": "Format"
+          },
           "id": {
             "format": "uuid",
             "title": "Id",
@@ -3764,6 +3809,7 @@
           "name",
           "numerator",
           "denominator",
+          "format",
           "note",
           "saved_at",
           "offered"
@@ -3781,6 +3827,21 @@
             ],
             "minLength": 1,
             "title": "Denominator",
+            "type": "string"
+          },
+          "format": {
+            "description": "How its numbers are written: `usd` a dollar amount, `tokens`, `count`, `seconds` a duration, `share` a percentage",
+            "enum": [
+              "usd",
+              "tokens",
+              "count",
+              "seconds",
+              "share"
+            ],
+            "examples": [
+              "count"
+            ],
+            "title": "Format",
             "type": "string"
           },
           "name": {
@@ -3821,7 +3882,8 @@
         "required": [
           "name",
           "numerator",
-          "denominator"
+          "denominator",
+          "format"
         ],
         "title": "CustomRatioWriteSchema",
         "type": "object"
@@ -27629,7 +27691,7 @@
     },
     "/api/dashboard/custom-ratios": {
       "post": {
-        "description": "Returns:     201: The ratio     400: No name, or a side missing; or a side has faults: the error         names every one of both, and ends on a correct example     401: No one is signed in     403: The caller lacks the editor role     409: A ratio a person made has the name",
+        "description": "Returns:     201: The ratio     400: No name, a side or the format missing, or a format not among         them; or a side has faults: the error names every one of both,         and ends on a correct example     401: No one is signed in     403: The caller lacks the editor role     409: A ratio a person made has the name",
         "operationId": "post__api_dashboard_custom-ratios",
         "parameters": [],
         "requestBody": {
@@ -27699,7 +27761,7 @@
             "BearerAuth": []
           }
         ],
-        "summary": "Make a ratio of two measures for everyone, its key made from its name in a space no built-in or loaded ratio's key is in, and kept (F155.3).",
+        "summary": "Make a ratio of two measures for everyone, its key made from its name in a space no built-in or loaded ratio's key is in, and kept (F155.3), its numbers written in the format the person picked (DB 640).",
         "tags": [],
         "x-required-role": "editor"
       }
@@ -27785,7 +27847,7 @@
         "x-required-role": "editor"
       },
       "put": {
-        "description": "Returns:     200: The ratio, changed     400: No name, or a side missing; or a side has faults: the error         names every one of both, and ends on a correct example     401: No one is signed in     403: The caller lacks the editor role     404: No stored ratio has the id     409: The ratio was loaded, which no one changes; or another ratio a         person made has the name",
+        "description": "Returns:     200: The ratio, changed     400: No name, a side or the format missing, or a format not among         them; or a side has faults: the error names every one of both,         and ends on a correct example     401: No one is signed in     403: The caller lacks the editor role     404: No stored ratio has the id     409: The ratio was loaded, which no one changes; or another ratio a         person made has the name",
         "operationId": "put__api_dashboard_custom-ratios_{ratio_id}",
         "parameters": [
           {

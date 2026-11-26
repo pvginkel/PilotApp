@@ -269,6 +269,14 @@ class CustomRatioSchema(BaseModel):
         description="The measure below the line, as a state writes it",
         examples=["turns.count"],
     )
+    format: Format | None = Field(
+        description=(
+            "How its numbers are written, as the person picked it; null for a "
+            "loaded one, written in the format its two measures give: a share "
+            "where their figures have one format, else its numerator's"
+        ),
+        examples=["count"],
+    )
     note: str | None = Field(description="A line of explanation shown with it")
     saved_at: datetime = Field(description="When it was last saved, or loaded")
     offered: bool = Field(

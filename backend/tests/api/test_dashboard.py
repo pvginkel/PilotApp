@@ -38,7 +38,7 @@ from app.models import (
     SavedView,
     User,
 )
-from app.models.reference import Origin, SessionState, UserKind
+from app.models.reference import NumberFormat, Origin, SessionState, UserKind
 from app.services.container import ServiceContainer
 from app.services.sse_connection_manager import SSEConnection
 from tests.support import transcripts
@@ -376,6 +376,7 @@ class TestGetCatalogue:
                 name="Cost per turn",
                 numerator="reported_cost.sum",
                 denominator="turns.count",
+                format_code=NumberFormat.USD,
                 saved_at=SAVED_AT,
             )
         )
@@ -393,6 +394,46 @@ class TestGetCatalogue:
             "origin": "person",
         }
 
+    def test_a_persons_ratio_is_in_the_format_picked_a_loaded_ones_its_measures(
+        self, client: FlaskClient, session: DbSession
+    ) -> None:
+        """DB 640: two counts make a share where no person picked a format."""
+        session.add_all(
+            [
+                CustomRatio(
+                    origin_code=Origin.PERSON,
+                    key="person_calls_per_turn",
+                    name="Calls per turn",
+                    numerator="calls.count",
+                    denominator="turns.count",
+                    format_code=NumberFormat.COUNT,
+                    saved_at=SAVED_AT,
+                ),
+                CustomRatio(
+                    origin_code=Origin.WORKFLOW,
+                    key="calls_per_turn",
+                    name="Calls per turn",
+                    numerator="calls.count",
+                    denominator="turns.count",
+                    saved_at=SAVED_AT,
+                ),
+            ]
+        )
+        session.flush()
+
+        measures = _part(client, "measures")["ratios"]
+        stored = _part(client, "stored")["custom_ratios"]
+
+        assert [
+            (ratio["key"], ratio["format"])
+            for ratio in measures
+            if ratio["origin"] is not None
+        ] == [("calls_per_turn", "share"), ("person_calls_per_turn", "count")]
+        assert [(ratio["key"], ratio["format"]) for ratio in stored] == [
+            ("calls_per_turn", None),
+            ("person_calls_per_turn", "count"),
+        ]
+
     def test_what_it_stores_that_no_longer_reads_is_listed_not_offered(
         self, client: FlaskClient, session: DbSession
     ) -> None:
@@ -406,6 +447,7 @@ class TestGetCatalogue:
                     name="Cost per crate",
                     numerator="cost.sum",
                     denominator="crates.count",
+                    format_code=NumberFormat.USD,
                     saved_at=SAVED_AT,
                 ),
                 QuickFilter(
@@ -655,6 +697,38 @@ class TestGetRows:
             "temporary disk than the database allows one: a shorter time range or "
             "a narrower scope reads less"
         )
+
+    def test_a_persons_ratio_is_answered_in_the_format_picked(
+        self, client: FlaskClient, session: DbSession, worked: Record
+    ) -> None:
+        """DB 640: calls over turns read as a number, not as a share."""
+        session.add(
+            CustomRatio(
+                origin_code=Origin.PERSON,
+                key="person_calls_per_turn",
+                name="Calls per turn",
+                numerator="calls.count",
+                denominator="turns.count",
+                format_code=NumberFormat.COUNT,
+                saved_at=SAVED_AT,
+            )
+        )
+        session.flush()
+
+        body = client.get(
+            ROWS,
+            query_string={
+                "state": "t=all&m=r:person_calls_per_turn&m=r:per_call&col=none"
+            },
+        ).get_json()
+
+        assert [
+            (measure["key"], measure["label"], measure["format"])
+            for measure in body["measures"]
+        ] == [
+            ("r:person_calls_per_turn", "Calls per turn", "count"),
+            ("r:per_call", "Cost per call", "usd"),
+        ]
 
     def test_no_state_is_refused(self, client: FlaskClient) -> None:
         assert client.get(ROWS).status_code == 400

@@ -7,7 +7,7 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, Field, StringConstraints
 
-from app.schemas.dashboard import SavedViewSchema
+from app.schemas.dashboard import Format, SavedViewSchema
 
 VIEW_NAME = 80
 """The longest name of a saved view, as the screen's field takes it."""
@@ -169,6 +169,13 @@ class CustomRatioWriteSchema(BaseModel):
         min_length=1,
         description="The measure below the line, as a state writes it after `m=`",
         examples=["turns.count"],
+    )
+    format: Format = Field(
+        description=(
+            "How its numbers are written: `usd` a dollar amount, `tokens`, "
+            "`count`, `seconds` a duration, `share` a percentage"
+        ),
+        examples=["count"],
     )
     note: Note | None = Field(
         default=None, description="A line of explanation shown with it"

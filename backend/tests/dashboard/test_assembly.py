@@ -28,7 +28,7 @@ from app.models import (
     SessionKind,
     StopReason,
 )
-from app.models.reference import Origin
+from app.models.reference import NumberFormat, Origin
 from app.services.container import ServiceContainer
 from app.services.quota_week_service import quota_weeks
 from app.utils.after_commit import run_after_commit_callbacks
@@ -179,7 +179,9 @@ def _ratio(
     numerator: str,
     denominator: str,
     note: str | None = None,
+    format_: NumberFormat = NumberFormat.SHARE,
 ) -> None:
+    """A stored ratio; a person's in `format_`, a loaded one in none."""
     db.add(
         CustomRatio(
             origin_code=origin,
@@ -187,6 +189,7 @@ def _ratio(
             name=key.replace("_", " ").capitalize(),
             numerator=numerator,
             denominator=denominator,
+            format_code=format_ if origin == Origin.PERSON else None,
             note=note,
             saved_at=LATER,
         )
@@ -279,6 +282,27 @@ class TestTheStoredConfiguration:
                 denominator="cost.sum",
                 origin="person",
             ),
+        ]
+
+    def test_a_persons_ratio_is_in_the_format_picked_a_loaded_ones_its_measures(
+        self, session: DbSession
+    ) -> None:
+        """DB 640: two counts make a share where no person picked a format."""
+        _ratio(
+            session,
+            Origin.PERSON,
+            "person_calls_per_turn",
+            "calls.count",
+            "turns.count",
+            format_=NumberFormat.COUNT,
+        )
+        _ratio(session, Origin.WORKFLOW, "calls_per_turn", "calls.count", "turns.count")
+
+        catalogue = assemble(session, ZONE, GAP)
+
+        assert [(ratio.key, ratio.format) for ratio in _stored_ratios(catalogue)] == [
+            ("calls_per_turn", "share"),
+            ("person_calls_per_turn", "count"),
         ]
 
     def test_a_state_names_each_by_its_key(self, session: DbSession) -> None:

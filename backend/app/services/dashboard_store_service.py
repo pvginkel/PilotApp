@@ -66,7 +66,7 @@ from app.models import (
     ViewStar,
 )
 from app.models.dashboard import PERSON_KEYS
-from app.models.reference import FavouriteMenu, Origin
+from app.models.reference import FavouriteMenu, NumberFormat, Origin
 from app.services.quota_week_service import quota_weeks
 from app.utils.after_commit import after_commit
 
@@ -599,12 +599,13 @@ class DashboardStoreService:
         name: str,
         numerator: str,
         denominator: str,
+        format_: NumberFormat,
         note: str | None,
         now: datetime | None = None,
     ) -> CustomRatio:
         """A ratio for everyone under `name`, its key made from the name in
         the space of a person's keys and kept, its two sides measures as a
-        state writes them.
+        state writes them, its numbers written in `format_`.
 
         Raises:
             StateRefusedException: a side has a fault, every fault of both
@@ -619,6 +620,7 @@ class DashboardStoreService:
             name=name,
             numerator=above,
             denominator=below,
+            format_code=format_,
             note=note,
             saved_at=now or datetime.now(UTC),
         )
@@ -633,10 +635,12 @@ class DashboardStoreService:
         name: str,
         numerator: str,
         denominator: str,
+        format_: NumberFormat,
         note: str | None,
         now: datetime | None = None,
     ) -> CustomRatio:
-        """A ratio a person made changed in place under its key.
+        """A ratio a person made changed in place under its key, its format
+        replaced with `format_`.
 
         Raises:
             RecordNotFoundException: no Custom Ratio has the id
@@ -650,7 +654,7 @@ class DashboardStoreService:
         above, below = self._sides(numerator, denominator)
         self._name_free(name, ratio.id)
         ratio.name, ratio.numerator, ratio.denominator = name, above, below
-        ratio.note = note
+        ratio.format_code, ratio.note = format_, note
         ratio.saved_at = now or datetime.now(UTC)
         self.db.flush()
         after_commit(self.catalogue_service.drop)

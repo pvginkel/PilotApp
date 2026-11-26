@@ -1,5 +1,6 @@
 """Saved View, View Star, Dimension Favourite, Quick Filter and Custom Ratio:
-what a row of what the dashboard stores must hold (DB §2.10; 600 to 603)."""
+what a row of what the dashboard stores must hold (DB §2.10; 600 to 603,
+640)."""
 
 from datetime import UTC, datetime
 
@@ -15,7 +16,7 @@ from app.models import (
     User,
     ViewStar,
 )
-from app.models.reference import FavouriteMenu, Origin, UserKind
+from app.models.reference import FavouriteMenu, NumberFormat, Origin, UserKind
 from tests.support.database import violated_constraint
 
 SAVED_AT = datetime(2026, 11, 20, 9, 30, tzinfo=UTC)
@@ -33,6 +34,12 @@ def _view(
     return view
 
 
+def _format(origin: Origin) -> NumberFormat | None:
+    """The format a row of `origin` holds: a person's picked, a loaded one
+    none (DB 640)."""
+    return NumberFormat.USD if origin == Origin.PERSON else None
+
+
 def _ratio(db: DbSession, origin: Origin, key: str, name: str) -> CustomRatio:
     ratio = CustomRatio(
         origin_code=origin,
@@ -40,6 +47,7 @@ def _ratio(db: DbSession, origin: Origin, key: str, name: str) -> CustomRatio:
         name=name,
         numerator="cost.sum",
         denominator="calls.count",
+        format_code=_format(origin),
         saved_at=SAVED_AT,
     )
     db.add(ratio)
@@ -303,6 +311,7 @@ class TestCustomRatio:
                 name="My cost per step",
                 numerator="cost.sum",
                 denominator="calls.count",
+                format_code=NumberFormat.USD,
                 saved_at=SAVED_AT,
             )
         )
@@ -341,6 +350,7 @@ class TestCustomRatio:
                 name="Cost per step",
                 numerator="cost.sum",
                 denominator="calls.count",
+                format_code=_format(origin),
                 saved_at=SAVED_AT,
             )
         )
@@ -358,8 +368,40 @@ class TestCustomRatio:
                 name="Cost per step",
                 numerator="cost.sum",
                 denominator="calls.count",
+                format_code=NumberFormat.USD,
                 saved_at=SAVED_AT,
             )
         )
 
         assert violated_constraint(session) == "custom_ratios_system_name_key"
+
+    @pytest.mark.parametrize(
+        ("origin", "key", "format_"),
+        [
+            (Origin.PERSON, "person_per_step", None),
+            (Origin.WORKFLOW, "per_step", NumberFormat.COUNT),
+        ],
+        ids=["a persons without one", "a loaded one with one"],
+    )
+    def test_a_persons_has_a_format_and_a_loaded_one_none(
+        self,
+        session: DbSession,
+        origin: Origin,
+        key: str,
+        format_: NumberFormat | None,
+    ) -> None:
+        """DB 640: a person picks it; a loaded one is written in the format
+        its two measures give."""
+        session.add(
+            CustomRatio(
+                origin_code=origin,
+                key=key,
+                name="Cost per step",
+                numerator="cost.sum",
+                denominator="calls.count",
+                format_code=format_,
+                saved_at=SAVED_AT,
+            )
+        )
+
+        assert violated_constraint(session) == "ck_custom_ratios_format"
