@@ -427,6 +427,57 @@ class TestRead:
             ("RecipeBox", REBASED, SUBJECT, "toolu_0001", READ_AT)
         ]
 
+    def test_one_whose_call_shows_its_hash_under_another_subject_stays_tied(
+        self, session: DbSession, publications: PublicationService
+    ) -> None:
+        publications.publish(_camp(_commit_call()))
+        _read(session)
+
+        publications.publish(
+            _camp(_commit_call(commits=[commit(subject="Scale the stew for eight")]))
+        )
+
+        assert _commits(session) == [
+            ("RecipeBox", WHOLE, SUBJECT, "toolu_0001", READ_AT)
+        ]
+
+    def test_its_hash_wins_over_its_subject(
+        self, session: DbSession, publications: PublicationService
+    ) -> None:
+        publications.publish(_camp(_commit_call()))
+        _read(session)
+
+        publications.publish(
+            _camp(
+                _commit_call(
+                    commits=[
+                        commit(sha="9d0e1f2"),
+                        commit(subject="Scale the stew for eight"),
+                    ]
+                )
+            )
+        )
+
+        assert _commits(session) == [
+            ("RecipeBox", WHOLE, SUBJECT, "toolu_0001", READ_AT),
+            ("RecipeBox", "9d0e1f2", SUBJECT, "toolu_0001", None),
+        ]
+
+    def test_one_whose_call_names_it_in_another_repository_stays_with_no_tool_call(
+        self, session: DbSession, publications: PublicationService
+    ) -> None:
+        publications.publish(_camp(_commit_call()))
+        _read(session)
+
+        publications.publish(
+            _camp(_commit_call(commits=[commit(repository="RecipeBoxSpecs")]))
+        )
+
+        assert _commits(session) == [
+            ("RecipeBox", WHOLE, SUBJECT, None, READ_AT),
+            ("RecipeBoxSpecs", "3f9a2c1", SUBJECT, "toolu_0001", None),
+        ]
+
     def test_one_its_call_no_longer_names_stays_with_no_tool_call(
         self, session: DbSession, publications: PublicationService
     ) -> None:
