@@ -479,6 +479,23 @@ class TestWorkEstimates:
         assert estimate.run_figures is not None
         assert estimate.run_figures.normal_seconds == pytest.approx(2 * 20 * MINUTE)
 
+    def test_one_to_nine_of_the_repos_own_give_the_repeats_share_with_the_price(
+        self, session: DbSession, run: uuid.UUID, past: uuid.UUID
+    ) -> None:
+        """The repeats' share comes from the timings the price reads: the
+        repo's four listed 20s and its unlisted 10 price a `write` at 22.5,
+        2.5 of it the share the running `write` owes, which all repos',
+        another repo's ten listed 50s among them, would not give; the running
+        step is read against all repos', 45 more."""
+        _timed(session, past, "write", [20] * 4)
+        _timed(session, past, "write", [10], listed=False, age=1.5)
+        _timed(session, past, "write", [50] * 10, repo=OTHER_REPO)
+        _list(session, run, [_active("write", 5), _pending("write")])
+
+        assert _minutes(_estimates(session, [run])[run]) == pytest.approx(
+            45 + 22.5 + 2.5
+        )
+
     @pytest.mark.parametrize(("unlisted", "price"), [(3, 38), (10, 80)])
     def test_a_repo_whose_window_lists_none_of_a_kind_is_priced_from_all_repos(
         self,
