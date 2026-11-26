@@ -2,9 +2,9 @@
  * A page's beat (F147; `database.md` assertion 312): while the page is visible and has had a key,
  * a pointer, a touch or a scroll in the last two minutes, it beats every thirty seconds and at once
  * when the project it shows changes, the project whose route it is on, by its id at each of its
- * addresses, none elsewhere; hidden, or
- * two minutes without input, it sends its away, and a page the server ended beats afresh. A person
- * at the handle step beats nothing. The page's clock is the spec's; its input waits for the page
+ * addresses, none elsewhere and none while the dashboard shows (F160.5); hidden, or two minutes
+ * without input, it sends its away, and a page the server ended beats afresh. A person at the
+ * handle step beats nothing. The page's clock is the spec's; its input waits for the page
  * to hear it (`shell.listening()`).
  */
 
@@ -29,8 +29,8 @@ function nextBeat(page: Page, id: string): Promise<Response> {
   return page.waitForResponse((response) => response.request().method() === 'PUT' && pathOf(response.request()) === `${PAGES}/${id}`);
 }
 
-/** The page's next beat after its first that names `project`, answered. */
-function nextBeatOf(page: Page, id: string, project: string): Promise<Response> {
+/** The page's next beat after its first that names `project`, or none, answered. */
+function nextBeatOf(page: Page, id: string, project: string | null): Promise<Response> {
   return page.waitForResponse(
     (response) =>
       response.request().method() === 'PUT' &&
@@ -153,6 +153,36 @@ test.describe("A page's beat", () => {
       expect((await first).request().postDataJSON()).toEqual({ project_id: id });
     });
   }
+
+  test('shows no project while the dashboard shows, so that nothing waiting there counts as shown, and the project at once as Projects shows it', async ({
+    page,
+    people,
+    projects,
+    shell,
+    dashboard,
+  }) => {
+    const me = await people.signIn();
+    const project = await projects.makeWithSession({ name: makeUnique('Behind'), members: [me.handle!] });
+    const tent = await projects.place(project, { kind: 'question', title: 'Which tent?', text: '```question id=Q1\n```\n' });
+    await shell.open(`${projectAddress(project)}#dash`);
+    await expect(dashboard.screen).toBeVisible();
+    const first = firstBeat(page);
+    await shell.listening();
+    await input(page);
+    const answered = await first;
+    expect(answered.request().postDataJSON()).toEqual({ project_id: null });
+    const id = await idOf(answered);
+    expect(await projects.sightings(project, me.handle!)).toEqual([]);
+
+    const shown = nextBeatOf(page, id, project);
+    await shell.projectsTab.click();
+    expect((await shown).status()).toBe(204);
+    await expect.poll(() => projects.sightings(project, me.handle!)).toEqual([tent]);
+
+    const behind = nextBeatOf(page, id, null);
+    await shell.dashboardTab.click();
+    expect((await behind).status()).toBe(204);
+  });
 
   test('shows no project on a page of none', async ({ page, people, shell }) => {
     await people.signIn();

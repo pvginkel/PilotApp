@@ -21,6 +21,7 @@ import { useEffect, useRef, useSyncExternalStore } from 'react';
 import { useQueryClient, type QueryClient } from '@tanstack/react-query';
 import { wallClock } from '@/hooks/use-now';
 import { changedUnshown } from '@/hooks/use-project-events';
+import { useScreenInView } from '@/hooks/use-screens';
 import type { ProjectHead } from '@/hooks/use-projects';
 import {
   useGetProjectsChatsByProjectId,
@@ -167,13 +168,14 @@ export function useChatDot(projectId: string): boolean {
 
 /**
  * The project's chat, which this page shows at its end while `atEnd`, marked seen there while the
- * page is in view whenever the list says a reply is unread; a mark that failed is made again once
- * the chat is shown again.
+ * page and its screen are in view (F160.5) whenever the list says a reply is unread; a mark that
+ * failed is made again once the chat is shown again.
  */
 export function useChatSeen(projectId: string, atEnd: boolean, unread: boolean): void {
   const queryClient = useQueryClient();
   const visible = useSyncExternalStore(subscribeVisibility, () => document.visibilityState === 'visible');
-  const shown = atEnd && visible;
+  const inView = useScreenInView();
+  const shown = atEnd && visible && inView;
   const { mutateAsync, isPending } = usePutProjectsChatReadByProjectId();
   const tried = useRef(false);
   useEffect(() => {

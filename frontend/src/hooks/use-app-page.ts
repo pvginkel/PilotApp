@@ -6,7 +6,8 @@
  * project's id, as it comes to show the project; and any page of Pilot closes the alarms', on a
  * fresh load and on coming back to the foreground.
  *
- * A page at any of a project's addresses shows it, by its id (`use-project-address.ts`).
+ * A page at any of a project's addresses shows it, by its id (`use-project-address.ts`), while the
+ * Projects screen shows: behind the dashboard it shows none (F160.5).
  *
  * Its beat says its person is online: every thirty seconds while the page is visible and has had a
  * key, a pointer, a touch or a scroll in the last two minutes, and at once when the project it
@@ -178,9 +179,13 @@ class AppPage {
   }
 }
 
-/** This page in front of `self`, under the shell: the notifications it closes and its beat. */
-export function useAppPage(self: Self | undefined): void {
-  const projectId = useProjectOnScreen() ?? null;
+/**
+ * This page in front of `self`, under the shell: the notifications it closes and its beat, the
+ * project at its address shown while `projectsShown`.
+ */
+export function useAppPage(self: Self | undefined, projectsShown: boolean): void {
+  const atAddress = useProjectOnScreen() ?? null;
+  const projectId = projectsShown ? atAddress : null;
   const person = self !== undefined && isPerson(self);
   const shown = useRef<string | null>(null);
   const page = useRef<AppPage | null>(null);

@@ -5,7 +5,8 @@
  * is a drawer over the centre, behind its scrim, opened from the top bar's toggle, under the top
  * bar. At a first sign-in the handle step stands under the top bar in their place (F137). The
  * loading bar lies at the top of what is under the top bar. While the dashboard shows, the Projects
- * screen is out of sight, inert, and the top bar has no drawer's toggle (F160.2).
+ * screen is out of sight, inert, and the top bar has no drawer's toggle (F160.2), and what lies
+ * under it is out of view (`ScreenInView`, F160.5).
  */
 
 import { useRef, type ReactNode } from 'react';
@@ -18,7 +19,7 @@ import type { Drawer } from '@/components/shell/drawer';
 import { NotificationsOffer } from '@/components/shell/notifications-offer';
 import { TopBar } from '@/components/shell/top-bar';
 import type { Condition } from '@/hooks/use-conditions';
-import type { Screens } from '@/hooks/use-screens';
+import { ScreenInView, type Screens } from '@/hooks/use-screens';
 import { isPerson, PersonProvider, type Self } from '@/hooks/use-self';
 
 interface DeskFrameProps {
@@ -42,24 +43,26 @@ export function DeskFrame({ self, drawer, screens, conditions, children }: DeskF
       {person !== null && (
         <PersonProvider value={person}>
           <LinksProvider>
-            <div
-              className={away ? 'app away' : 'app'}
-              inert={away}
-              data-drawer={drawer === null ? undefined : drawer.open ? 'open' : 'closed'}
-              data-testid="shell.app"
-            >
-              <LoadingBar />
-              <nav className="tabs" aria-label="Projects" data-testid="shell.side">
-                <div ref={side} className="tabs-view scroll-view">
-                  <ProjectColumn />
-                </div>
-                <ScrollBar view={side} testId="shell.side.scrollbar" />
-              </nav>
-              {drawer !== null && <div className="drawer-scrim" onClick={drawer.close} data-testid="shell.scrim" />}
-              <main className="centre" data-testid="shell.centre">
-                {children}
-              </main>
-            </div>
+            <ScreenInView value={!away}>
+              <div
+                className={away ? 'app away' : 'app'}
+                inert={away}
+                data-drawer={drawer === null ? undefined : drawer.open ? 'open' : 'closed'}
+                data-testid="shell.app"
+              >
+                <LoadingBar />
+                <nav className="tabs" aria-label="Projects" data-testid="shell.side">
+                  <div ref={side} className="tabs-view scroll-view">
+                    <ProjectColumn />
+                  </div>
+                  <ScrollBar view={side} testId="shell.side.scrollbar" />
+                </nav>
+                {drawer !== null && <div className="drawer-scrim" onClick={drawer.close} data-testid="shell.scrim" />}
+                <main className="centre" data-testid="shell.centre">
+                  {children}
+                </main>
+              </div>
+            </ScreenInView>
           </LinksProvider>
         </PersonProvider>
       )}

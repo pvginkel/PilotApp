@@ -9,7 +9,8 @@
  * frame takes it down. The screen out of sight lies under the one that shows, in the same box,
  * out of the flow, its visibility off and inert, so that its place and its scroll are kept.
  * The page closes the notifications of what it shows on its device and beats while its person is
- * active in it (`use-app-page.ts`).
+ * active in it (`use-app-page.ts`), the Projects screen behind the dashboard showing nothing.
+ * On a phone a dashboard address shows the app, its hash taken off (`use-screens.ts`).
  * Every text under the side column and the centre links through the link settings read here.
  * Once it shows, a route keeps the screen showing while it reads its own (`screen-reads.ts`).
  * While the connection to the server is down or slow, the page lies under its tint (F149).
@@ -45,10 +46,10 @@ export const Route = createFileRoute('/_shell')({
 function Shell() {
   const { data: self } = useSelf();
   useEffect(screenShown, []);
-  useAppPage(self);
   const phone = usePhone();
   const narrow = useNarrow();
-  const screens = useScreens(!phone && self !== undefined && isPerson(self));
+  const screens = useScreens(phone, self !== undefined && isPerson(self));
+  useAppPage(self, screens.shown === 'projects');
   const pathname = useRouterState({ select: (state) => state.location.pathname });
   // The drawer is open on the page it was opened on, and going elsewhere closes it: coming back
   // to that page, by Back or a link, finds it closed.
