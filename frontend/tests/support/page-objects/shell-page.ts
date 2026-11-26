@@ -7,8 +7,8 @@ import { waitTestEvent } from '../helpers';
 type ConditionCode = components['schemas']['ConditionsSchema.6c014b4.ConditionCode'];
 
 /**
- * The frame every screen sits in: the offer of the browser's notifications, the top bar, its gold
- * badges, the week's halt's popover and its profile menu, the gold bar, its lines and their flyout,
+ * The frame every screen sits in: the offer of the browser's notifications, the top bar, the
+ * screens' tabs, its gold badges, the week's halt's popover and its profile menu, the gold bar, its lines and their flyout,
  * the side column and at the narrow width its drawer, on a phone the home, its head and the arrow to
  * it, the keys list.
  */
@@ -19,6 +19,10 @@ export class ShellPage {
   readonly offerNotNow: Locator;
   readonly topBar: Locator;
   readonly brand: Locator;
+  /** The two screens' tabs after the name (F160.1), and each. */
+  readonly screens: Locator;
+  readonly projectsTab: Locator;
+  readonly dashboardTab: Locator;
   /** At the narrow width, the drawer's toggle, in the top bar. */
   readonly drawerToggle: Locator;
   /** On a phone, the home (F98.6): its head, the top bar's block of colour, and Pilot's name in it, and its list. */
@@ -62,6 +66,9 @@ export class ShellPage {
     this.offerNotNow = page.getByTestId('shell.notifications-offer.not-now');
     this.topBar = page.getByTestId('app-shell.topbar');
     this.brand = this.topBar.locator('.brand');
+    this.screens = page.getByTestId('shell.screens');
+    this.projectsTab = page.getByTestId('shell.screens.projects');
+    this.dashboardTab = page.getByTestId('shell.screens.dashboard');
     this.drawerToggle = page.getByTestId('shell.drawer-toggle');
     this.home = page.getByTestId('home');
     this.homeHead = page.getByTestId('shell.home-head');

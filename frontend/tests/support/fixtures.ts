@@ -18,7 +18,8 @@
  * the worker's fake push service, `device` the page as its device: the pushes its service worker
  * shows, the notifications standing there and the page's visibility,
  * `storeUpdate` makes the store's update and asks its lift, lifting one a spec left standing, and
- * `waits` adds the brain's waits, fires them, places their runs and closes them.
+ * `waits` adds the brain's waits, fires them, places their runs and closes them. `dashboard` is the
+ * dashboard, the screen beside Projects.
  * `conditions`, the worker's, reads what the gold bar reads, and `warmFrontend` has the worker's dev
  * server serve the app once before the worker's first test. `poolGuard` fails a test where a thread of
  * the worker's backend checked out a second connection of its pool while it held one, and
@@ -40,6 +41,7 @@ import { HaltSettings } from './halt-settings';
 import { Links } from './links';
 import { ChatPage } from './page-objects/chat-page';
 import { ConversationsPage } from './page-objects/conversations-page';
+import { DashboardPage } from './page-objects/dashboard-page';
 import { DocTabsPage } from './page-objects/doc-tabs-page';
 import { HandleStepPage } from './page-objects/handle-step-page';
 import { DebriefPage } from './page-objects/debrief-page';
@@ -86,6 +88,7 @@ interface DomainFixtures {
   device: Device;
   storeUpdate: StoreUpdate;
   waits: Waits;
+  dashboard: DashboardPage;
   poolGuard: void;
   statementCap: void;
 }
@@ -219,6 +222,9 @@ export const test = infrastructureFixtures.extend<DomainFixtures, DomainWorkerFi
   },
   waits: async ({ page, backendUrl }, use) => {
     await use(new Waits(page, backendUrl));
+  },
+  dashboard: async ({ page }, use) => {
+    await use(new DashboardPage(page));
   },
   // The nestings the backend's pool guard kept (backend/app/utils/pool_guard.py), taken once the
   // test and the fixtures it used are done: the test's, its fixtures', or those of a thread a test

@@ -1,7 +1,7 @@
 /**
  * The gold bar (F125; UC *The gold bar*): with the controller unreachable, it shows in every open
  * browser, at once and with no reload. Off a phone it is a badge in the top bar, left-aligned after
- * Pilot's name, the buttons' corner radius, its full line its title, the light theme's gold in both
+ * Pilot's name and the screens' tabs, the buttons' corner radius, its full line its title, the light theme's gold in both
  * themes at 4.5:1 or better; at 900px and below, with no top bar, it is a line across the page's
  * top, in gold tokens of its own, light and dark, the home under it as every screen: the badge's words on
  * one line, without the time, cut where they do not fit, a tap opening a flyout with the
@@ -35,10 +35,10 @@ const FIVE_HOUR_LINE = new RegExp(
 );
 
 async function wideBoxes(shell: ShellPage) {
-  const [top, brand, badge, side, centre] = await Promise.all(
-    [shell.topBar, shell.brand, shell.goldBadge('outage'), shell.side, shell.centre].map((locator) => locator.boundingBox()),
+  const [top, screens, badge, side, centre] = await Promise.all(
+    [shell.topBar, shell.screens, shell.goldBadge('outage'), shell.side, shell.centre].map((locator) => locator.boundingBox()),
   );
-  return { top: top!, brand: brand!, badge: badge!, side: side!, centre: centre! };
+  return { top: top!, screens: screens!, badge: badge!, side: side!, centre: centre! };
 }
 
 /** A browser of the same person's beside the spec's, open at `path` with its stream up. */
@@ -91,7 +91,7 @@ test.describe('The gold bar', () => {
     // corner radius; no line over the project list, which starts under the top bar.
     await expect(shell.goldBar).toHaveCount(0);
     const wide = await wideBoxes(shell);
-    expect(wide.badge.x).toBeCloseTo(wide.brand.x + wide.brand.width + 16, 0);
+    expect(wide.badge.x).toBeCloseTo(wide.screens.x + wide.screens.width + 16, 0);
     expect(wide.badge.y + wide.badge.height / 2).toBeCloseTo(wide.top.y + wide.top.height / 2, 0);
     expect(wide.side.y).toBeCloseTo(wide.top.y + wide.top.height, 0);
     expect(wide.centre.y).toBeCloseTo(wide.side.y, 0);
