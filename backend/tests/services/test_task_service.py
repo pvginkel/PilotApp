@@ -1,6 +1,5 @@
-"""A task's progress update, with what the task has answered so far: the
-standing edit to the template's task form that lets a page show a task's
-answer as it comes."""
+"""A task's progress update, with what the task has answered so far, so
+that a page shows a task's answer as it comes."""
 
 import json
 from collections.abc import Iterator

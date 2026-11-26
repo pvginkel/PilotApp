@@ -552,8 +552,8 @@ from the blue renders, and the top bar's `logo.png`, the phone home's head's too
 one, three times the bar's 32px, the bar being the theme's blue itself (D020). Beside them stand
 `public/`'s manifest (`manifest.json`), which names no `theme_color`, and service worker, `sw.js`;
 the page head links the manifest, names the page "Pilot - AI powered work orchestration" (D205) and sets
-the three `theme-color`s of the browser's bar (above), a standing edit of the template's
-`index.html` (`CLAUDE.md`). `registerServiceWorker()`
+the three `theme-color`s of the browser's bar (above), in the template-owned `index.html`.
+`registerServiceWorker()`
 (`src/lib/service-worker.ts`) registers the worker when the shell's module loads, on any page,
 before sign-in too, wherever the browser offers service workers (a secure context). The worker
 shows the server's pushes and opens the app at a tap on one
@@ -563,8 +563,8 @@ sign-in, its callback and sign-out are. The UI's nginx caches the build's hashed
 year and has the browser revalidate the root's files — the icons, the logo, the manifest, the worker
 — on every load, so a changed icon shows under its name. It hands every path under `/api/` to the
 backend, whatever its extension, so the cache rule never answers one from the static root, the
-sync's `/api/sync/files/*.json` among them. Both are standing edits of the template's `nginx.conf`
-(`CLAUDE.md`), which `tests/infrastructure/nginx.spec.ts` pins.
+sync's `/api/sync/files/*.json` among them. Both are in the template-owned `nginx.conf`, which
+`tests/infrastructure/nginx.spec.ts` pins.
 
 ## Testing it
 
