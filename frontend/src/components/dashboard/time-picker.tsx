@@ -12,7 +12,7 @@
  * field or in the range at hand, and drops it otherwise. A quota week is written by the instant it
  * starts, its key, as two weeks may share a label. The weeks follow the usage readings, so the
  * catalogue's time is read again as the popover opens. A time set closes the popover; it is a new
- * entry (F160.4).
+ * entry (F160.4), the drawer's row no longer selected, as the mockup's `timePopover` sets it.
  */
 
 import { useLayoutEffect, useRef, useState } from 'react';

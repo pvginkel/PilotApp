@@ -85,7 +85,7 @@ function View({ tab, now, one, moves, wrote }: ViewProps) {
     <>
       <div className="dash-bar" role="toolbar" aria-label="Dashboard" data-testid="dashboard.toolbar">
         {one && <OneTab tab={tab} moves={moves} />}
-        {state !== null && <TimePicker state={state} window={window} onTime={(time) => moves.set(tab.id, writeState({ ...state, time }))} />}
+        {state !== null && <TimePicker state={state} window={window} onTime={(time) => moves.set(tab.id, writeState({ ...state, time, selected: null }))} />}
         <span className="grow" />
         <ResetButton tab={tab} now={now} moves={moves} />
         <SaveViewButton tab={tab} now={now} />

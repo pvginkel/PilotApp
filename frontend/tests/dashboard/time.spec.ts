@@ -4,9 +4,9 @@
  * To over a month's calendar with Apply, typed day first or ISO, a time of day optional, an empty
  * one an open bound; a pick on the calendar keeping a time of day only where one was typed; at the
  * right the catalogue's ranges, then its quota weeks, newest first; at the foot the zone and when
- * the running quota week started. A time set is a new entry (F160.4) and reads the view again. The
- * figures are the tally's (`TALLY`), on two projects of the spec's own, over the 4,040 s before its
- * load.
+ * the running quota week started. A time set is a new entry (F160.4), the drawer's row let go, and
+ * reads the view again. The figures are the tally's (`TALLY`), on two projects of the spec's own,
+ * over the 4,040 s before its load.
  */
 
 import type { Page } from '@playwright/test';
@@ -104,8 +104,10 @@ test.describe('The view’s time', () => {
     const part = await timePart(page, backendUrl);
     const weeks = part.quota_weeks!;
     const running = weeks.find((week) => week.running)!;
-    await shell.open(`${projectAddress(recipeBox)}${dashboardAddress(`t=all&by=project&m=cost.sum&${chip}`)}`);
+    // A row selected for the drawer, which a time set lets go.
+    await shell.open(`${projectAddress(recipeBox)}${dashboardAddress(`t=all&by=project&m=cost.sum&${chip}&sel=${recipeBox}`)}`);
     await expect(dashboard.allValues).toHaveText(['$2.29']);
+    expect(page.url()).toContain(`sel=${recipeBox}`);
 
     await dashboard.time.click();
     await expect(dashboard.timePicker).toBeVisible();
@@ -129,6 +131,7 @@ test.describe('The view’s time', () => {
     await expect(dashboard.timePicker).toHaveCount(0);
     await expect(dashboard.timeWords).toHaveText('Last 2 days');
     await expect.poll(() => timeOf(page)).toBe('d2');
+    expect(page.url()).not.toContain('sel=');
     expect(await historyLength(page)).toBe(entries + 1);
     await expect.poll(() => reads().some((state) => state.startsWith('t=d2&'))).toBe(true);
     await expect(dashboard.allValues).toHaveText(['$2.29']);
