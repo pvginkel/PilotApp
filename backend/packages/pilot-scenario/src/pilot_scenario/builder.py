@@ -51,6 +51,14 @@ from pilot_scenario.transcript import MANAGED, HomeFile, Lines, Spawned, request
 COLLECTOR = "1.4.0"
 """The version of the collector the publications say read the files."""
 
+LABELLER = "1.0.0"
+"""The version of the labeller the publications that name a group say
+labelled the files."""
+
+_STAMP = "1:scenario"
+"""The stamp a publication that names a group gives of what its labeller
+read."""
+
 CLAUDE_CODE = "claude-code"
 """The component whose version a Launch's lines carry."""
 
@@ -686,6 +694,11 @@ class Builder:
         publication |= _given(
             environment=session.environment,
             group=None if session.group is None else asdict(session.group),
+            labelling=(
+                None
+                if session.group is None
+                else {"version": LABELLER, "stamp": _STAMP, "labels": {}}
+            ),
             launches=launches,
             compactions=thread.compactions,
             calls=thread.calls,

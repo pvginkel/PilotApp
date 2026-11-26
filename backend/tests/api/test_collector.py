@@ -49,6 +49,7 @@ from tests.support.publications import (
     call,
     collector_headers,
     group,
+    labelling,
     launch,
     prompt,
     sub_agent,
@@ -130,7 +131,7 @@ class TestCollectorProtocolVersion:
         # pin bumps COLLECTOR_PROTOCOL_MAX and the collector's own version in
         # one commit, and COLLECTOR_PROTOCOL_MIN with it when the server
         # cannot serve the old collector.
-        assert (COLLECTOR_PROTOCOL_MIN, COLLECTOR_PROTOCOL_MAX) == (1, 1)
+        assert (COLLECTOR_PROTOCOL_MIN, COLLECTOR_PROTOCOL_MAX) == (1, 2)
 
 
 class TestCollectorGate:
@@ -176,7 +177,7 @@ class TestCollectorGate:
 
         assert wrote == {}
 
-    @pytest.mark.parametrize("version", ["0", "2", "one", "+1", "1.0", ""])
+    @pytest.mark.parametrize("version", ["0", "3", "one", "+1", "1.0", ""])
     def test_a_version_outside_the_range_is_426_with_the_range(
         self,
         session: DbSession,
@@ -197,6 +198,20 @@ class TestCollectorGate:
         assert repr(version) in caplog.text
         assert wrote == {}
 
+    def test_a_collector_of_the_oldest_version_is_taken(
+        self, session: DbSession, client: FlaskClient
+    ) -> None:
+        """It sends no labelling, which a call of today's may leave out."""
+        headers = {
+            **collector_headers(),
+            "X-Pilot-Collector-Protocol": str(COLLECTOR_PROTOCOL_MIN),
+        }
+
+        response = _post(client, _body(_camp()), headers)
+
+        assert response.status_code == 204
+        assert session.scalars(select(Transcript.session_id)).all() == [CAMP]
+
     def test_a_call_naming_no_version_is_426(
         self, session: DbSession, client: FlaskClient
     ) -> None:
@@ -207,13 +222,13 @@ class TestCollectorGate:
             response = _post(client, _body(_camp()), headers)
 
         assert response.status_code == 426
-        assert response.json == {"min": 1, "max": 1}
+        assert response.json == {"min": 1, "max": 2}
         assert wrote == {}
 
     def test_the_bearer_is_asked_for_before_the_version(
         self, client: FlaskClient
     ) -> None:
-        headers = {"X-Pilot-Collector-Protocol": "2"}
+        headers = {"X-Pilot-Collector-Protocol": "3"}
 
         assert _post(client, _body(_camp()), headers).status_code == 401
 
@@ -344,7 +359,7 @@ class TestInventory:
             headers = {**collector_headers(), "Authorization": bearer}
             assert client.get(INVENTORY, headers=headers).status_code == 401
 
-    @pytest.mark.parametrize("version", ["0", "2", None])
+    @pytest.mark.parametrize("version", ["0", "3", None])
     def test_a_version_outside_the_range_is_426_with_the_range(
         self, client: FlaskClient, version: str | None
     ) -> None:
@@ -466,7 +481,7 @@ class TestEndWalk:
             headers = {**collector_headers(), "Authorization": bearer}
             assert client.post(WALKS, headers=headers).status_code == 401
 
-    @pytest.mark.parametrize("version", ["0", "2", None])
+    @pytest.mark.parametrize("version", ["0", "3", None])
     def test_a_version_outside_the_range_is_426_with_the_range(
         self, session: DbSession, client: FlaskClient, version: str | None
     ) -> None:
@@ -617,7 +632,7 @@ class TestDeclareVocabularies:
 
         assert wrote == {}
 
-    @pytest.mark.parametrize("version", ["0", "2", None])
+    @pytest.mark.parametrize("version", ["0", "3", None])
     def test_a_version_outside_the_range_is_426_with_the_range(
         self, session: DbSession, client: FlaskClient, version: str | None
     ) -> None:
@@ -817,7 +832,9 @@ class TestPublish:
         self, session: DbSession, client: FlaskClient, service_user: User
     ) -> None:
         """F152.8."""
-        response = _post(client, _body(_camp()) | {"group": group()})
+        response = _post(
+            client, _body(_camp()) | {"group": group(), "labelling": labelling()}
+        )
 
         assert response.status_code == 204
         project = session.scalars(select(Project)).one()
@@ -834,7 +851,9 @@ class TestPublish:
         self, session: DbSession, client: FlaskClient
     ) -> None:
         with writes(session) as wrote:
-            response = _post(client, _body(_camp()) | {"group": group()})
+            response = _post(
+                client, _body(_camp()) | {"group": group(), "labelling": labelling()}
+            )
 
         assert response.status_code == 409
         assert response.json["code"] == "NO_SERVICE_USER"
@@ -856,7 +875,9 @@ class TestPublish:
         session.flush()
 
         with writes(session) as wrote:
-            response = _post(client, _body(_camp()) | {"group": group()})
+            response = _post(
+                client, _body(_camp()) | {"group": group(), "labelling": labelling()}
+            )
 
         assert response.status_code == 409
         assert response.json["code"] == "TRANSCRIPT_NOT_ADOPTABLE"
@@ -870,7 +891,10 @@ class TestPublish:
     def test_a_group_that_makes_no_project_document_is_400(
         self, session: DbSession, client: FlaskClient, service_user: User
     ) -> None:
-        body = _body(_camp()) | {"group": group(name="The first menus ")}
+        body = _body(_camp()) | {
+            "group": group(name="The first menus "),
+            "labelling": labelling(),
+        }
 
         with writes(session) as wrote:
             response = _post(client, body)

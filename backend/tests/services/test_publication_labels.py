@@ -1,0 +1,1320 @@
+"""A publication's labelling, written with its facts in one transaction:
+every label of the Transcript replaced together, the Work Units, Test Suites
+and CI Builds written by their keys and kept (F152.3, F152.6, F152.7; DB
+decision 81, assertion 561).
+
+The rules that protect the most: a publication's facts never remove or
+overwrite a label, nor its labels a fact (`TestFactsAndLabels`, slice 047's
+I2), and a call with no labelling keeps every label Pilot holds, holding no
+stamp (`TestNoLabelling`). A Call's labelled Context Parts are carved out of
+its opening prompt's (`TestCarved`, D266)."""
+
+import logging
+from datetime import timedelta
+from decimal import Decimal
+from typing import Any
+
+import pytest
+from pilot_collection.publication import PublicationSchema
+from sqlalchemy import func, select, update
+from sqlalchemy.orm import Session as DbSession
+
+from app.exceptions import PublicationInvalidException
+from app.models import (
+    Call,
+    CIBuild,
+    CIWait,
+    ComponentVersion,
+    ContextPart,
+    Document,
+    Event,
+    Launch,
+    RuleBreach,
+    Segment,
+    Test,
+    TestFailure,
+    TestRun,
+    TestSuite,
+    ToolCall,
+    Transcript,
+    WorkUnit,
+    WorkUnitMeasure,
+)
+from app.services.container import ServiceContainer
+from app.services.publication_service import PublicationService
+from tests.support.database import Written, writes
+from tests.support.publications import (
+    STAMP,
+    appended,
+    call,
+    context_part,
+    event,
+    labelling,
+    launch,
+    prompt,
+    sub_agent,
+    tool_call,
+    whole,
+)
+from tests.support.transcripts import STARTED, SUB_AGENT
+from tests.support.vocabularies import VERSION, lists, vocabularies
+
+LOGGER = "app.services.publication_service"
+
+OPENING = (
+    "Cook the spring menu's soup, and taste it before it goes out.\n\n"
+    "# Orientation digest — the soup\n\n"
+    "## The menu\n\nFour dishes, the soup first; the guests come at eight.\n\n"
+    "## The pantry (as stocked this morning)\n\nLeeks, stock and cream.\n"
+)
+"""An invented opening prompt that holds a digest, as a dispatch's does."""
+
+SUITE = "RecipeBox/backend/test"
+JOB = "RecipeBox/Build-Main"
+DEPLOY = "RecipeBox/Deploy"
+MENU, STARTERS, SOUP, AGAIN = (
+    "spring",
+    "spring|starters",
+    "spring|starters|soup",
+    "spring|starters|soup.2",
+)
+
+
+def _at(minutes: float) -> str:
+    return (STARTED + timedelta(minutes=minutes)).isoformat()
+
+
+def _digest(text: str) -> list[dict[str, Any]]:
+    """The digest's sections as the labeller's page reads them: one per
+    `## ` heading of the block that opens `# Orientation digest —`, named by
+    its heading up to its first ` (`, its characters the section's length
+    with its heading."""
+    block = text[text.index("# Orientation digest —") :]
+    sections = block.split("\n## ")[1:]
+    return [
+        {
+            "name": section.split("\n", 1)[0].split(" (", 1)[0],
+            "characters": len(("## " + section).rstrip("\n")),
+        }
+        for section in sections
+    ]
+
+
+SECTIONS = _digest(OPENING)
+
+
+def _published(**overrides: Any) -> PublicationSchema:
+    """The main thread: two Launches, three Calls. The first Call carries
+    the opening prompt, the second places an order and runs a timer, the
+    third runs the tests and waits on a build, each Call an Event of the
+    collector's but the second."""
+    values: dict[str, Any] = {
+        "launches": [
+            launch(ended_at=_at(2.5), prompts=[prompt(characters=len(OPENING))]),
+            launch(started_at=_at(2.6), prompts=[prompt(received_at=_at(2.6))]),
+        ],
+        "calls": [
+            call(
+                1,
+                prompt=1,
+                tool_calls=[tool_call(1)],
+                events=[event(at=_at(0.5))],
+                context_parts=[
+                    context_part(),
+                    context_part(kind="prompt", characters=len(OPENING)),
+                ],
+            ),
+            call(
+                2,
+                prompt=1,
+                predecessor="msg_0001",
+                tool_calls=[tool_call(2), tool_call(3)],
+            ),
+            call(
+                3,
+                prompt=2,
+                predecessor="msg_0002",
+                tool_calls=[tool_call(4), tool_call(5)],
+                events=[event(at=_at(3.5))],
+                context_parts=[context_part(kind="prompt", characters=212)],
+            ),
+        ],
+    }
+    return whole(**values | overrides)
+
+
+def _grown(**overrides: Any) -> PublicationSchema:
+    """`_published`'s file grown by a fourth Call under its second Launch,
+    taken appended from that Call on."""
+    values: dict[str, Any] = {
+        "call": 4,
+        "launch": 2,
+        "prompt": 2,
+        "launches": [
+            launch(started_at=_at(2.6), prompts=[prompt(received_at=_at(2.6))])
+        ],
+        "calls": [call(4, prompt=2, predecessor="msg_0003")],
+    }
+    return appended(**values | overrides)
+
+
+def _units() -> list[dict[str, Any]]:
+    """The spring menu, its starters, and the soup sent back and cooked
+    again."""
+    return [
+        {
+            "key": MENU,
+            "kind": "menu",
+            "title": "The spring menu",
+            "started_at": _at(0),
+            "measures": [{"measure": "planned_dishes", "amount": 4}],
+        },
+        {"key": STARTERS, "kind": "course", "part_of": MENU, "title": "Starters"},
+        {
+            "key": SOUP,
+            "kind": "dish",
+            "part_of": STARTERS,
+            "title": "Soup",
+            "role": "cook",
+            "round": 1,
+            "outcome": "sent_back",
+        },
+        {
+            "key": AGAIN,
+            "kind": "dish",
+            "part_of": STARTERS,
+            "occasioned_by": SOUP,
+            "rework_kind": "recooked",
+            "title": "Soup again",
+            "variant": "thicker",
+            "role": "cook",
+            "round": 2,
+            "outcome": "served",
+            "started_at": _at(2.6),
+            "ended_at": _at(4),
+            "card": "KITCHEN-12",
+            "measures": [{"measure": "tastings", "amount": 3}],
+        },
+    ]
+
+
+def _labels(**overrides: Any) -> dict[str, Any]:
+    values: dict[str, Any] = {
+        "launches": [{"n": 1, "work_unit": SOUP}, {"n": 2, "work_unit": AGAIN}],
+        "calls": [
+            {
+                "id": "msg_0001",
+                "segment": 1,
+                "call_class": "chop",
+                "wait_cause": "delivery",
+            },
+            {"id": "msg_0002", "segment": 2, "call_class": "stir"},
+            {
+                "id": "msg_0003",
+                "segment": 2,
+                "call_class": "other",
+                "avoidable_kind": "spilt",
+                "wait_cause": "oven",
+            },
+        ],
+        "segments": [{"position": 1, "kind": "prep"}, {"position": 2, "kind": "cook"}],
+        "tool_calls": [
+            {
+                "tool_use_id": "toolu_0002",
+                "command_class": "timer",
+                "rules": ["no_tasting_from_the_pot"],
+            },
+            {
+                "tool_use_id": "toolu_0003",
+                "effect_kind": "order_placed",
+                "effect_subject": "ORDER-12",
+            },
+            {"tool_use_id": "toolu_0004", "command_class": "timer"},
+        ],
+        "events": [
+            {"call": "msg_0003", "kind": "burnt", "at": _at(3.6), "detail": "the sauce"}
+        ],
+        "context_parts": [
+            {"call": "msg_0001", "kind": "recipe_card", **section}
+            for section in SECTIONS
+        ],
+        "test_runs": [
+            {
+                "tool_use_id": "toolu_0004",
+                "suite": SUITE,
+                "passed": False,
+                "tests": 12,
+                "retries_allowed": 1,
+                "started_at": _at(3),
+                "ended_at": _at(3.2),
+                "failures": [
+                    {
+                        "test": "tests/test_scale.py::test_halves",
+                        "attempts": 2,
+                        "flaky": True,
+                    },
+                    {
+                        "test": "tests/test_scale.py::test_doubles",
+                        "attempts": 2,
+                        "flaky": False,
+                    },
+                ],
+            },
+            {"work_unit": STARTERS, "suite": SUITE, "passed": True, "tests": 12},
+        ],
+        "ci_waits": [
+            {"tool_use_id": "toolu_0005", "job": JOB, "number": 812},
+            {"tool_use_id": "toolu_0005", "job": DEPLOY, "number": 40},
+        ],
+    }
+    return values | overrides
+
+
+def _labelling(**overrides: Any) -> dict[str, Any]:
+    """The invented labeller's labels of `_published`'s transcript, every
+    kind of label given."""
+    values: dict[str, Any] = {
+        "labels": _labels(),
+        "units": _units(),
+        "test_suites": [{"code": SUITE, "name": "RecipeBox backend test"}],
+        "ci_builds": [
+            {
+                "job": JOB,
+                "number": 812,
+                "result": "DONE",
+                "queued_at": _at(3.4),
+                "started_at": _at(3.5),
+                "ended_at": _at(9),
+                "commit": "4f1c2a9",
+                "deployed_at": _at(11),
+            },
+            {"job": DEPLOY, "number": 40, "result": "DONE"},
+        ],
+    }
+    return labelling(**values | overrides)
+
+
+@pytest.fixture
+def publications(container: ServiceContainer) -> PublicationService:
+    container.vocabulary_service().declare(vocabularies())
+    return container.publication_service()
+
+
+def _count(db: DbSession, entity: type) -> int:
+    return db.scalar(select(func.count()).select_from(entity)) or 0
+
+
+def _calls(db: DbSession) -> list[tuple[Any, ...]]:
+    return [
+        tuple(row)
+        for row in db.execute(
+            select(
+                Call.message_id,
+                Call.segment_position,
+                Call.call_class_code,
+                Call.avoidable_kind_code,
+                Call.wait_cause_code,
+            )
+            .where(Call.transcript_id == Transcript.id, Transcript.agent_id.is_(None))
+            .order_by(Call.position)
+        )
+    ]
+
+
+def _labelled(db: DbSession, entity: type) -> list[tuple[Any, ...]]:
+    """The labelled rows of an Event's or a Context Part's, by their Call."""
+    columns = (
+        (Event.kind_code, Event.at, Event.detail)
+        if entity is Event
+        else (ContextPart.kind_code, ContextPart.name, ContextPart.characters)
+    )
+    return [
+        tuple(row)
+        for row in db.execute(
+            select(Call.message_id, *columns)
+            .join(Call, Call.id == entity.call_id)
+            .where(entity.labelled.is_(True))
+            .order_by(entity.id)
+        )
+    ]
+
+
+def _parts(db: DbSession, message_id: str) -> list[tuple[Any, ...]]:
+    """The Context Parts of the Call, the collector's and the labeller's."""
+    return [
+        tuple(row)
+        for row in db.execute(
+            select(ContextPart.kind_code, ContextPart.characters, ContextPart.labelled)
+            .join(Call, Call.id == ContextPart.call_id)
+            .where(Call.message_id == message_id, Transcript.agent_id.is_(None))
+            .join(Transcript, Transcript.id == Call.transcript_id)
+            .order_by(ContextPart.id)
+        )
+    ]
+
+
+def _ids(db: DbSession, entity: type, *where: Any) -> list[int]:
+    return list(db.scalars(select(entity.id).where(*where).order_by(entity.id)))
+
+
+class TestLabelled:
+    """A whole publication's labelling, held as the Transcript's labels."""
+
+    def test_the_transcript_is_labelled_under_the_labellers_version_with_its_stamp(
+        self, session: DbSession, publications: PublicationService
+    ) -> None:
+        thread = publications.publish(_published(labelling=_labelling()))
+
+        version = session.get_one(ComponentVersion, thread.labelled_under_id)
+        assert (version.component_code, version.version) == ("labeller", VERSION)
+        assert thread.records_stamp == STAMP
+
+    def test_each_row_of_the_transcript_holds_its_labels(
+        self, session: DbSession, publications: PublicationService
+    ) -> None:
+        thread = publications.publish(_published(labelling=_labelling()))
+
+        units = dict(session.execute(select(WorkUnit.id, WorkUnit.key)).all())
+        assert [
+            units[row]
+            for row in session.scalars(
+                select(Launch.work_unit_id)
+                .where(Launch.transcript_id == thread.id)
+                .order_by(Launch.id)
+            )
+        ] == [SOUP, AGAIN]
+        assert _calls(session) == [
+            ("msg_0001", 1, "chop", None, "delivery"),
+            ("msg_0002", 2, "stir", None, None),
+            ("msg_0003", 2, "other", "spilt", "oven"),
+        ]
+        assert session.execute(
+            select(Segment.position, Segment.kind_code).order_by(Segment.position)
+        ).all() == [(1, "prep"), (2, "cook")]
+        assert session.execute(
+            select(
+                ToolCall.tool_use_id,
+                ToolCall.command_class_code,
+                ToolCall.effect_kind_code,
+                ToolCall.effect_subject,
+            ).order_by(ToolCall.tool_use_id)
+        ).all() == [
+            ("toolu_0001", None, None, None),
+            ("toolu_0002", "timer", None, None),
+            ("toolu_0003", None, "order_placed", "ORDER-12"),
+            ("toolu_0004", "timer", None, None),
+            ("toolu_0005", None, None, None),
+        ]
+        assert session.execute(
+            select(ToolCall.tool_use_id, RuleBreach.rule_code).join(
+                ToolCall, ToolCall.id == RuleBreach.tool_call_id
+            )
+        ).all() == [("toolu_0002", "no_tasting_from_the_pot")]
+        assert _labelled(session, Event) == [
+            ("msg_0003", "burnt", STARTED + timedelta(minutes=3.6), "the sauce")
+        ]
+        assert _labelled(session, ContextPart) == [
+            ("msg_0001", "recipe_card", "The menu", SECTIONS[0]["characters"]),
+            ("msg_0001", "recipe_card", "The pantry", SECTIONS[1]["characters"]),
+        ]
+
+    def test_its_test_runs_ci_waits_and_what_they_name_are_held(
+        self, session: DbSession, publications: PublicationService
+    ) -> None:
+        thread = publications.publish(_published(labelling=_labelling()))
+
+        suite = session.scalars(select(TestSuite)).one()
+        assert (suite.code, suite.name) == (SUITE, "RecipeBox backend test")
+        runs = session.execute(
+            select(
+                ToolCall.tool_use_id,
+                WorkUnit.key,
+                TestRun.suite_id,
+                TestRun.passed,
+                TestRun.tests,
+                TestRun.retries_allowed,
+                TestRun.transcript_id,
+            )
+            .outerjoin(ToolCall, ToolCall.id == TestRun.tool_call_id)
+            .outerjoin(WorkUnit, WorkUnit.id == TestRun.work_unit_id)
+            .order_by(TestRun.id)
+        ).all()
+        assert runs == [
+            ("toolu_0004", None, suite.id, False, 12, 1, thread.id),
+            (None, STARTERS, suite.id, True, 12, None, thread.id),
+        ]
+        assert session.execute(
+            select(Test.name, TestFailure.attempts, TestFailure.flaky)
+            .join(Test, Test.id == TestFailure.test_id)
+            .order_by(Test.name)
+        ).all() == [
+            ("tests/test_scale.py::test_doubles", 2, False),
+            ("tests/test_scale.py::test_halves", 2, True),
+        ]
+        built = session.scalars(select(CIBuild).order_by(CIBuild.number.desc())).first()
+        assert built is not None
+        assert (built.job, built.number, built.result_code, built.commit_sha) == (
+            JOB,
+            812,
+            "DONE",
+            "4f1c2a9",
+        )
+        assert built.deployed_at == STARTED + timedelta(minutes=11)
+        assert sorted(
+            session.execute(
+                select(ToolCall.tool_use_id, CIBuild.job)
+                .select_from(CIWait)
+                .join(ToolCall, ToolCall.id == CIWait.tool_call_id)
+                .join(CIBuild, CIBuild.id == CIWait.ci_build_id)
+            ).all()
+        ) == [("toolu_0005", JOB), ("toolu_0005", DEPLOY)]
+
+    def test_its_work_units_sit_where_the_labelling_places_them(
+        self, session: DbSession, publications: PublicationService
+    ) -> None:
+        publications.publish(_published(labelling=_labelling()))
+
+        units = {row.key: row for row in session.scalars(select(WorkUnit))}
+        again = units[AGAIN]
+        assert (again.part_of_id, again.part_of_kind_code) == (
+            units[STARTERS].id,
+            "course",
+        )
+        assert (again.occasioned_by_id, again.rework_kind_code) == (
+            units[SOUP].id,
+            "recooked",
+        )
+        assert (again.title, again.variant, again.role, again.round) == (
+            "Soup again",
+            "thicker",
+            "cook",
+            2,
+        )
+        assert (again.outcome_code, again.card) == ("served", "KITCHEN-12")
+        assert units[MENU].part_of_id is None
+        assert sorted(
+            session.execute(
+                select(
+                    WorkUnit.key, WorkUnitMeasure.measure_code, WorkUnitMeasure.amount
+                ).join(WorkUnit, WorkUnit.id == WorkUnitMeasure.work_unit_id)
+            ).all()
+        ) == [(MENU, "planned_dishes", Decimal(4)), (AGAIN, "tastings", Decimal(3))]
+
+    def test_a_documents_ask_category_is_its_labelling_s(
+        self,
+        session: DbSession,
+        publications: PublicationService,
+        draft_document: Document,
+    ) -> None:
+        named = [{"id": str(draft_document.id), "ask_category": "menu_question"}]
+        publications.publish(
+            _published(labelling=_labelling(labels=_labels(documents=named)))
+        )
+        session.refresh(draft_document)
+        assert draft_document.ask_category_code == "menu_question"
+
+        publications.publish(
+            _published(
+                labelling=_labelling(
+                    labels=_labels(documents=[{"id": str(draft_document.id)}])
+                )
+            )
+        )
+        session.refresh(draft_document)
+        assert draft_document.ask_category_code is None
+
+    def test_a_sub_agents_thread_is_labelled_as_a_main_thread_is(
+        self, session: DbSession, publications: PublicationService
+    ) -> None:
+        thread = publications.publish(
+            sub_agent(
+                calls=[call(1)],
+                labelling=labelling(
+                    labels={
+                        "calls": [
+                            {"id": "msg_0001", "segment": 1, "call_class": "chop"}
+                        ],
+                        "segments": [{"position": 1, "kind": "prep"}],
+                    }
+                ),
+            )
+        )
+
+        assert thread.records_stamp == STAMP
+        assert session.execute(
+            select(Call.segment_position, Call.call_class_code).where(
+                Call.transcript_id == thread.id
+            )
+        ).one() == (1, "chop")
+
+    def test_the_same_labelling_again_writes_no_label(
+        self, session: DbSession, publications: PublicationService
+    ) -> None:
+        publications.publish(_published(labelling=_labelling()))
+
+        with writes(session) as wrote:
+            publications.publish(_published(labelling=_labelling()))
+
+        assert wrote == {"transcripts": Written(updated=1)}
+
+
+class TestRelabelled:
+    """A labelling replaces every label of the Transcript together, and
+    nothing older is kept (assertion 561); the Work Units, Test Suites and CI
+    Builds stand (`labeller.md`, "It never deletes one at a relabel")."""
+
+    def test_a_relabel_naming_less_leaves_no_label_it_does_not_name(
+        self, session: DbSession, publications: PublicationService
+    ) -> None:
+        thread = publications.publish(_published(labelling=_labelling()))
+
+        publications.publish(
+            _published(
+                labelling=labelling(
+                    labels={
+                        "calls": [
+                            {"id": "msg_0001", "segment": 1},
+                            {"id": "msg_0002", "segment": 1},
+                            {"id": "msg_0003", "segment": 1, "call_class": "stir"},
+                        ],
+                        "segments": [{"position": 1, "kind": "cook"}],
+                    }
+                )
+            )
+        )
+
+        assert session.scalars(
+            select(Launch.work_unit_id).where(Launch.transcript_id == thread.id)
+        ).all() == [None, None]
+        assert _calls(session) == [
+            ("msg_0001", 1, None, None, None),
+            ("msg_0002", 1, None, None, None),
+            ("msg_0003", 1, "stir", None, None),
+        ]
+        assert session.execute(select(Segment.position, Segment.kind_code)).all() == [
+            (1, "cook")
+        ]
+        assert session.execute(
+            select(ToolCall.command_class_code, ToolCall.effect_kind_code).distinct()
+        ).all() == [(None, None)]
+        for entity in (RuleBreach, TestRun, TestFailure, CIWait):
+            assert _count(session, entity) == 0, entity
+        assert _labelled(session, Event) == _labelled(session, ContextPart) == []
+        assert (
+            _count(session, WorkUnit),
+            _count(session, WorkUnitMeasure),
+            _count(session, TestSuite),
+            _count(session, Test),
+            _count(session, CIBuild),
+        ) == (4, 2, 1, 2, 2)
+
+    def test_a_label_given_again_otherwise_keeps_its_row(
+        self, session: DbSession, publications: PublicationService
+    ) -> None:
+        publications.publish(_published(labelling=_labelling()))
+        held = {entity: _ids(session, entity) for entity in (Segment, TestRun, Event)}
+        changed = _labels(
+            segments=[
+                {"position": 1, "kind": "plate"},
+                {"position": 2, "kind": "cook"},
+            ],
+            events=[{"call": "msg_0003", "kind": "burnt", "at": _at(3.7)}],
+        )
+        changed["test_runs"][0] |= {"passed": True, "failures": []}
+
+        with writes(session) as wrote:
+            publications.publish(_published(labelling=_labelling(labels=changed)))
+
+        assert {entity: _ids(session, entity) for entity in held} == held
+        assert wrote == {
+            "transcripts": Written(updated=1),
+            "segments": Written(updated=1),
+            "test_runs": Written(updated=1),
+            "test_failures": Written(deleted=2),
+            "events": Written(updated=1),
+        }
+
+    def test_a_unit_named_again_takes_its_new_row_and_its_measures(
+        self, session: DbSession, publications: PublicationService
+    ) -> None:
+        publications.publish(_published(labelling=_labelling()))
+        units = _units()
+        units[0] |= {"title": "The summer menu", "measures": []}
+        units[3] |= {
+            "outcome": "sent_back",
+            "measures": [
+                {"measure": "tastings", "amount": 5},
+                {"measure": "planned_dishes", "amount": 1},
+            ],
+        }
+
+        publications.publish(_published(labelling=_labelling(units=units)))
+
+        menu = session.scalars(select(WorkUnit).where(WorkUnit.key == MENU)).one()
+        assert menu.title == "The summer menu"
+        assert sorted(
+            session.execute(
+                select(
+                    WorkUnit.key, WorkUnitMeasure.measure_code, WorkUnitMeasure.amount
+                ).join(WorkUnit, WorkUnit.id == WorkUnitMeasure.work_unit_id)
+            ).all()
+        ) == [(AGAIN, "planned_dishes", Decimal(1)), (AGAIN, "tastings", Decimal(5))]
+        assert (
+            session.scalars(
+                select(WorkUnit.outcome_code).where(WorkUnit.key == AGAIN)
+            ).one()
+            == "sent_back"
+        )
+
+    def test_a_test_run_of_another_suite_takes_its_failures_anew(
+        self, session: DbSession, publications: PublicationService
+    ) -> None:
+        """A Test Failure carries its run's suite (DB 556)."""
+        publications.publish(_published(labelling=_labelling()))
+        other = "RecipeBox/frontend/test"
+        changed = _labels()
+        changed["test_runs"][0]["suite"] = other
+
+        publications.publish(
+            _published(
+                labelling=_labelling(
+                    labels=changed,
+                    test_suites=[
+                        {"code": SUITE, "name": "RecipeBox backend test"},
+                        {"code": other, "name": "RecipeBox frontend test"},
+                    ],
+                )
+            )
+        )
+
+        assert sorted(
+            session.execute(
+                select(TestSuite.code, Test.name)
+                .join(TestFailure, TestFailure.test_id == Test.id)
+                .join(TestSuite, TestSuite.id == TestFailure.suite_id)
+            ).all()
+        ) == [
+            (other, "tests/test_scale.py::test_doubles"),
+            (other, "tests/test_scale.py::test_halves"),
+        ]
+
+    def test_a_unit_another_transcript_named_stands_where_this_one_names_it_no_more(
+        self, session: DbSession, publications: PublicationService
+    ) -> None:
+        publications.publish(_published(labelling=_labelling()))
+
+        publications.publish(_published(labelling=labelling()))
+
+        assert sorted(session.scalars(select(WorkUnit.key))) == sorted(
+            [MENU, STARTERS, SOUP, AGAIN]
+        )
+
+
+class TestNoLabelling:
+    """A call no labeller answered for writes its facts and leaves every
+    label Pilot holds of the Transcript as it stands, with no stamp, so that
+    the labeller's next answer differs from it (F152.2, F152.6)."""
+
+    @pytest.mark.parametrize("grown", [False, True], ids=["whole", "appended"])
+    def test_it_keeps_every_label_and_holds_no_stamp(
+        self, session: DbSession, publications: PublicationService, grown: bool
+    ) -> None:
+        thread = publications.publish(_published(labelling=_labelling()))
+        held = (
+            _calls(session),
+            _labelled(session, Event),
+            _labelled(session, ContextPart),
+            _ids(session, Segment),
+            _ids(session, TestRun),
+            _count(session, RuleBreach),
+            _count(session, CIWait),
+        )
+        labelled_under = thread.labelled_under_id
+
+        if grown:
+            publications.publish(_grown())
+        else:
+            publications.publish(_published())
+
+        assert (
+            _calls(session)[:3],
+            _labelled(session, Event),
+            _labelled(session, ContextPart),
+            _ids(session, Segment),
+            _ids(session, TestRun),
+            _count(session, RuleBreach),
+            _count(session, CIWait),
+        ) == held
+        session.refresh(thread)
+        assert (thread.labelled_under_id, thread.records_stamp) == (
+            labelled_under,
+            None,
+        )
+
+    def test_a_transcript_no_labelling_covered_holds_its_facts_and_no_label(
+        self, session: DbSession, publications: PublicationService
+    ) -> None:
+        thread = publications.publish(_published())
+
+        assert (thread.labelled_under_id, thread.records_stamp) == (None, None)
+        assert {row[1:] for row in _calls(session)} == {(None, None, None, None)}
+        assert _count(session, Segment) == 0
+        assert _labelled(session, ContextPart) == []
+
+
+class TestFactsAndLabels:
+    """The facts are the Events and Context Parts the collector read, the
+    labels those the labeller gave: neither writes the other's (slice 047's
+    I2)."""
+
+    @pytest.mark.parametrize("collected", [0, 1, 2], ids=["fewer", "the same", "more"])
+    def test_the_collectors_events_under_a_call_leave_its_labelled_ones(
+        self, session: DbSession, publications: PublicationService, collected: int
+    ) -> None:
+        publications.publish(_published(labelling=_labelling()))
+        held = _ids(session, Event, Event.labelled.is_(True))
+        labelled = _labelled(session, Event)
+        published = _published()
+        third = published.calls[2].model_dump(mode="json")
+        third["events"] = [
+            event(at=_at(3.5 + place / 10)) for place in range(collected)
+        ]
+
+        for labels in (None, _labelling()):
+            publications.publish(
+                _published(
+                    calls=[*published.model_dump(mode="json")["calls"][:2], third],
+                    labelling=labels,
+                )
+            )
+
+            assert _ids(session, Event, Event.labelled.is_(True)) == held
+            assert _labelled(session, Event) == labelled
+            assert _count(session, Event) == 1 + collected + len(held)
+
+    @pytest.mark.parametrize("collected", [1, 2, 3], ids=["fewer", "the same", "more"])
+    def test_the_collectors_context_parts_under_a_call_leave_its_labelled_ones(
+        self, session: DbSession, publications: PublicationService, collected: int
+    ) -> None:
+        publications.publish(_published(labelling=_labelling()))
+        held = _ids(session, ContextPart, ContextPart.labelled.is_(True))
+        labelled = _labelled(session, ContextPart)
+        first = _published().calls[0].model_dump(mode="json")
+        others = [
+            context_part(),
+            context_part(kind="tool_schemas", characters=45_300),
+        ][: collected - 1]
+        first["context_parts"] = [
+            *others,
+            context_part(kind="prompt", characters=len(OPENING)),
+        ]
+        rest = _published().model_dump(mode="json")["calls"][1:]
+
+        publications.publish(_published(calls=[first, *rest]))
+
+        assert _ids(session, ContextPart, ContextPart.labelled.is_(True)) == held
+        assert _labelled(session, ContextPart) == labelled
+
+    def test_a_relabel_leaves_the_collectors_rows(
+        self, session: DbSession, publications: PublicationService
+    ) -> None:
+        publications.publish(_published(labelling=_labelling()))
+        events = _ids(session, Event, Event.labelled.is_(False))
+        parts = _ids(session, ContextPart, ContextPart.labelled.is_(False))
+
+        with writes(session) as wrote:
+            publications.publish(
+                _published(
+                    labelling=_labelling(
+                        labels=_labels(
+                            events=[
+                                {"call": "msg_0001", "kind": "burnt", "at": _at(0.6)},
+                                {"call": "msg_0003", "kind": "burnt", "at": _at(3.6)},
+                            ]
+                        )
+                    )
+                )
+            )
+
+        assert _ids(session, Event, Event.labelled.is_(False)) == events
+        assert _ids(session, ContextPart, ContextPart.labelled.is_(False)) == parts
+        assert wrote["events"] == Written(inserted=1, updated=1)
+
+
+class TestCarved:
+    """A dispatch's digest sections are carved out of its opening prompt's
+    Context Part, not beside it: a first Call's parts add up to what it
+    carried once (D266). The carve moves with the labels, and is made again
+    from what the collector counted."""
+
+    def test_the_digests_sections_are_carved_out_of_the_prompt_that_holds_them(
+        self, session: DbSession, publications: PublicationService
+    ) -> None:
+        publications.publish(_published(labelling=_labelling()))
+
+        carved = len(OPENING) - sum(section["characters"] for section in SECTIONS)
+        assert _parts(session, "msg_0001") == [
+            ("system_prompt", 9_100, False),
+            ("prompt", carved, False),
+            ("recipe_card", SECTIONS[0]["characters"], True),
+            ("recipe_card", SECTIONS[1]["characters"], True),
+        ]
+        assert sum(characters for _, characters, _ in _parts(session, "msg_0001")) == (
+            9_100 + len(OPENING)
+        )
+
+    def test_a_relabel_carves_again_from_what_the_collector_counted(
+        self, session: DbSession, publications: PublicationService
+    ) -> None:
+        publications.publish(_published(labelling=_labelling()))
+        menu = SECTIONS[0]
+
+        publications.publish(
+            _published(
+                labelling=_labelling(
+                    labels=_labels(
+                        context_parts=[
+                            {"call": "msg_0001", "kind": "recipe_card", **menu}
+                        ]
+                    )
+                )
+            )
+        )
+        assert _parts(session, "msg_0001")[1] == (
+            "prompt",
+            len(OPENING) - menu["characters"],
+            False,
+        )
+
+        publications.publish(
+            _published(labelling=_labelling(labels=_labels(context_parts=[])))
+        )
+        assert _parts(session, "msg_0001")[1] == ("prompt", len(OPENING), False)
+
+    def test_a_publication_with_no_labelling_carves_with_the_parts_pilot_holds(
+        self, session: DbSession, publications: PublicationService
+    ) -> None:
+        publications.publish(_published(labelling=_labelling()))
+        held = _parts(session, "msg_0001")
+
+        with writes(session) as wrote:
+            publications.publish(_published())
+
+        assert _parts(session, "msg_0001") == held
+        assert wrote == {"transcripts": Written(updated=1)}
+
+    def test_a_prompt_the_collector_counts_otherwise_is_carved_from_its_new_count(
+        self, session: DbSession, publications: PublicationService
+    ) -> None:
+        publications.publish(_published(labelling=_labelling()))
+        first = _published().calls[0].model_dump(mode="json")
+        first["context_parts"][1]["characters"] = len(OPENING) + 40
+        rest = _published().model_dump(mode="json")["calls"][1:]
+
+        publications.publish(_published(calls=[first, *rest]))
+
+        carved = sum(section["characters"] for section in SECTIONS)
+        assert _parts(session, "msg_0001")[1] == (
+            "prompt",
+            len(OPENING) + 40 - carved,
+            False,
+        )
+
+
+class TestReplayedAtRest:
+    """A labelled row the replay at rest changes is logged with its
+    Transcript, beside the facts' rows, where the labelling is under the
+    labeller's version and stamp Pilot held (F152.16)."""
+
+    LATER = call(4, prompt=2, predecessor="msg_0003")
+    GROWN = {"file_size": 61_000, "file_modified_at": _at(30)}
+
+    def _held_appended(
+        self, session: DbSession, publications: PublicationService
+    ) -> None:
+        """The transcript labelled whole, then grown by a fourth Call taken
+        appended, under the stamp the rest was labelled under."""
+        publications.publish(_published(labelling=_labelling()))
+        publications.publish(_grown())
+        session.execute(update(Transcript).values(records_stamp=STAMP))
+
+    def _at_rest(self, **overrides: Any) -> PublicationSchema:
+        calls = _published().model_dump(mode="json")["calls"]
+        return _published(calls=[*calls, self.LATER], **self.GROWN | overrides)
+
+    def _logged(self, caplog: pytest.LogCaptureFixture) -> list[str]:
+        return [r.getMessage() for r in caplog.records if r.name == LOGGER]
+
+    def test_a_label_it_changes_is_logged_beside_the_facts(
+        self,
+        session: DbSession,
+        publications: PublicationService,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        self._held_appended(session, publications)
+        labels = _labels()
+        labels["calls"].append({"id": "msg_0004", "segment": 2, "call_class": "stir"})
+
+        with caplog.at_level(logging.WARNING, LOGGER):
+            publications.publish(self._at_rest(labelling=_labelling(labels=labels)))
+
+        assert self._logged(caplog) == [
+            "The replay at rest of transcript"
+            f" {_published().session_id}, 12888 of its 61000 bytes taken in parts,"
+            " wrote labels that differ from what Pilot held: calls 1"
+        ]
+
+    def test_a_carve_that_moved_with_the_labels_is_no_fact_that_changed(
+        self,
+        session: DbSession,
+        publications: PublicationService,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        self._held_appended(session, publications)
+        labels = _labels(
+            context_parts=[{"call": "msg_0001", "kind": "recipe_card", **SECTIONS[0]}]
+        )
+        labels["calls"].append({"id": "msg_0004", "segment": 2})
+
+        with caplog.at_level(logging.WARNING, LOGGER):
+            publications.publish(self._at_rest(labelling=_labelling(labels=labels)))
+
+        assert self._logged(caplog) == [
+            "The replay at rest of transcript"
+            f" {_published().session_id}, 12888 of its 61000 bytes taken in parts,"
+            " wrote labels that differ from what Pilot held: calls 1, context_parts 1"
+        ]
+
+    @pytest.mark.parametrize(
+        "held",
+        [{"version": "1.4.3"}, {"version": "1.5.0"}, {"stamp": "1:7e3f00c1"}],
+        ids=["a newer patch", "a newer minor", "another stamp"],
+    )
+    def test_one_under_another_version_or_stamp_logs_no_label(
+        self,
+        session: DbSession,
+        publications: PublicationService,
+        caplog: pytest.LogCaptureFixture,
+        held: dict[str, str],
+    ) -> None:
+        """What a whole publication under a newer minor or patch improves is
+        no replay difference."""
+        self._held_appended(session, publications)
+        labels = _labels()
+        labels["calls"].append({"id": "msg_0004", "segment": 2, "call_class": "stir"})
+
+        with caplog.at_level(logging.WARNING, LOGGER):
+            publications.publish(
+                self._at_rest(labelling=_labelling(labels=labels, **held))
+            )
+
+        assert self._logged(caplog) == []
+
+
+class TestRefusedLabelling:
+    """A labelling that contradicts its call or the record's rules for
+    labels is a fault of the call, and nothing is written."""
+
+    @staticmethod
+    def _faults(
+        session: DbSession,
+        publications: PublicationService,
+        publication: PublicationSchema,
+    ) -> list[str]:
+        with (
+            writes(session) as wrote,
+            pytest.raises(PublicationInvalidException) as raised,
+        ):
+            publications.publish(publication)
+        assert wrote == {}
+        return raised.value.faults
+
+    @pytest.mark.parametrize(
+        ("labelled", "fault"),
+        [
+            (
+                {"labels": _labels(launches=[{"n": 3}])},
+                "launch 3: the call has 2 launches",
+            ),
+            (
+                {"labels": _labels(launches=[{"n": 1, "work_unit": "autumn"}])},
+                "launch 1: the unit `autumn` is none of the call's `units`",
+            ),
+            (
+                {
+                    "labels": _labels(
+                        calls=[*_labels()["calls"], {"id": "msg_0001", "segment": 1}]
+                    )
+                },
+                "call `msg_0001` is labelled 2 times",
+            ),
+            (
+                {"labels": _labels(calls=[*_labels()["calls"], {"id": "msg_0009"}])},
+                "call `msg_0009`: no call of the call's",
+            ),
+            (
+                {"labels": _labels(segments=[{"position": 2, "kind": "prep"}])},
+                "the segments' positions are not 1 to their number, in order",
+            ),
+            (
+                {
+                    "labels": _labels(
+                        calls=[
+                            {"id": "msg_0001", "segment": 1},
+                            {"id": "msg_0002", "segment": 2},
+                            {"id": "msg_0003", "segment": 1},
+                        ]
+                    )
+                },
+                "call `msg_0003`: segment 1 follows segment 2",
+            ),
+            (
+                {"labels": _labels(calls=[{"id": "msg_0001", "segment": 1}])},
+                "call `msg_0002`: names no segment",
+            ),
+            (
+                {
+                    "labels": _labels(
+                        segments=[
+                            {"position": 1, "kind": "prep"},
+                            {"position": 2, "kind": "cook"},
+                            {"position": 3, "kind": "plate"},
+                        ]
+                    )
+                },
+                "segment 3 holds no call",
+            ),
+            (
+                {"labels": _labels(tool_calls=[{"tool_use_id": "toolu_0099"}])},
+                "tool call `toolu_0099`: no tool call of the call's",
+            ),
+            (
+                {
+                    "labels": _labels(
+                        tool_calls=[
+                            {"tool_use_id": "toolu_0003", "effect_subject": "ORDER-12"}
+                        ]
+                    )
+                },
+                "tool call `toolu_0003`: an `effect_subject` with no `effect_kind`",
+            ),
+            (
+                {
+                    "labels": _labels(
+                        events=[{"call": "msg_0009", "kind": "burnt", "at": _at(1)}]
+                    )
+                },
+                "call `msg_0009`: no call of the call's",
+            ),
+            (
+                {
+                    "labels": _labels(
+                        context_parts=[
+                            {
+                                "call": "msg_0001",
+                                "kind": "recipe_card",
+                                "characters": len(OPENING) + 1,
+                            }
+                        ]
+                    )
+                },
+                f"call `msg_0001`: its labelled context parts carry {len(OPENING) + 1}"
+                f" characters, more than its opening `prompt`'s {len(OPENING)}",
+            ),
+            (
+                {
+                    "labels": _labels(
+                        context_parts=[
+                            {
+                                "call": "msg_0002",
+                                "kind": "recipe_card",
+                                "characters": 10,
+                            }
+                        ]
+                    )
+                },
+                "call `msg_0002`: its labelled context parts carry 10 characters, and"
+                " it carries no `prompt` to carve them from",
+            ),
+            (
+                {
+                    "labels": _labels(
+                        test_runs=[{"suite": SUITE, "passed": True, "tests": 1}]
+                    )
+                },
+                "test run 1: run by exactly one of a tool call and a unit",
+            ),
+            (
+                {
+                    "labels": _labels(
+                        test_runs=[
+                            {
+                                "work_unit": MENU,
+                                "suite": "Pantry/test",
+                                "passed": True,
+                                "tests": 1,
+                            }
+                        ]
+                    )
+                },
+                "test run 1: the suite `Pantry/test` is none of the call's `test_suites`",
+            ),
+            (
+                {
+                    "labels": _labels(
+                        ci_waits=[
+                            {"tool_use_id": "toolu_0005", "job": JOB, "number": 813}
+                        ]
+                    )
+                },
+                f"ci wait of `toolu_0005`: {JOB} #813 is none of the call's `ci_builds`",
+            ),
+            (
+                {"units": [*_units(), _units()[0]]},
+                f"unit `{MENU}` is labelled 2 times",
+            ),
+            (
+                {"units": [_units()[1], _units()[0], *_units()[2:]]},
+                f"unit `{STARTERS}`: its `part_of` `{MENU}` is no unit before it",
+            ),
+        ],
+        ids=[
+            "a launch past the call's",
+            "a launch's unit not given",
+            "a call twice",
+            "a call not the call's",
+            "segments not from 1",
+            "a segment going back",
+            "a call in no segment",
+            "a segment of no call",
+            "a tool call not the call's",
+            "a subject of no effect",
+            "an event of no call",
+            "a carve past the prompt",
+            "a carve of no prompt",
+            "a run of no runner",
+            "a suite not given",
+            "a build not given",
+            "a unit twice",
+            "a unit before its own",
+        ],
+    )
+    def test_a_labelling_that_contradicts_its_call_is_a_fault(
+        self,
+        session: DbSession,
+        publications: PublicationService,
+        labelled: dict[str, Any],
+        fault: str,
+    ) -> None:
+        faults = self._faults(
+            session, publications, _published(labelling=_labelling(**labelled))
+        )
+
+        assert fault in faults
+
+    def test_a_group_with_no_labelling_is_a_fault(
+        self, session: DbSession, publications: PublicationService
+    ) -> None:
+        group = {"key": "spring-menus", "name": "Spring menus", "summary": "Soups."}
+
+        assert self._faults(session, publications, _published(group=group)) == [
+            "a call with no labelling names no `group`"
+        ]
+
+    def test_an_appended_call_carries_no_labelling(
+        self, session: DbSession, publications: PublicationService
+    ) -> None:
+        publications.publish(_published())
+        assert self._faults(session, publications, _grown(labelling=labelling())) == [
+            "an appended call carries no labelling"
+        ]
+
+    def test_a_value_no_list_declares_is_a_fault(
+        self, session: DbSession, publications: PublicationService
+    ) -> None:
+        labels = _labels()
+        labels["calls"][0]["call_class"] = "simmer"
+        labels["segments"][1]["kind"] = "garnish"
+
+        assert self._faults(
+            session, publications, _published(labelling=_labelling(labels=labels))
+        ) == [
+            "`segment_kind` `garnish`: no value the labeller declares",
+            "`call_class` `simmer`: no value the labeller declares",
+        ]
+
+    def test_a_value_its_list_no_longer_declares_is_a_fault(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        publications: PublicationService,
+    ) -> None:
+        """P1 keeps it, with no place, while a label names it."""
+        publications.publish(_published(labelling=_labelling()))
+        container.vocabulary_service().declare(
+            vocabularies(lists=lists(call_class=lists()["call_class"][::2]))
+        )
+
+        assert self._faults(
+            session, publications, _published(labelling=_labelling())
+        ) == ["`call_class` `stir`: no value the labeller declares"]
+
+    def test_a_unit_where_no_nesting_pairs_its_kind_is_a_fault(
+        self, session: DbSession, publications: PublicationService
+    ) -> None:
+        units = _units()
+        units[2]["part_of"] = MENU
+
+        assert self._faults(
+            session, publications, _published(labelling=_labelling(units=units))
+        ) == [f"unit `{SOUP}`: no nesting pairs a `dish` in a `menu`"]
+
+    def test_a_document_pilot_does_not_hold_is_a_fault(
+        self, session: DbSession, publications: PublicationService
+    ) -> None:
+        named = "0b5e3c1a-0000-4f6e-9a18-2c4d6e8f0a1b"
+
+        assert self._faults(
+            session,
+            publications,
+            _published(labelling=_labelling(labels=_labels(documents=[{"id": named}]))),
+        ) == [f"document `{named}`: no document Pilot holds"]
+
+    def test_a_prompt_too_short_for_the_labels_pilot_holds_is_a_fault(
+        self, session: DbSession, publications: PublicationService
+    ) -> None:
+        """Pilot keeps the labels of a call with no labelling, so the
+        prompt they carve must hold them."""
+        publications.publish(_published(labelling=_labelling()))
+        first = _published().calls[0].model_dump(mode="json")
+        first["context_parts"][1]["characters"] = 40
+        rest = _published().model_dump(mode="json")["calls"][1:]
+        carved = sum(section["characters"] for section in SECTIONS)
+
+        assert self._faults(
+            session, publications, _published(calls=[first, *rest])
+        ) == [
+            f"call `msg_0001`: the labelled context parts Pilot holds carry {carved}"
+            " characters, more than its opening `prompt`'s 40"
+        ]
+
+
+def test_the_sub_agents_labels_name_no_document(
+    session: DbSession, publications: PublicationService, draft_document: Document
+) -> None:
+    with pytest.raises(PublicationInvalidException) as raised:
+        publications.publish(
+            sub_agent(
+                labelling=labelling(
+                    labels={"documents": [{"id": str(draft_document.id)}]}
+                )
+            )
+        )
+
+    assert raised.value.faults == ["a sub-agent's thread labels no document"]
+    assert (
+        session.scalars(
+            select(Transcript.id).where(Transcript.agent_id == SUB_AGENT)
+        ).all()
+        == []
+    )

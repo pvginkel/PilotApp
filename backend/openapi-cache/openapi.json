@@ -13772,7 +13772,19 @@
               }
             ],
             "default": null,
-            "description": "A main thread's label: the group it belongs to, whose adopted project then adopts it; none where its labels name none, and the transcript is then adopted by no project"
+            "description": "A main thread's label, with a labelling alone: the group it belongs to, whose adopted project then adopts it; none where its labels name none, and the transcript is then adopted by no project"
+          },
+          "labelling": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PublicationSchema.9ed0c05.PublishedLabellingSchema"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "The labeller's labels of the Transcript, which replace all Pilot holds; none where no labeller answered for it, and Pilot then keeps the labels it holds"
           },
           "launches": {
             "description": "A main thread's Launches, in the file's order; on an appended call those that wrote a line of what it carries, the first with its Prompts from the boundary's on",
@@ -13830,6 +13842,498 @@
           "working_directory"
         ],
         "title": "PublicationSchema",
+        "type": "object"
+      },
+      "PublicationSchema.9ed0c05.LabelledCIWaitSchema": {
+        "additionalProperties": false,
+        "description": "A wait of a Tool Call on one CI Build.",
+        "properties": {
+          "job": {
+            "description": "The CI Build's job",
+            "minLength": 1,
+            "title": "Job",
+            "type": "string"
+          },
+          "number": {
+            "description": "The CI Build's number",
+            "maximum": 2147483647,
+            "minimum": 1,
+            "title": "Number",
+            "type": "integer"
+          },
+          "tool_use_id": {
+            "description": "The Tool Call that waited",
+            "minLength": 1,
+            "title": "Tool Use Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "tool_use_id",
+          "job",
+          "number"
+        ],
+        "title": "LabelledCIWaitSchema",
+        "type": "object"
+      },
+      "PublicationSchema.9ed0c05.LabelledCallSchema": {
+        "additionalProperties": false,
+        "description": "A Call's labels.",
+        "properties": {
+          "avoidable_kind": {
+            "anyOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "The Avoidable Kind's code, where it was avoidable",
+            "title": "Avoidable Kind"
+          },
+          "call_class": {
+            "anyOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "The Call Class's code: what the Call was doing",
+            "title": "Call Class"
+          },
+          "id": {
+            "description": "The Call's `message_id`",
+            "minLength": 1,
+            "title": "Id",
+            "type": "string"
+          },
+          "segment": {
+            "anyOf": [
+              {
+                "maximum": 2147483647,
+                "minimum": 1,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "The `position` of the Segment it falls in",
+            "title": "Segment"
+          },
+          "wait_cause": {
+            "anyOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "The Wait Cause's code: what woke the Transcript before it",
+            "title": "Wait Cause"
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "title": "LabelledCallSchema",
+        "type": "object"
+      },
+      "PublicationSchema.9ed0c05.LabelledContextPartSchema": {
+        "additionalProperties": false,
+        "description": "A component of a Call's opening prompt the labeller recognised, which\nPilot carves out of the collector's part for that prompt.",
+        "properties": {
+          "call": {
+            "description": "The `message_id` of the Call that carried it",
+            "minLength": 1,
+            "title": "Call",
+            "type": "string"
+          },
+          "characters": {
+            "description": "Its length",
+            "maximum": 2147483647,
+            "minimum": 0,
+            "title": "Characters",
+            "type": "integer"
+          },
+          "kind": {
+            "description": "The labeller's Context Part Kind's code",
+            "minLength": 1,
+            "title": "Kind",
+            "type": "string"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Which one of its kind",
+            "title": "Name"
+          }
+        },
+        "required": [
+          "call",
+          "kind",
+          "characters"
+        ],
+        "title": "LabelledContextPartSchema",
+        "type": "object"
+      },
+      "PublicationSchema.9ed0c05.LabelledDocumentSchema": {
+        "additionalProperties": false,
+        "description": "A Document's label, on a main thread's labelling.",
+        "properties": {
+          "ask_category": {
+            "anyOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "The Ask Category's code of the asks it puts",
+            "title": "Ask Category"
+          },
+          "id": {
+            "description": "Pilot's id of the Document, as handed",
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "title": "LabelledDocumentSchema",
+        "type": "object"
+      },
+      "PublicationSchema.9ed0c05.LabelledEventSchema": {
+        "additionalProperties": false,
+        "description": "An occurrence the labeller marks on a Call.",
+        "properties": {
+          "at": {
+            "description": "When it occurred",
+            "format": "date-time",
+            "title": "At",
+            "type": "string"
+          },
+          "call": {
+            "description": "The `message_id` of the Call it is held on",
+            "minLength": 1,
+            "title": "Call",
+            "type": "string"
+          },
+          "detail": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Its one qualifier",
+            "title": "Detail"
+          },
+          "kind": {
+            "description": "The labeller's Event Kind's code",
+            "minLength": 1,
+            "title": "Kind",
+            "type": "string"
+          }
+        },
+        "required": [
+          "call",
+          "kind",
+          "at"
+        ],
+        "title": "LabelledEventSchema",
+        "type": "object"
+      },
+      "PublicationSchema.9ed0c05.LabelledLaunchSchema": {
+        "additionalProperties": false,
+        "description": "A Launch's label.",
+        "properties": {
+          "n": {
+            "description": "The Launch's place among the Transcript's Launches",
+            "maximum": 2147483647,
+            "minimum": 1,
+            "title": "N",
+            "type": "integer"
+          },
+          "work_unit": {
+            "anyOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "The key of the lowest Work Unit it carried out",
+            "title": "Work Unit"
+          }
+        },
+        "required": [
+          "n"
+        ],
+        "title": "LabelledLaunchSchema",
+        "type": "object"
+      },
+      "PublicationSchema.9ed0c05.LabelledSegmentSchema": {
+        "additionalProperties": false,
+        "description": "A stretch of the Transcript's Calls by what it was doing.",
+        "properties": {
+          "kind": {
+            "description": "The Segment Kind's code",
+            "minLength": 1,
+            "title": "Kind",
+            "type": "string"
+          },
+          "position": {
+            "description": "Its place among the Transcript's Segments",
+            "maximum": 2147483647,
+            "minimum": 1,
+            "title": "Position",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "position",
+          "kind"
+        ],
+        "title": "LabelledSegmentSchema",
+        "type": "object"
+      },
+      "PublicationSchema.9ed0c05.LabelledTestFailureSchema": {
+        "additionalProperties": false,
+        "description": "A test that failed at least one attempt in a Test Run.",
+        "properties": {
+          "attempts": {
+            "description": "How often it was tried in the run",
+            "maximum": 2147483647,
+            "minimum": 1,
+            "title": "Attempts",
+            "type": "integer"
+          },
+          "flaky": {
+            "description": "Whether a later attempt passed",
+            "title": "Flaky",
+            "type": "boolean"
+          },
+          "test": {
+            "description": "The test's name, as its suite names it",
+            "minLength": 1,
+            "title": "Test",
+            "type": "string"
+          }
+        },
+        "required": [
+          "test",
+          "attempts",
+          "flaky"
+        ],
+        "title": "LabelledTestFailureSchema",
+        "type": "object"
+      },
+      "PublicationSchema.9ed0c05.LabelledTestRunSchema": {
+        "additionalProperties": false,
+        "description": "A run of one Test Suite, by a Tool Call or by a Work Unit.",
+        "properties": {
+          "ended_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Its end",
+            "title": "Ended At"
+          },
+          "failures": {
+            "description": "The tests that failed an attempt",
+            "items": {
+              "$ref": "#/components/schemas/PublicationSchema.9ed0c05.LabelledTestFailureSchema"
+            },
+            "title": "Failures",
+            "type": "array"
+          },
+          "passed": {
+            "description": "Whether the run had no failure",
+            "title": "Passed",
+            "type": "boolean"
+          },
+          "retries_allowed": {
+            "anyOf": [
+              {
+                "maximum": 2147483647,
+                "minimum": 0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "How often a failing test was tried again",
+            "title": "Retries Allowed"
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Its start",
+            "title": "Started At"
+          },
+          "suite": {
+            "description": "The Test Suite's code",
+            "minLength": 1,
+            "title": "Suite",
+            "type": "string"
+          },
+          "tests": {
+            "description": "The tests it ran",
+            "maximum": 2147483647,
+            "minimum": 0,
+            "title": "Tests",
+            "type": "integer"
+          },
+          "tool_use_id": {
+            "anyOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "The Tool Call that ran it, none for a unit's",
+            "title": "Tool Use Id"
+          },
+          "work_unit": {
+            "anyOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "The key of the Work Unit that ran it",
+            "title": "Work Unit"
+          }
+        },
+        "required": [
+          "suite",
+          "passed",
+          "tests"
+        ],
+        "title": "LabelledTestRunSchema",
+        "type": "object"
+      },
+      "PublicationSchema.9ed0c05.LabelledToolCallSchema": {
+        "additionalProperties": false,
+        "description": "A Tool Call's labels.",
+        "properties": {
+          "command_class": {
+            "anyOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "The Command Class's code of what it ran",
+            "title": "Command Class"
+          },
+          "effect_kind": {
+            "anyOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "The Tool Effect Kind's code of the change it made",
+            "title": "Effect Kind"
+          },
+          "effect_subject": {
+            "anyOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "The id of what that change touched",
+            "title": "Effect Subject"
+          },
+          "rules": {
+            "description": "The codes of the Rules it breached",
+            "items": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "title": "Rules",
+            "type": "array"
+          },
+          "tool_use_id": {
+            "description": "The Tool Call's `tool_use_id`",
+            "minLength": 1,
+            "title": "Tool Use Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "tool_use_id"
+        ],
+        "title": "LabelledToolCallSchema",
         "type": "object"
       },
       "PublicationSchema.9ed0c05.PublishedAppendedSchema": {
@@ -13924,6 +14428,115 @@
           "compaction"
         ],
         "title": "PublishedBoundarySchema",
+        "type": "object"
+      },
+      "PublicationSchema.9ed0c05.PublishedCIBuildSchema": {
+        "additionalProperties": false,
+        "description": "A CI Build a CI Wait names, as the wait gave it.",
+        "properties": {
+          "commit": {
+            "anyOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "The hash the wait's command named",
+            "title": "Commit"
+          },
+          "deployed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "When the deploy it triggered finished",
+            "title": "Deployed At"
+          },
+          "ended_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Its end",
+            "title": "Ended At"
+          },
+          "job": {
+            "description": "Its job",
+            "minLength": 1,
+            "title": "Job",
+            "type": "string"
+          },
+          "number": {
+            "description": "Its number",
+            "maximum": 2147483647,
+            "minimum": 1,
+            "title": "Number",
+            "type": "integer"
+          },
+          "queued_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "When queued",
+            "title": "Queued At"
+          },
+          "result": {
+            "anyOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "The Build Result's code",
+            "title": "Result"
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Its start",
+            "title": "Started At"
+          }
+        },
+        "required": [
+          "job",
+          "number"
+        ],
+        "title": "PublishedCIBuildSchema",
         "type": "object"
       },
       "PublicationSchema.9ed0c05.PublishedCallSchema": {
@@ -14423,6 +15036,142 @@
         "title": "PublishedHookRunSchema",
         "type": "object"
       },
+      "PublicationSchema.9ed0c05.PublishedLabellingSchema": {
+        "additionalProperties": false,
+        "description": "The labeller's labels of one Transcript, whole: what Pilot holds of its\nlabels after the call (DB decision 81, assertion 561).",
+        "properties": {
+          "ci_builds": {
+            "description": "Every CI Build a CI Wait names",
+            "items": {
+              "$ref": "#/components/schemas/PublicationSchema.9ed0c05.PublishedCIBuildSchema"
+            },
+            "title": "Ci Builds",
+            "type": "array"
+          },
+          "labels": {
+            "$ref": "#/components/schemas/PublicationSchema.9ed0c05.PublishedLabelsSchema",
+            "description": "The Transcript's own labels"
+          },
+          "stamp": {
+            "description": "The labeller's stamp of all it read for them besides the file",
+            "minLength": 1,
+            "title": "Stamp",
+            "type": "string"
+          },
+          "test_suites": {
+            "description": "Every Test Suite a Test Run names",
+            "items": {
+              "$ref": "#/components/schemas/PublicationSchema.9ed0c05.PublishedTestSuiteSchema"
+            },
+            "title": "Test Suites",
+            "type": "array"
+          },
+          "units": {
+            "description": "Every Work Unit the labels name and every one above them, each after the units it sits in and is occasioned by",
+            "items": {
+              "$ref": "#/components/schemas/PublicationSchema.9ed0c05.PublishedWorkUnitSchema"
+            },
+            "title": "Units",
+            "type": "array"
+          },
+          "version": {
+            "description": "The labeller's own version that gave them",
+            "examples": [
+              "1.0.0"
+            ],
+            "minLength": 1,
+            "title": "Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "version",
+          "stamp",
+          "labels"
+        ],
+        "title": "PublishedLabellingSchema",
+        "type": "object"
+      },
+      "PublicationSchema.9ed0c05.PublishedLabelsSchema": {
+        "additionalProperties": false,
+        "description": "The labels of the Transcript's own rows, each list in the labeller's\norder; a row the labels do not name takes none.",
+        "properties": {
+          "calls": {
+            "description": "The Calls' labels",
+            "items": {
+              "$ref": "#/components/schemas/PublicationSchema.9ed0c05.LabelledCallSchema"
+            },
+            "title": "Calls",
+            "type": "array"
+          },
+          "ci_waits": {
+            "description": "The waits of its Tool Calls on CI Builds",
+            "items": {
+              "$ref": "#/components/schemas/PublicationSchema.9ed0c05.LabelledCIWaitSchema"
+            },
+            "title": "Ci Waits",
+            "type": "array"
+          },
+          "context_parts": {
+            "description": "The labeller's Context Parts, each carved out of its Call's prompt",
+            "items": {
+              "$ref": "#/components/schemas/PublicationSchema.9ed0c05.LabelledContextPartSchema"
+            },
+            "title": "Context Parts",
+            "type": "array"
+          },
+          "documents": {
+            "description": "A main thread's labels of the Documents handed with it",
+            "items": {
+              "$ref": "#/components/schemas/PublicationSchema.9ed0c05.LabelledDocumentSchema"
+            },
+            "title": "Documents",
+            "type": "array"
+          },
+          "events": {
+            "description": "The labeller's Events",
+            "items": {
+              "$ref": "#/components/schemas/PublicationSchema.9ed0c05.LabelledEventSchema"
+            },
+            "title": "Events",
+            "type": "array"
+          },
+          "launches": {
+            "description": "A main thread's Launches' labels",
+            "items": {
+              "$ref": "#/components/schemas/PublicationSchema.9ed0c05.LabelledLaunchSchema"
+            },
+            "title": "Launches",
+            "type": "array"
+          },
+          "segments": {
+            "description": "Every Segment, by position from 1",
+            "items": {
+              "$ref": "#/components/schemas/PublicationSchema.9ed0c05.LabelledSegmentSchema"
+            },
+            "title": "Segments",
+            "type": "array"
+          },
+          "test_runs": {
+            "description": "The Test Runs the Transcript's labels hold",
+            "items": {
+              "$ref": "#/components/schemas/PublicationSchema.9ed0c05.LabelledTestRunSchema"
+            },
+            "title": "Test Runs",
+            "type": "array"
+          },
+          "tool_calls": {
+            "description": "The labels of the Tool Calls with any",
+            "items": {
+              "$ref": "#/components/schemas/PublicationSchema.9ed0c05.LabelledToolCallSchema"
+            },
+            "title": "Tool Calls",
+            "type": "array"
+          }
+        },
+        "title": "PublishedLabelsSchema",
+        "type": "object"
+      },
       "PublicationSchema.9ed0c05.PublishedLaunchSchema": {
         "additionalProperties": false,
         "description": "A start of a Claude Code process on the main thread.",
@@ -14472,6 +15221,36 @@
         "title": "PublishedLaunchSchema",
         "type": "object"
       },
+      "PublicationSchema.9ed0c05.PublishedMeasureSchema": {
+        "additionalProperties": false,
+        "description": "A figure read for a Work Unit.",
+        "properties": {
+          "amount": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "string"
+              }
+            ],
+            "description": "The figure, in the measure's unit",
+            "title": "Amount"
+          },
+          "measure": {
+            "description": "The Unit Measure's code",
+            "minLength": 1,
+            "title": "Measure",
+            "type": "string"
+          }
+        },
+        "required": [
+          "measure",
+          "amount"
+        ],
+        "title": "PublishedMeasureSchema",
+        "type": "object"
+      },
       "PublicationSchema.9ed0c05.PublishedPromptSchema": {
         "additionalProperties": false,
         "description": "An input a Launch received.",
@@ -14514,6 +15293,30 @@
           "characters"
         ],
         "title": "PublishedPromptSchema",
+        "type": "object"
+      },
+      "PublicationSchema.9ed0c05.PublishedTestSuiteSchema": {
+        "additionalProperties": false,
+        "description": "A Test Suite a Test Run names.",
+        "properties": {
+          "code": {
+            "description": "The labeller's code of the suite",
+            "minLength": 1,
+            "title": "Code",
+            "type": "string"
+          },
+          "name": {
+            "description": "Its name, to be read",
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "name"
+        ],
+        "title": "PublishedTestSuiteSchema",
         "type": "object"
       },
       "PublicationSchema.9ed0c05.PublishedToolCallSchema": {
@@ -14697,6 +15500,183 @@
           "version"
         ],
         "title": "PublishedVersionSchema",
+        "type": "object"
+      },
+      "PublicationSchema.9ed0c05.PublishedWorkUnitSchema": {
+        "additionalProperties": false,
+        "description": "A Work Unit, whole, by its key, which is the same at every relabel.",
+        "properties": {
+          "card": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "The card it serves",
+            "title": "Card"
+          },
+          "ended_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Its end",
+            "title": "Ended At"
+          },
+          "key": {
+            "description": "The labeller's key of the unit",
+            "minLength": 1,
+            "title": "Key",
+            "type": "string"
+          },
+          "kind": {
+            "description": "The Work Unit Kind's code",
+            "minLength": 1,
+            "title": "Kind",
+            "type": "string"
+          },
+          "measures": {
+            "description": "Its figures, one per Unit Measure",
+            "items": {
+              "$ref": "#/components/schemas/PublicationSchema.9ed0c05.PublishedMeasureSchema"
+            },
+            "title": "Measures",
+            "type": "array"
+          },
+          "occasioned_by": {
+            "anyOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "The key of the unit whose outcome made it necessary",
+            "title": "Occasioned By"
+          },
+          "outcome": {
+            "anyOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "The Unit Outcome's code",
+            "title": "Outcome"
+          },
+          "part_of": {
+            "anyOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "The key of the unit it sits in",
+            "title": "Part Of"
+          },
+          "rework_kind": {
+            "anyOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "The Rework Kind's code, where it is work redone",
+            "title": "Rework Kind"
+          },
+          "role": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "The role that did it",
+            "title": "Role"
+          },
+          "round": {
+            "anyOf": [
+              {
+                "maximum": 2147483647,
+                "minimum": 1,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Its round",
+            "title": "Round"
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Its start",
+            "title": "Started At"
+          },
+          "title": {
+            "description": "Its title",
+            "minLength": 1,
+            "title": "Title",
+            "type": "string"
+          },
+          "variant": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Its variant",
+            "title": "Variant"
+          }
+        },
+        "required": [
+          "key",
+          "kind",
+          "title"
+        ],
+        "title": "PublishedWorkUnitSchema",
         "type": "object"
       },
       "PushEndpointQuerySchema.efd40b8": {

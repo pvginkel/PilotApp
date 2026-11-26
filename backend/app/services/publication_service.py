@@ -47,11 +47,23 @@ made in, and its Transcript with its first and its last Call's time
 (`call_caches`; DB §7.4). A main thread's publication leaves each Call of
 its sub-agents' threads in the Launch that holds it.
 
-A main thread whose call names a group is adopted by the group's adopted
+A call's labelling replaces every label Pilot holds of the Transcript, in the
+same transaction as its facts (`label_write`; DB decision 81, assertion 561),
+under the labeller's version and stamp it names. The facts are the Events and
+Context Parts the collector read and the labels those the labeller gave, so
+that a publication's facts never remove or overwrite a label, nor its labels
+a fact, but for the carve: a Call's labelled Context Parts are carved out of
+its opening prompt's, stored as what the collector counted less them. A call
+with no labelling, made while no labeller answered for the Transcript, writes
+its facts and leaves every label Pilot holds of it as it stands, its adoption
+included, and its stamp none, so that the labeller's next answer differs from
+it (F152.2, F152.6).
+
+A main thread whose labelling names a group is adopted by the group's adopted
 Project, which the call makes where Pilot has none (`adoption_service`;
-F152.8), and by none where its call names none: the label is the call's. A
-Transcript a Session of Pilot's ran is adopted by no Project (DB 539), so a
-group named for one is refused.
+F152.8), and by none where its labelling names none: the label is the
+labeller's. A Transcript a Session of Pilot's ran is adopted by no Project (DB
+539), so a group named for one is refused.
 """
 
 import hmac
@@ -81,6 +93,7 @@ from sqlalchemy import (
     delete,
     exists,
     func,
+    inspect,
     literal,
     select,
     tuple_,
@@ -134,6 +147,16 @@ from app.services.adoption_service import AdoptionService, group_faults
 from app.services.call_caches import caches, hold_sub_agents_calls
 from app.services.environment_service import reported_columns
 from app.services.fleet_consumer import FleetConsumer
+from app.services.label_write import (
+    LABEL_COLUMNS,
+    LABELLER,
+    PROMPT,
+    LabelWrite,
+    carve,
+    carve_faults,
+    labelled,
+    labelling_faults,
+)
 from app.services.launch_placement import conversation_turn, place_launches
 from app.services.price_service import costs, price_as_family, prices_turn
 from app.utils.after_commit import after_commit
@@ -143,7 +166,7 @@ logger = logging.getLogger(__name__)
 COLLECTOR_PROTOCOL_MIN = 1
 """The oldest protocol version the server takes of a collector."""
 
-COLLECTOR_PROTOCOL_MAX = 1
+COLLECTOR_PROTOCOL_MAX = 2
 """The newest protocol version the server takes of a collector. A change to a
 request or response shape of the collector's routes bumps it, and
 `COLLECTOR_PROTOCOL_MIN` with it when the server cannot serve the old
@@ -170,10 +193,11 @@ type _Surplus = dict[type[Any], list[Any]]
 """The held rows past the last the call names under their parent, by
 entity."""
 
-type _Held = Row[uuid.UUID, int, datetime, int, str]
+type _Held = Row[uuid.UUID, int, datetime, int, str, str | None, str | None]
 """A Transcript as Pilot holds it (`PublicationService._held`): its id, its
-`file_size`, `file_modified_at` and `replayed_size`, and the collector's
-`version` it was read under."""
+`file_size`, `file_modified_at` and `replayed_size`, the collector's `version`
+it was read under, and the labeller's version it was `labelled_under` and its
+`records_stamp`."""
 
 _FACTS: tuple[type[Any], ...] = (
     Launch,
@@ -191,12 +215,17 @@ _FACTS: tuple[type[Any], ...] = (
 
 class _Replay:
     """The rows under a Transcript that a write changes, adds and removes,
-    counted by table from its making to its `end`. A row that goes with the
-    one it hangs on is not counted."""
+    counted by table from its making to its `end`: its facts', and its
+    labels' where `labels`. A row that goes with the one it hangs on is not
+    counted, and neither is a prompt's Context Part whose carve alone moved
+    (`carved`)."""
 
-    def __init__(self, session: Session) -> None:
+    def __init__(self, session: Session, labels: bool) -> None:
         self._session = session
-        self._rows: set[Any] = set()
+        self._labels = labels
+        self._facts: set[Any] = set()
+        self._labelled: set[Any] = set()
+        self._carved: set[Any] = set()
         self._removed: Counter[str] = Counter()
         listen(session, "before_flush", self._flushing)
 
@@ -206,23 +235,47 @@ class _Replay:
         if entity in _FACTS:
             self._removed[entity.__tablename__] += rows
 
-    def end(self) -> dict[str, int]:
-        """Stop counting; the number of rows written, by table."""
+    def carved(self, row: ContextPart) -> None:
+        """Count no change of the prompt's part's `characters`: what the
+        collector counted of it is what Pilot held."""
+        self._carved.add(row)
+
+    def end(self) -> tuple[dict[str, int], dict[str, int]]:
+        """Stop counting; the number of rows written, by table, of the facts
+        and of the labels."""
         remove(self._session, "before_flush", self._flushing)
-        wrote = Counter(row.__tablename__ for row in self._rows) + self._removed
-        return dict(sorted(wrote.items()))
+        facts = Counter(row.__tablename__ for row in self._facts) + self._removed
+        labels: Counter[str] = Counter()
+        if self._labels:
+            labels.update(row.__tablename__ for row in self._labelled)
+        return dict(sorted(facts.items())), dict(sorted(labels.items()))
 
     def _flushing(
         self, session: Session, _flush_context: UOWTransaction, _instances: Any
     ) -> None:
-        self._rows.update(
-            row for row in (*session.new, *session.deleted) if isinstance(row, _FACTS)
-        )
-        self._rows.update(
-            row
-            for row in session.dirty
-            if isinstance(row, _FACTS) and session.is_modified(row)
-        )
+        for row in (*session.new, *session.deleted):
+            if labelled(row):
+                self._labelled.add(row)
+            elif isinstance(row, _FACTS):
+                self._facts.add(row)
+        for row in session.dirty:
+            if not session.is_modified(row):
+                continue
+            if labelled(row):
+                self._labelled.add(row)
+            elif isinstance(row, _FACTS):
+                changed = {
+                    attribute.key
+                    for attribute in inspect(row).attrs
+                    if attribute.history.has_changes()
+                }
+                columns = LABEL_COLUMNS.get(type(row), frozenset())
+                if changed & columns:
+                    self._labelled.add(row)
+                if row in self._carved:
+                    changed.discard("characters")
+                if changed - columns:
+                    self._facts.add(row)
 
 
 def _not_held(fact: str, place: int, did: str, held: datetime, first: datetime) -> str:
@@ -267,6 +320,7 @@ def _faults(publication: PublicationSchema) -> list[str]:
             found.append("a sub-agent's thread names no `group`")
     if publication.group is not None:
         found.extend(group_faults(publication.group.name, publication.group.summary))
+    found.extend(labelling_faults(publication))
 
     released: dict[_Version, datetime] = {}
     for place, launch in enumerate(publication.launches, start=1):
@@ -371,6 +425,7 @@ class PublicationService:
         self.adoption_service = adoption_service
         self.fleet_consumer = fleet_consumer
         self.catalogue_service = catalogue_service
+        self._labels = LabelWrite(db)
         self._replay: _Replay | None = None
 
     def admit(self, authorization: str | None, protocol: str | None) -> None:
@@ -440,10 +495,15 @@ class PublicationService:
         before it as it was, and `replayed_size` as it stood. After either,
         each Launch of a main thread that a Turn of Pilot's started, or a
         driver under a Session whose step names the thread, stands under
-        its Session and Turn (DB 538). After either, a main thread
-        is adopted by the adopted Project of the `group` the call names,
-        made where no Project holds the group and renamed where the group
-        was, and by none where the call names none. After either, each Call
+        its Session and Turn (DB 538). After one with a labelling the
+        Transcript holds its labels and no other, under the labeller's
+        version and stamp it names, and a main thread is adopted by the
+        adopted Project of the `group` the call names, made where no Project
+        holds the group and renamed where the group was, and by none where
+        the call names none; after one with none it holds the labels it held
+        and no stamp. After either, each Call's opening prompt's Context
+        Part is what the collector counted less the Call's labelled Context
+        Parts. After either, each Call
         it carries holds its cost at the Prices in force, none where a kind
         it counts tokens of has no Price, and its other caches
         (`call_caches`); the Transcript holds its first and its last Call's
@@ -457,7 +517,10 @@ class PublicationService:
         with the Model it is priced as; one Pilot has met stands as it is.
 
         Raises:
-            PublicationInvalidException: the call has faults; nothing is
+            PublicationInvalidException: the call has faults, its labelling
+                names a value no list of the labeller's declares or a row
+                Pilot does not hold, or the labelled Context Parts it keeps
+                do not fit in their Call's opening prompt; nothing is
                 written.
             PublicationNotAppendableException: an appended call does not
                 continue what Pilot holds of the Transcript; nothing is
@@ -476,17 +539,29 @@ class PublicationService:
         boundary = _WHOLE
         ids: dict[str, int] = {}
         held = self._held(publication)
+        labelling = publication.labelling
+        kept = self._kept_carve(held)
+        if labelling is None:
+            carved = kept
+            found = carve_faults(
+                publication.calls, kept, "the labelled context parts Pilot holds"
+            )
+        else:
+            carved = carve(labelling)
+            found = self._labels.faults(labelling)
+        if found:
+            raise PublicationInvalidException(_name(publication), found)
         if publication.appended is not None:
             boundary = publication.appended.boundary
             ids = self._continued(publication, publication.appended, held)
         adopted_by = self._adopted_by(publication)
         self._meet_references(publication)
         versions = self._versions(publication)
-        thread = self._thread(
-            publication, versions[COLLECTOR, publication.collector.version], adopted_by
-        )
+        thread = self._thread(publication, versions, adopted_by)
         with self._replayed(publication, held):
-            self._facts(thread, publication, versions, boundary, ids)
+            self._facts(thread, publication, versions, boundary, ids, (kept, carved))
+            if labelling is not None:
+                self._labels.write(thread, labelling, ids)
         self._join(publication.session_id)
         if publication.agent_id is None:
             hold_sub_agents_calls(self.db, publication.session_id)
@@ -495,6 +570,7 @@ class PublicationService:
 
     def _held(self, publication: PublicationSchema) -> _Held | None:
         """The Transcript as Pilot holds it; None where it does not."""
+        labeller = aliased(ComponentVersion)
         return self.db.execute(
             select(
                 Transcript.id,
@@ -502,13 +578,32 @@ class PublicationService:
                 Transcript.file_modified_at,
                 Transcript.replayed_size,
                 ComponentVersion.version,
+                labeller.version.label("labelled_under"),
+                Transcript.records_stamp,
             )
             .join(ComponentVersion, ComponentVersion.id == Transcript.read_under_id)
+            .outerjoin(labeller, labeller.id == Transcript.labelled_under_id)
             .where(
                 Transcript.session_id == publication.session_id,
                 Transcript.agent_id.is_not_distinct_from(publication.agent_id),
             )
         ).one_or_none()
+
+    def _kept_carve(self, held: _Held | None) -> dict[str, int]:
+        """The characters the labelled Context Parts Pilot holds of the
+        Transcript carve out of each Call's opening prompt, by the Call's
+        `message_id`."""
+        if held is None:
+            return {}
+        return {
+            message_id: int(characters)
+            for message_id, characters in self.db.execute(
+                select(Call.message_id, func.sum(ContextPart.characters))
+                .join(Call, Call.id == ContextPart.call_id)
+                .where(Call.transcript_id == held.id, ContextPart.labelled.is_(True))
+                .group_by(Call.message_id)
+            )
+        }
 
     @contextmanager
     def _replayed(
@@ -522,7 +617,10 @@ class PublicationService:
         call. Pilot holds no boundary, so each row written is logged, by its
         table, with how much of the file was taken in parts; a whole call of
         a file that changed, or read under another version, writes rows that
-        say nothing of the appended calls, and is not logged."""
+        say nothing of the appended calls, and is not logged. The labels'
+        rows are logged beside the facts' where the call's labelling is under
+        the labeller's version and stamp Pilot held: under another, what the
+        labels improve is no replay's difference."""
         if (
             publication.appended is not None
             or held is None
@@ -536,21 +634,33 @@ class PublicationService:
         ):
             yield
             return
-        self._replay = _Replay(self.db)
+        labelling = publication.labelling
+        self._replay = _Replay(
+            self.db,
+            labelling is not None
+            and (held.labelled_under, held.records_stamp)
+            == (labelling.version, labelling.stamp),
+        )
         try:
             yield
             self.db.flush()
         finally:
-            wrote = self._replay.end()
+            facts, labels = self._replay.end()
             self._replay = None
+        wrote: list[str] = []
+        if facts:
+            wrote.append(f"rows that differ from what Pilot held: {_tables(facts)}")
+        if labels:
+            differ = "labels that differ" + ("" if facts else " from what Pilot held")
+            wrote.append(f"{differ}: {_tables(labels)}")
         if wrote:
             logger.warning(
                 "The replay at rest of transcript %s, %d of its %d bytes taken in"
-                " parts, wrote rows that differ from what Pilot held: %s",
+                " parts, wrote %s",
                 _name(publication),
                 held.file_size - held.replayed_size,
                 held.file_size,
-                ", ".join(f"{table} {rows}" for table, rows in wrote.items()),
+                ", and ".join(wrote),
             )
 
     def _facts(
@@ -560,10 +670,14 @@ class PublicationService:
         versions: dict[_Version, int],
         boundary: PublishedBoundarySchema,
         ids: dict[str, int],
+        carves: tuple[dict[str, int], dict[str, int]],
     ) -> None:
         """The rows under the Transcript from the boundary on as the call
-        has them. `ids` comes with the Calls before the boundary that the
-        call's name as their predecessor."""
+        has them, the Events and Context Parts the collector's alone. `ids`
+        comes with the Calls before the boundary that the call's name as
+        their predecessor. `carves` are the characters the labelled Context
+        Parts carve out of each Call's opening prompt, by its `message_id`:
+        those Pilot held, and those it holds after the call."""
         surplus: _Surplus = {}
         prompts = self._launches(
             thread, publication.launches, versions, surplus, boundary
@@ -593,23 +707,20 @@ class PublicationService:
                 for call in calls
             },
         )
-        self._hung(
-            ContextPart,
-            thread,
-            ids,
-            boundary,
-            {
-                call.message_id: [
-                    {
-                        "kind_code": part.kind,
-                        "name": part.name,
-                        "characters": part.characters,
-                    }
-                    for part in call.context_parts
-                ]
-                for call in calls
-            },
-        )
+        parts: dict[str, list[dict[str, Any]]] = {}
+        for call in calls:
+            rows = parts[call.message_id] = [
+                {
+                    "kind_code": part.kind,
+                    "name": part.name,
+                    "characters": part.characters,
+                }
+                for part in call.context_parts
+            ]
+            opening = _opening(rows)
+            if opening is not None:
+                rows[opening]["characters"] -= carves[1].get(call.message_id, 0)
+        self._hung(ContextPart, thread, ids, boundary, parts, carves)
 
     def _continued(
         self,
@@ -905,7 +1016,7 @@ class PublicationService:
         events = [event for call in calls for event in call.events]
         self._meet(
             Component,
-            [COLLECTOR]
+            [COLLECTOR, LABELLER if publication.labelling is not None else None]
             + [used.component for launch in launches for used in launch.components],
         )
         self._meet(
@@ -982,6 +1093,8 @@ class PublicationService:
         named: dict[_Version, datetime | None] = {
             (COLLECTOR, collector.version): collector.released_at
         }
+        if publication.labelling is not None:
+            named[LABELLER, publication.labelling.version] = None
         for launch in publication.launches:
             for used in launch.components:
                 version = (used.component, used.version)
@@ -1059,28 +1172,37 @@ class PublicationService:
     def _thread(
         self,
         publication: PublicationSchema,
-        read_under_id: int,
+        versions: dict[_Version, int],
         adopted_by: uuid.UUID | None,
     ) -> Transcript:
-        """The Transcript's row as the call has it, adopted by the Project
-        `adopted_by`, its `replayed_size` its file's size after a whole call
-        alone (DB 605), with its first and its last Call's time as the call
-        leaves them. A sub-agent's thread
+        """The Transcript's row as the call has it, its `replayed_size` its
+        file's size after a whole call alone (DB 605), with its first and its
+        last Call's time as the call leaves them. One with a labelling is
+        adopted by the Project `adopted_by`, under the labeller's version
+        and stamp it names; one with none keeps its adoption and its
+        labeller's version, and holds no stamp. A sub-agent's thread
         is under its main thread where Pilot holds that one, and a main
         thread first held takes the sub-agents' threads that came before it."""
         facts: dict[str, Any] = {
             "working_directory": publication.working_directory,
             "repository_id": None,
             "environment_id": None,
-            "adopted_project_id": adopted_by,
             "spawned_by_tool_use_id": publication.spawned_by,
             "agent_type": publication.agent_type,
             "description": publication.description,
             "file_size": publication.file_size,
             "file_modified_at": publication.file_modified_at,
             "collected_at": datetime.now(UTC),
-            "read_under_id": read_under_id,
+            "read_under_id": versions[COLLECTOR, publication.collector.version],
+            "records_stamp": None,
         }
+        labelling = publication.labelling
+        if labelling is not None:
+            facts |= {
+                "adopted_project_id": adopted_by,
+                "labelled_under_id": versions[LABELLER, labelling.version],
+                "records_stamp": labelling.stamp,
+            }
         if publication.appended is None:
             facts["replayed_size"] = publication.file_size
         if publication.repository is not None:
@@ -1456,23 +1578,56 @@ class PublicationService:
         ids: dict[str, int],
         boundary: PublishedBoundarySchema,
         facts: dict[str, list[dict[str, Any]]],
+        carves: tuple[dict[str, int], dict[str, int]] | None = None,
     ) -> None:
-        """The rows of `entity`, an Event's or a Context Part's, under each
-        Call as `facts` has them by the Call's `message_id`, in the file's
-        order; a held one past the last its Call has is removed."""
+        """The collector's rows of `entity`, an Event's or a Context Part's,
+        under each Call as `facts` has them by the Call's `message_id`, in
+        the file's order; a held one past the last its Call has is removed.
+        The labelled rows stand. `carves`, for the Context Parts, are what
+        `_facts` takes them as."""
         held: dict[int, list[Any]] = self._grouped(
             select(entity)
             .join(Call, Call.id == entity.call_id)
-            .where(Call.transcript_id == thread.id, Call.position >= boundary.call)
+            .where(
+                Call.transcript_id == thread.id,
+                Call.position >= boundary.call,
+                entity.labelled.is_(False),
+            )
             .order_by(entity.id),
             "call_id",
         )
         surplus: _Surplus = {}
         for message_id, rows in facts.items():
             call_id = ids[message_id]
-            self._placed(held.get(call_id, []), rows, entity, surplus, call_id=call_id)
+            under = held.get(call_id, [])
+            if carves is not None and self._replay is not None:
+                self._carve_moved(
+                    under, rows, *(carve.get(message_id, 0) for carve in carves)
+                )
+            self._placed(under, rows, entity, surplus, call_id=call_id)
         self.db.flush()
         self._remove(entity, [row.id for row in surplus.get(entity, [])])
+
+    def _carve_moved(
+        self,
+        held: list[ContextPart],
+        rows: list[dict[str, Any]],
+        before: int,
+        after: int,
+    ) -> None:
+        """Tell the replay where the held opening prompt's part, carved by
+        `before` characters, is what the collector counted again, `rows`'
+        own carved by `after`: a change of its characters is its labels'."""
+        assert self._replay is not None
+        opening = _opening(rows)
+        if opening is None or opening >= len(held):
+            return
+        row = held[opening]
+        if (
+            row.kind_code == PROMPT
+            and row.characters + before == rows[opening]["characters"] + after
+        ):
+            self._replay.carved(row)
 
     def _join(self, session_id: str) -> None:
         """Join each sub-agent's thread of the conversation to the Tool Call
@@ -1548,6 +1703,19 @@ class PublicationService:
         for row in self.db.scalars(rows):
             grouped.setdefault(getattr(row, parent), []).append(row)
         return grouped
+
+
+def _opening(parts: list[dict[str, Any]]) -> int | None:
+    """The place of a Call's opening prompt among its Context Parts' facts,
+    none where it carries no prompt."""
+    return next(
+        (place for place, part in enumerate(parts) if part["kind_code"] == PROMPT),
+        None,
+    )
+
+
+def _tables(rows: dict[str, int]) -> str:
+    return ", ".join(f"{table} {count}" for table, count in rows.items())
 
 
 def _set(row: Any, facts: dict[str, Any]) -> None:

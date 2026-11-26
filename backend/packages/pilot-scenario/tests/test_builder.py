@@ -14,6 +14,7 @@ from typing import Any
 import pilot_scenario
 import pytest
 from pilot_scenario import COLLECTOR, SCENARIO, Builder, Scenario, SentTurn
+from pilot_scenario.builder import LABELLER
 from pilot_scenario.script import (
     Call,
     Carried,
@@ -502,7 +503,11 @@ class TestAMainThread:
         assert gears["working_directory"] == "/work/BikeLog"
         assert "agent_id" not in gears
 
-    def test_a_session_of_a_group_names_it_on_its_main_thread(self) -> None:
+    def test_a_session_of_a_group_names_it_on_its_main_thread_with_a_labelling(
+        self,
+    ) -> None:
+        """A group is a label, which a publication carries with a labelling
+        alone."""
         built = _built()
 
         assert built["gears"]["group"] == {
@@ -513,8 +518,15 @@ class TestAMainThread:
                 " the log."
             ),
         }
+        assert built["gears"]["labelling"] == {
+            "version": LABELLER,
+            "stamp": "1:scenario",
+            "labels": {},
+        }
         assert "group" not in built["halving"]
         assert "group" not in built["counting"]
+        assert "labelling" not in built["halving"]
+        assert "labelling" not in built["counting"]
 
     def test_a_launch_ends_at_its_last_lines_time_whatever_came_before(
         self,

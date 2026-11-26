@@ -91,6 +91,7 @@ from tests.support.publications import (
     event,
     group,
     hook_run,
+    labelling,
     launch,
     prompt,
     sub_agent,
@@ -3588,14 +3589,15 @@ class TestCaches:
 
 
 class TestAdopted:
-    """A main thread whose call names a group is adopted by the group's
+    """A main thread whose labelling names a group is adopted by the group's
     adopted Project, made the first time the group is named and found again
-    by its key (F152.8; DB 539, 582, 584)."""
+    by its key (F152.8; DB 539, 582, 584). A call with no labelling leaves
+    the adoption as it stands (F152.6)."""
 
     def test_a_group_first_named_makes_its_project_which_adopts_the_transcript(
         self, session: DbSession, publications: PublicationService, service_user: User
     ) -> None:
-        thread = publications.publish(_camp(group=group()))
+        thread = publications.publish(_camp(group=group(), labelling=labelling()))
 
         project = session.scalars(select(Project)).one()
         assert thread.adopted_project_id == project.id
@@ -3607,24 +3609,30 @@ class TestAdopted:
         assert project.name == "Recipe box: the first menus"
         assert project.created_by_user_id == service_user.id
 
-    def test_an_appended_call_that_first_names_a_group_makes_its_project(
+    def test_an_appended_call_names_no_group(
         self, session: DbSession, publications: PublicationService, service_user: User
     ) -> None:
+        """It carries no labelling yet, and a group is a label of one."""
         publications.publish(_camp())
 
-        thread = publications.publish(_grown(group=group()))
+        with (
+            writes(session) as wrote,
+            pytest.raises(PublicationInvalidException) as raised,
+        ):
+            publications.publish(_grown(group=group()))
 
-        project = session.scalars(select(Project)).one()
-        assert thread.adopted_project_id == project.id
-        assert project.adopted_group == FIRST_MENUS
+        assert raised.value.faults == ["a call with no labelling names no `group`"]
+        assert wrote == {}
 
     def test_a_later_publication_naming_the_group_finds_its_project(
         self, session: DbSession, publications: PublicationService, service_user: User
     ) -> None:
-        first = publications.publish(_camp(group=group()))
+        first = publications.publish(_camp(group=group(), labelling=labelling()))
 
-        second = publications.publish(_camp(session_id=OTHER, group=group()))
-        again = publications.publish(_grown(group=group()))
+        second = publications.publish(
+            _camp(session_id=OTHER, group=group(), labelling=labelling())
+        )
+        again = publications.publish(_grown())
 
         assert _count(session, Project) == 1
         assert (
@@ -3637,20 +3645,23 @@ class TestAdopted:
     def test_a_republish_of_an_adopted_transcript_writes_no_project(
         self, session: DbSession, publications: PublicationService, service_user: User
     ) -> None:
-        publications.publish(_camp(group=group()))
+        publications.publish(_camp(group=group(), labelling=labelling()))
 
         with writes(session) as wrote:
-            publications.publish(_camp(group=group()))
+            publications.publish(_camp(group=group(), labelling=labelling()))
 
         assert wrote == {"transcripts": Written(updated=1)}
 
     def test_a_renamed_group_renames_its_project(
         self, session: DbSession, publications: PublicationService, service_user: User
     ) -> None:
-        thread = publications.publish(_camp(group=group()))
+        thread = publications.publish(_camp(group=group(), labelling=labelling()))
 
         publications.publish(
-            _camp(group=group(name="The first menus", summary="As Ben tells it."))
+            _camp(
+                group=group(name="The first menus", summary="As Ben tells it."),
+                labelling=labelling(),
+            )
         )
 
         project = session.get_one(Project, thread.adopted_project_id)
@@ -3663,31 +3674,44 @@ class TestAdopted:
     def test_a_transcript_whose_group_goes_is_adopted_by_none_and_its_project_stands(
         self, session: DbSession, publications: PublicationService, service_user: User
     ) -> None:
-        """The label is the call's, and nothing removes an adopted Project."""
-        publications.publish(_camp(group=group()))
+        """The label is the labelling's, and nothing removes an adopted
+        Project."""
+        publications.publish(_camp(group=group(), labelling=labelling()))
 
-        thread = publications.publish(_camp())
+        thread = publications.publish(_camp(labelling=labelling()))
 
         assert thread.adopted_project_id is None
         assert session.scalars(select(Project.adopted_group)).all() == [FIRST_MENUS]
 
-    def test_an_appended_call_without_the_group_leaves_the_transcript_adopted_by_none(
-        self, session: DbSession, publications: PublicationService, service_user: User
+    @pytest.mark.parametrize("grown", [False, True], ids=["whole", "appended"])
+    def test_a_call_with_no_labelling_leaves_the_transcript_adopted(
+        self,
+        session: DbSession,
+        publications: PublicationService,
+        service_user: User,
+        grown: bool,
     ) -> None:
-        publications.publish(_camp(group=group()))
+        adopted = publications.publish(
+            _camp(group=group(), labelling=labelling())
+        ).adopted_project_id
 
-        thread = publications.publish(_grown())
+        thread = publications.publish(_grown() if grown else _camp())
 
-        assert thread.adopted_project_id is None
+        assert thread.adopted_project_id == adopted is not None
         assert _count(session, Project) == 1
 
     def test_a_transcript_whose_group_changes_moves_and_both_projects_stand(
         self, session: DbSession, publications: PublicationService, service_user: User
     ) -> None:
-        first = publications.publish(_camp(group=group())).adopted_project_id
+        first = publications.publish(
+            _camp(group=group(), labelling=labelling())
+        ).adopted_project_id
 
         thread = publications.publish(
-            _camp(group=group(key="recipe-box-second-menus", name="The second menus"))
+            _camp(
+                group=group(key="recipe-box-second-menus", name="The second menus"),
+                labelling=labelling(),
+            )
         )
 
         assert thread.adopted_project_id != first
@@ -3699,7 +3723,7 @@ class TestAdopted:
     def test_a_sub_agents_thread_is_under_its_adopted_main_thread_and_adopted_by_none(
         self, session: DbSession, publications: PublicationService, service_user: User
     ) -> None:
-        main = publications.publish(_camp(group=group()))
+        main = publications.publish(_camp(group=group(), labelling=labelling()))
 
         thread = publications.publish(sub_agent())
 
@@ -3709,19 +3733,21 @@ class TestAdopted:
         self, session: DbSession, publications: PublicationService
     ) -> None:
         with writes(session) as wrote, pytest.raises(NoServiceUserException):
-            publications.publish(_camp(group=group()))
+            publications.publish(_camp(group=group(), labelling=labelling()))
 
         assert wrote == {}
 
     def test_a_group_whose_project_stands_needs_no_service_user(
         self, session: DbSession, publications: PublicationService, service_user: User
     ) -> None:
-        publications.publish(_camp(group=group()))
+        publications.publish(_camp(group=group(), labelling=labelling()))
         service_user.kind_code = UserKind.PERSON
         service_user.avatar_slot = 3
         session.flush()
 
-        thread = publications.publish(_camp(session_id=OTHER, group=group()))
+        thread = publications.publish(
+            _camp(session_id=OTHER, group=group(), labelling=labelling())
+        )
 
         assert thread.adopted_project_id is not None
 
@@ -3739,7 +3765,7 @@ class TestAdopted:
             writes(session) as wrote,
             pytest.raises(TranscriptNotAdoptableException) as raised,
         ):
-            publications.publish(_camp(group=group()))
+            publications.publish(_camp(group=group(), labelling=labelling()))
 
         assert raised.value.message == (
             f"Cannot adopt transcript {CAMP} into the group 'recipe-box-first-menus'"
@@ -3760,7 +3786,7 @@ class TestAdopted:
             writes(session) as wrote,
             pytest.raises(TranscriptNotAdoptableException),
         ):
-            publications.publish(_camp(group=group()))
+            publications.publish(_camp(group=group(), labelling=labelling()))
 
         assert wrote == {}
 
@@ -3777,24 +3803,7 @@ class TestAdopted:
             writes(session) as wrote,
             pytest.raises(TranscriptNotAdoptableException),
         ):
-            publications.publish(_camp(group=group()))
-
-        assert wrote == {}
-
-    def test_an_appended_call_naming_a_group_for_a_sessions_transcript_is_refused(
-        self,
-        session: DbSession,
-        publications: PublicationService,
-        run: models.Session,
-        service_user: User,
-    ) -> None:
-        publications.publish(_camp())
-
-        with (
-            writes(session) as wrote,
-            pytest.raises(TranscriptNotAdoptableException),
-        ):
-            publications.publish(_grown(group=group()))
+            publications.publish(_camp(group=group(), labelling=labelling()))
 
         assert wrote == {}
 
@@ -3808,12 +3817,14 @@ class TestAdopted:
     ) -> None:
         """DB 539, the other way round: its Launches stay off the Session,
         and each publication that finds it so logs it."""
-        adopted = publications.publish(_camp(group=group())).adopted_project_id
+        adopted = publications.publish(
+            _camp(group=group(), labelling=labelling())
+        ).adopted_project_id
         project_session.conversation_id = CAMP
         turn_at(session, project_session, _at_time(0) - timedelta(seconds=4))
 
         with caplog.at_level(logging.WARNING, logger=PLACEMENT_LOGGER):
-            thread = publications.publish(_grown(group=group()))
+            thread = publications.publish(_grown())
 
         assert thread.adopted_project_id == adopted
         assert _ran(session) == [(None, None), (None, None)]
@@ -3829,11 +3840,11 @@ class TestAdopted:
         project_session: models.Session,
         service_user: User,
     ) -> None:
-        publications.publish(_camp(group=group()))
+        publications.publish(_camp(group=group(), labelling=labelling()))
         project_session.conversation_id = CAMP
         turn_at(session, project_session, _at_time(0) - timedelta(seconds=4))
 
-        thread = publications.publish(_camp())
+        thread = publications.publish(_camp(labelling=labelling()))
 
         assert thread.adopted_project_id is None
         assert _ran(session) == [(project_session.id, 1), (project_session.id, 1)]
@@ -3845,20 +3856,28 @@ class TestAdopted:
         run: models.Session,
         service_user: User,
     ) -> None:
-        thread = publications.publish(_camp(session_id=OTHER, group=group()))
+        thread = publications.publish(
+            _camp(session_id=OTHER, group=group(), labelling=labelling())
+        )
 
         assert thread.adopted_project_id is not None
 
     @pytest.mark.parametrize(
         ("publication", "fault"),
         [
-            (sub_agent(group=group()), "a sub-agent's thread names no `group`"),
             (
-                whole(group=group(name=" The first menus")),
+                sub_agent(group=group(), labelling=labelling()),
+                "a sub-agent's thread names no `group`",
+            ),
+            (
+                whole(group=group(name=" The first menus"), labelling=labelling()),
                 "the group's `name` is not one line of words with no space around them",
             ),
             (
-                whole(group=group(summary="```question id=Q1\ndefault: Stew\n```")),
+                whole(
+                    group=group(summary="```question id=Q1\ndefault: Stew\n```"),
+                    labelling=labelling(),
+                ),
                 "the group's `summary` holds an ask",
             ),
         ],
@@ -4031,7 +4050,7 @@ class TestAdmitted:
         with pytest.raises(AuthenticationException):
             publications.admit(authorization, str(COLLECTOR_PROTOCOL_MAX))
 
-    @pytest.mark.parametrize("version", [None, "", "0", "2", "one", "+1", "1.0"])
+    @pytest.mark.parametrize("version", [None, "", "0", "3", "one", "+1", "1.0"])
     def test_a_version_outside_the_range_is_refused_with_the_range(
         self, publications: PublicationService, version: str | None
     ) -> None:

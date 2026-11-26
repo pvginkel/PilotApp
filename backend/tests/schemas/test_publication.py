@@ -9,6 +9,7 @@ from pilot_collection.publication import PublicationSchema
 from pydantic import ValidationError
 
 from tests.support.publications import (
+    STAMP,
     appended,
     builds_on,
     call,
@@ -17,6 +18,7 @@ from tests.support.publications import (
     event,
     group,
     hook_run,
+    labelling,
     launch,
     prompt,
     sub_agent,
@@ -24,6 +26,7 @@ from tests.support.publications import (
     whole,
 )
 from tests.support.transcripts import CAMP, STARTED
+from tests.support.vocabularies import VERSION
 
 
 def _refused(**overrides: Any) -> list[tuple[Any, ...]]:
@@ -377,3 +380,191 @@ class TestPublicationSchema:
         self, overrides: dict[str, Any], where: tuple[Any, ...]
     ) -> None:
         assert _refused(**overrides) == [where]
+
+
+def _labelled(**labels: list[dict[str, Any]]) -> dict[str, Any]:
+    """A labelling with those labels."""
+    return labelling(labels=labels)
+
+
+class TestLabellingSchema:
+    """The labeller's labels of the Transcript, as its `label` answer's line
+    gives them, each row named as both sides compute it (F152.6, F152.7)."""
+
+    def test_a_call_carries_no_labelling_unless_a_labeller_answered(self) -> None:
+        assert whole().labelling is None
+
+    def test_a_labelling_carries_every_label(self) -> None:
+        given = whole(
+            labelling=labelling(
+                labels={
+                    "launches": [{"n": 1, "work_unit": "spring|soup"}],
+                    "calls": [
+                        {
+                            "id": "msg_0001",
+                            "segment": 1,
+                            "call_class": "chop",
+                            "avoidable_kind": "spilt",
+                            "wait_cause": "oven",
+                        }
+                    ],
+                    "segments": [{"position": 1, "kind": "prep"}],
+                    "tool_calls": [
+                        {
+                            "tool_use_id": "toolu_0001",
+                            "command_class": "timer",
+                            "effect_kind": "order_placed",
+                            "effect_subject": "ORDER-12",
+                            "rules": ["no_tasting_from_the_pot"],
+                        }
+                    ],
+                    "events": [
+                        {"call": "msg_0001", "kind": "burnt", "at": STARTED.isoformat()}
+                    ],
+                    "context_parts": [
+                        {"call": "msg_0001", "kind": "recipe_card", "characters": 40}
+                    ],
+                    "test_runs": [
+                        {
+                            "tool_use_id": "toolu_0001",
+                            "suite": "RecipeBox/backend/test",
+                            "passed": False,
+                            "tests": 12,
+                            "failures": [{"test": "t", "attempts": 2, "flaky": True}],
+                        }
+                    ],
+                    "ci_waits": [
+                        {"tool_use_id": "toolu_0001", "job": "Build", "number": 812}
+                    ],
+                    "documents": [
+                        {
+                            "id": "0b5e3c1a-0000-4f6e-9a18-2c4d6e8f0a1b",
+                            "ask_category": "menu_question",
+                        }
+                    ],
+                },
+                units=[
+                    {
+                        "key": "spring|soup",
+                        "kind": "dish",
+                        "title": "Soup",
+                        "round": 2,
+                        "measures": [{"measure": "tastings", "amount": 3}],
+                    }
+                ],
+                test_suites=[{"code": "RecipeBox/backend/test", "name": "RecipeBox"}],
+                ci_builds=[{"job": "Build", "number": 812, "result": "DONE"}],
+            )
+        ).labelling
+
+        assert given is not None
+        assert (given.version, given.stamp) == (VERSION, STAMP)
+        labels = given.labels
+        assert labels.calls[0].segment == 1
+        assert labels.tool_calls[0].rules == ["no_tasting_from_the_pot"]
+        assert labels.test_runs[0].failures[0].attempts == 2
+        assert labels.test_runs[0].work_unit is None
+        assert given.units[0].measures[0].amount == 3
+        assert given.units[0].part_of is None
+        assert given.ci_builds[0].deployed_at is None
+
+    @pytest.mark.parametrize("missing", ["version", "stamp", "labels"])
+    def test_a_labelling_names_its_version_its_stamp_and_its_labels(
+        self, missing: str
+    ) -> None:
+        given = labelling()
+        del given[missing]
+
+        assert _refused(labelling=given) == [("labelling", missing)]
+
+    @pytest.mark.parametrize(
+        ("labels", "where"),
+        [
+            ({"launches": [{"work_unit": "spring"}]}, ("launches", 0, "n")),
+            ({"calls": [{"segment": 1}]}, ("calls", 0, "id")),
+            ({"segments": [{"position": 1}]}, ("segments", 0, "kind")),
+            ({"tool_calls": [{"rules": []}]}, ("tool_calls", 0, "tool_use_id")),
+            (
+                {"events": [{"call": "msg_0001", "kind": "burnt"}]},
+                ("events", 0, "at"),
+            ),
+            (
+                {"context_parts": [{"call": "msg_0001", "kind": "recipe_card"}]},
+                ("context_parts", 0, "characters"),
+            ),
+            (
+                {"test_runs": [{"suite": "s", "passed": True}]},
+                ("test_runs", 0, "tests"),
+            ),
+            (
+                {"ci_waits": [{"tool_use_id": "toolu_0001", "job": "Build"}]},
+                ("ci_waits", 0, "number"),
+            ),
+            (
+                {"documents": [{"ask_category": "menu_question"}]},
+                ("documents", 0, "id"),
+            ),
+        ],
+    )
+    def test_a_label_names_its_row(
+        self, labels: dict[str, Any], where: tuple[Any, ...]
+    ) -> None:
+        assert _refused(labelling=_labelled(**labels)) == [
+            ("labelling", "labels", *where)
+        ]
+
+    @pytest.mark.parametrize(
+        ("part", "values", "where"),
+        [
+            ("units", {"key": "k", "kind": "dish"}, ("units", 0, "title")),
+            ("test_suites", {"code": "s"}, ("test_suites", 0, "name")),
+            ("ci_builds", {"job": "Build"}, ("ci_builds", 0, "number")),
+        ],
+    )
+    def test_what_the_labels_name_is_given_whole(
+        self, part: str, values: dict[str, Any], where: tuple[Any, ...]
+    ) -> None:
+        assert _refused(labelling=labelling(**{part: [values]})) == [
+            ("labelling", *where)
+        ]
+
+    def test_a_labelling_takes_no_field_pilot_does_not_know(self) -> None:
+        assert _refused(labelling=labelling(checkpoint="opaque")) == [
+            ("labelling", "checkpoint")
+        ]
+        assert _refused(
+            labelling=_labelled(
+                calls=[{"id": "msg_0001", "batchable_condition": "orient-read"}]
+            )
+        ) == [("labelling", "labels", "calls", 0, "batchable_condition")]
+        assert _refused(
+            labelling=labelling(labels={"transcript": [{"adopted_group": None}]})
+        ) == [("labelling", "labels", "transcript")]
+
+    @pytest.mark.parametrize(
+        ("labelled", "where"),
+        [
+            ({"ci_waits": [{"tool_use_id": "t", "job": "B", "number": 0}]}, "number"),
+            (
+                {
+                    "test_runs": [
+                        {
+                            "work_unit": "u",
+                            "suite": "s",
+                            "passed": True,
+                            "tests": 1,
+                            "failures": [{"test": "t", "attempts": 0, "flaky": False}],
+                        }
+                    ]
+                },
+                "attempts",
+            ),
+            ({"segments": [{"position": 0, "kind": "prep"}]}, "position"),
+        ],
+    )
+    def test_a_number_or_a_place_counts_from_one(
+        self, labelled: dict[str, Any], where: str
+    ) -> None:
+        refused = _refused(labelling=_labelled(**labelled))
+
+        assert [location[-1] for location in refused] == [where]

@@ -235,9 +235,13 @@ def _nested() -> Scenario:
 
 
 def _cut(publication: dict[str, Any]) -> dict[str, Any]:
-    """A publication of the builder's but for the labeller's `group`, which
-    the reader reads none of."""
-    return {name: fact for name, fact in publication.items() if name != "group"}
+    """A publication of the builder's but for the labeller's `group` and
+    `labelling`, which the reader reads none of."""
+    return {
+        name: fact
+        for name, fact in publication.items()
+        if name not in ("group", "labelling")
+    }
 
 
 def _read(projects: Path, lines: list[Line] | bytes) -> PublicationSchema:

@@ -75,7 +75,7 @@ class Transcript(db.Model):  # type: ignore[name-defined]
     its record names its spawning call by, and `spawned_by_id` the Tool Call
     of that name once a thread of its conversation holds it (DB decision
     79.16). `adopted_project_id` is a label of a main thread's: the adopted
-    Project of the group its last publication named for it, none where it
+    Project of the group its last labelling named for it, none where it
     named none. `labelled_under_id` is the labeller's own version that wrote
     its labels, held whole, and `records_stamp` the stamp the labeller handed
     back with them, of all it read for them besides the file (DB decision

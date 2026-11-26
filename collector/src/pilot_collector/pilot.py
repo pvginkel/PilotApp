@@ -18,7 +18,7 @@ from pilot_collection.inventory import InventorySchema
 from pilot_collection.publication import CollectorProtocolRangeSchema, PublicationSchema
 from pydantic import ValidationError
 
-PROTOCOL = 1
+PROTOCOL = 2
 """The version of the collector's API these calls speak."""
 
 _ROUTES = "/api/collector"

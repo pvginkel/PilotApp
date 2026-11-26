@@ -799,8 +799,8 @@ class TestPilotsAnswers:
         monkeypatch: pytest.MonkeyPatch,
         caplog: pytest.LogCaptureFixture,
     ) -> None:
-        monkeypatch.setattr(publication_service, "COLLECTOR_PROTOCOL_MIN", 2)
-        monkeypatch.setattr(publication_service, "COLLECTOR_PROTOCOL_MAX", 3)
+        monkeypatch.setattr(publication_service, "COLLECTOR_PROTOCOL_MIN", 3)
+        monkeypatch.setattr(publication_service, "COLLECTOR_PROTOCOL_MAX", 4)
 
         with caplog.at_level(logging.WARNING, LOGGER):
             walked = walker.walk()
@@ -813,8 +813,8 @@ class TestPilotsAnswers:
         ] == [
             (
                 "ERROR",
-                "The walk ended early: Pilot takes the protocol versions 2 to 3,"
-                " and the collector speaks 1",
+                "The walk ended early: Pilot takes the protocol versions 3 to 4,"
+                " and the collector speaks 2",
             )
         ]
         assert _held(committed_app) == {}
@@ -827,8 +827,8 @@ class TestPilotsAnswers:
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         with monkeypatch.context() as newer:
-            newer.setattr(publication_service, "COLLECTOR_PROTOCOL_MIN", 2)
-            newer.setattr(publication_service, "COLLECTOR_PROTOCOL_MAX", 3)
+            newer.setattr(publication_service, "COLLECTOR_PROTOCOL_MIN", 3)
+            newer.setattr(publication_service, "COLLECTOR_PROTOCOL_MAX", 4)
             walker.walk()
 
         walked = walker.walk()

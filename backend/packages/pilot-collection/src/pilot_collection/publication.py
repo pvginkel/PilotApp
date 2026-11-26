@@ -13,9 +13,14 @@ A call is whole, the file as it stands, or appended, for a file that grew
 boundary its Launches, Compactions and Calls start at. A place and a
 `position` count through the file in both, from 1.
 
-Of the workflow's labels a call carries one, a main thread's `group` (F152.8).
+The workflow's labels ride in a call's `labelling`, the labeller's answer for
+the Transcript, each row named as both sides compute it (F152.6, F152.7), with
+a main thread's `group` (F152.8). A call with no labelling is one no labeller
+answered for: it carries the file's facts alone, and no `group`.
 """
 
+import uuid
+from decimal import Decimal
 from typing import Annotated, Literal
 
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, StringConstraints
@@ -346,6 +351,244 @@ class PublishedGroupSchema(_Published):
     )
 
 
+class LabelledLaunchSchema(_Published):
+    """A Launch's label."""
+
+    n: Place = Field(description="The Launch's place among the Transcript's Launches")
+    work_unit: Name | None = Field(
+        default=None, description="The key of the lowest Work Unit it carried out"
+    )
+
+
+class LabelledCallSchema(_Published):
+    """A Call's labels."""
+
+    id: Name = Field(description="The Call's `message_id`")
+    segment: Place | None = Field(
+        default=None, description="The `position` of the Segment it falls in"
+    )
+    call_class: Name | None = Field(
+        default=None, description="The Call Class's code: what the Call was doing"
+    )
+    avoidable_kind: Name | None = Field(
+        default=None, description="The Avoidable Kind's code, where it was avoidable"
+    )
+    wait_cause: Name | None = Field(
+        default=None,
+        description="The Wait Cause's code: what woke the Transcript before it",
+    )
+
+
+class LabelledSegmentSchema(_Published):
+    """A stretch of the Transcript's Calls by what it was doing."""
+
+    position: Place = Field(description="Its place among the Transcript's Segments")
+    kind: Name = Field(description="The Segment Kind's code")
+
+
+class LabelledToolCallSchema(_Published):
+    """A Tool Call's labels."""
+
+    tool_use_id: Name = Field(description="The Tool Call's `tool_use_id`")
+    command_class: Name | None = Field(
+        default=None, description="The Command Class's code of what it ran"
+    )
+    effect_kind: Name | None = Field(
+        default=None, description="The Tool Effect Kind's code of the change it made"
+    )
+    effect_subject: Name | None = Field(
+        default=None, description="The id of what that change touched"
+    )
+    rules: list[Name] = Field(
+        default_factory=list, description="The codes of the Rules it breached"
+    )
+
+
+class LabelledEventSchema(_Published):
+    """An occurrence the labeller marks on a Call."""
+
+    call: Name = Field(description="The `message_id` of the Call it is held on")
+    kind: Name = Field(description="The labeller's Event Kind's code")
+    at: AwareDatetime = Field(description="When it occurred")
+    detail: str | None = Field(default=None, description="Its one qualifier")
+
+
+class LabelledContextPartSchema(_Published):
+    """A component of a Call's opening prompt the labeller recognised, which
+    Pilot carves out of the collector's part for that prompt."""
+
+    call: Name = Field(description="The `message_id` of the Call that carried it")
+    kind: Name = Field(description="The labeller's Context Part Kind's code")
+    name: str | None = Field(default=None, description="Which one of its kind")
+    characters: Count = Field(description="Its length")
+
+
+class LabelledTestFailureSchema(_Published):
+    """A test that failed at least one attempt in a Test Run."""
+
+    test: Name = Field(description="The test's name, as its suite names it")
+    attempts: Place = Field(description="How often it was tried in the run")
+    flaky: bool = Field(description="Whether a later attempt passed")
+
+
+class LabelledTestRunSchema(_Published):
+    """A run of one Test Suite, by a Tool Call or by a Work Unit."""
+
+    tool_use_id: Name | None = Field(
+        default=None, description="The Tool Call that ran it, none for a unit's"
+    )
+    work_unit: Name | None = Field(
+        default=None, description="The key of the Work Unit that ran it"
+    )
+    suite: Name = Field(description="The Test Suite's code")
+    passed: bool = Field(description="Whether the run had no failure")
+    tests: Count = Field(description="The tests it ran")
+    retries_allowed: Count | None = Field(
+        default=None, description="How often a failing test was tried again"
+    )
+    started_at: AwareDatetime | None = Field(default=None, description="Its start")
+    ended_at: AwareDatetime | None = Field(default=None, description="Its end")
+    failures: list[LabelledTestFailureSchema] = Field(
+        default_factory=list, description="The tests that failed an attempt"
+    )
+
+
+class LabelledCIWaitSchema(_Published):
+    """A wait of a Tool Call on one CI Build."""
+
+    tool_use_id: Name = Field(description="The Tool Call that waited")
+    job: Name = Field(description="The CI Build's job")
+    number: Place = Field(description="The CI Build's number")
+
+
+class LabelledDocumentSchema(_Published):
+    """A Document's label, on a main thread's labelling."""
+
+    id: uuid.UUID = Field(description="Pilot's id of the Document, as handed")
+    ask_category: Name | None = Field(
+        default=None, description="The Ask Category's code of the asks it puts"
+    )
+
+
+class PublishedLabelsSchema(_Published):
+    """The labels of the Transcript's own rows, each list in the labeller's
+    order; a row the labels do not name takes none."""
+
+    launches: list[LabelledLaunchSchema] = Field(
+        default_factory=list, description="A main thread's Launches' labels"
+    )
+    calls: list[LabelledCallSchema] = Field(
+        default_factory=list, description="The Calls' labels"
+    )
+    segments: list[LabelledSegmentSchema] = Field(
+        default_factory=list, description="Every Segment, by position from 1"
+    )
+    tool_calls: list[LabelledToolCallSchema] = Field(
+        default_factory=list, description="The labels of the Tool Calls with any"
+    )
+    events: list[LabelledEventSchema] = Field(
+        default_factory=list, description="The labeller's Events"
+    )
+    context_parts: list[LabelledContextPartSchema] = Field(
+        default_factory=list,
+        description="The labeller's Context Parts, each carved out of its Call's prompt",
+    )
+    test_runs: list[LabelledTestRunSchema] = Field(
+        default_factory=list, description="The Test Runs the Transcript's labels hold"
+    )
+    ci_waits: list[LabelledCIWaitSchema] = Field(
+        default_factory=list, description="The waits of its Tool Calls on CI Builds"
+    )
+    documents: list[LabelledDocumentSchema] = Field(
+        default_factory=list,
+        description="A main thread's labels of the Documents handed with it",
+    )
+
+
+class PublishedMeasureSchema(_Published):
+    """A figure read for a Work Unit."""
+
+    measure: Name = Field(description="The Unit Measure's code")
+    amount: Decimal = Field(description="The figure, in the measure's unit")
+
+
+class PublishedWorkUnitSchema(_Published):
+    """A Work Unit, whole, by its key, which is the same at every relabel."""
+
+    key: Name = Field(description="The labeller's key of the unit")
+    kind: Name = Field(description="The Work Unit Kind's code")
+    part_of: Name | None = Field(
+        default=None, description="The key of the unit it sits in"
+    )
+    occasioned_by: Name | None = Field(
+        default=None, description="The key of the unit whose outcome made it necessary"
+    )
+    rework_kind: Name | None = Field(
+        default=None, description="The Rework Kind's code, where it is work redone"
+    )
+    title: Name = Field(description="Its title")
+    variant: str | None = Field(default=None, description="Its variant")
+    role: str | None = Field(default=None, description="The role that did it")
+    round: Place | None = Field(default=None, description="Its round")
+    outcome: Name | None = Field(default=None, description="The Unit Outcome's code")
+    started_at: AwareDatetime | None = Field(default=None, description="Its start")
+    ended_at: AwareDatetime | None = Field(default=None, description="Its end")
+    card: str | None = Field(default=None, description="The card it serves")
+    measures: list[PublishedMeasureSchema] = Field(
+        default_factory=list, description="Its figures, one per Unit Measure"
+    )
+
+
+class PublishedTestSuiteSchema(_Published):
+    """A Test Suite a Test Run names."""
+
+    code: Name = Field(description="The labeller's code of the suite")
+    name: Name = Field(description="Its name, to be read")
+
+
+class PublishedCIBuildSchema(_Published):
+    """A CI Build a CI Wait names, as the wait gave it."""
+
+    job: Name = Field(description="Its job")
+    number: Place = Field(description="Its number")
+    result: Name | None = Field(default=None, description="The Build Result's code")
+    queued_at: AwareDatetime | None = Field(default=None, description="When queued")
+    started_at: AwareDatetime | None = Field(default=None, description="Its start")
+    ended_at: AwareDatetime | None = Field(default=None, description="Its end")
+    commit: Name | None = Field(
+        default=None, description="The hash the wait's command named"
+    )
+    deployed_at: AwareDatetime | None = Field(
+        default=None, description="When the deploy it triggered finished"
+    )
+
+
+class PublishedLabellingSchema(_Published):
+    """The labeller's labels of one Transcript, whole: what Pilot holds of its
+    labels after the call (DB decision 81, assertion 561)."""
+
+    version: Name = Field(
+        description="The labeller's own version that gave them", examples=["1.0.0"]
+    )
+    stamp: Name = Field(
+        description=("The labeller's stamp of all it read for them besides the file")
+    )
+    labels: PublishedLabelsSchema = Field(description="The Transcript's own labels")
+    units: list[PublishedWorkUnitSchema] = Field(
+        default_factory=list,
+        description=(
+            "Every Work Unit the labels name and every one above them, each after"
+            " the units it sits in and is occasioned by"
+        ),
+    )
+    test_suites: list[PublishedTestSuiteSchema] = Field(
+        default_factory=list, description="Every Test Suite a Test Run names"
+    )
+    ci_builds: list[PublishedCIBuildSchema] = Field(
+        default_factory=list, description="Every CI Build a CI Wait names"
+    )
+
+
 class PublicationSchema(_Published):
     """One Transcript as its file stands: read whole or, with `appended`,
     from a boundary on."""
@@ -393,9 +636,17 @@ class PublicationSchema(_Published):
     group: PublishedGroupSchema | None = Field(
         default=None,
         description=(
-            "A main thread's label: the group it belongs to, whose adopted"
-            " project then adopts it; none where its labels name none, and the"
-            " transcript is then adopted by no project"
+            "A main thread's label, with a labelling alone: the group it belongs"
+            " to, whose adopted project then adopts it; none where its labels"
+            " name none, and the transcript is then adopted by no project"
+        ),
+    )
+    labelling: PublishedLabellingSchema | None = Field(
+        default=None,
+        description=(
+            "The labeller's labels of the Transcript, which replace all Pilot"
+            " holds; none where no labeller answered for it, and Pilot then"
+            " keeps the labels it holds"
         ),
     )
     appended: PublishedAppendedSchema | None = Field(

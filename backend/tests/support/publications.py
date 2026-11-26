@@ -1,8 +1,8 @@
 """Publications of an invented transcript, as a collector sends one: each
-helper gives a part of the call, `group` the group its labels name, and
-`whole` the call, validated, `appended`
-one of the file once it grew; `collector_headers` the headers it is sent
-under."""
+helper gives a part of the call, `group` the group its labels name,
+`labelling` the invented labeller's labels, and `whole` the call, validated,
+`appended` one of the file once it grew; `collector_headers` the headers it is
+sent under."""
 
 from datetime import timedelta
 from typing import Any
@@ -12,6 +12,7 @@ from pilot_collection.publication import PublicationSchema
 from app.services.publication_service import COLLECTOR_PROTOCOL_MAX
 from tests.support.adoption import FIRST_MENUS
 from tests.support.transcripts import CAMP, OPUS, STARTED, SUB_AGENT
+from tests.support.vocabularies import VERSION
 
 COLLECTOR_TOKEN = "an-invented-collector-token"
 """The collector's bearer the test app is set with."""
@@ -120,6 +121,18 @@ def group(**overrides: Any) -> dict[str, Any]:
         "name": "Recipe box: the first menus",
         "summary": "The menus Ada wrote by hand, before the recipe box.",
     }
+    return values | overrides
+
+
+STAMP = "1:5d0c9a2e"
+"""The invented labeller's stamp of what it read for a transcript."""
+
+
+def labelling(**overrides: Any) -> dict[str, Any]:
+    """The invented labeller's labelling under its version and `STAMP`,
+    labelling nothing; the overrides give it its labels, which name the
+    values `tests.support.vocabularies` declares."""
+    values: dict[str, Any] = {"version": VERSION, "stamp": STAMP, "labels": {}}
     return values | overrides
 
 
