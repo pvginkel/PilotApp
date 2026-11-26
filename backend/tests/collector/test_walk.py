@@ -1,7 +1,8 @@
 """The collector's walk against Pilot's routes (F152.2): a home of the
-scenario's transcript files, walked by the collector's own code over HTTP,
-and what Pilot's record then holds, of a file published whole and of one
-that grew, published appended (F152.15)."""
+scenario's transcript files, walked by the collector's own code over HTTP
+with the stub labeller (F122.5), and what Pilot's record then holds, of a
+file published whole and of one that grew, published appended (F152.15), and
+of the labeller's vocabularies (F152.6)."""
 
 import json
 import logging
@@ -21,13 +22,15 @@ import pytest
 from dependency_injector import providers
 from flask import Flask
 from pilot_collection.publication import PublicationSchema
+from pilot_collection.vocabularies import VocabulariesSchema
 from pilot_collector import home as collector_home
+from pilot_collector import labeller as running
 from pilot_collector import reader, walk
 from pilot_collector.home import transcript
 from pilot_collector.pilot import NotAdmitted, NotAppendable, Pilot, Refused
 from pilot_collector.settings import Settings
 from pilot_collector.walk import Walker
-from pilot_scenario import SCENARIO, Builder, Scenario, script
+from pilot_scenario import SCENARIO, Builder, Scenario, labeller, script
 from pilot_scenario.transcript import stamp
 from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session as DbSession
@@ -47,6 +50,8 @@ from app.models import (
     ToolCall,
     Transcript,
     Walk,
+    WorkUnitKind,
+    WorkUnitKindNesting,
 )
 from app.services import publication_service
 from tests.support.publications import COLLECTOR_TOKEN, collector_headers
@@ -108,12 +113,15 @@ def walker(pilot_url: str, home: Path, stop: threading.Event) -> Generator[Walke
 
 
 def _settings(pilot_url: str, home: Path, **given: Any) -> Settings:
-    return Settings(
-        COLLECTOR_PILOT_URL=pilot_url,
-        COLLECTOR_TOKEN=COLLECTOR_TOKEN,
-        COLLECTOR_HOME=home,
-        **given,
-    )
+    """The collector's settings for that Pilot and home, the stub labeller
+    its labeller, but for `given`."""
+    named: dict[str, Any] = {
+        "COLLECTOR_PILOT_URL": pilot_url,
+        "COLLECTOR_TOKEN": COLLECTOR_TOKEN,
+        "COLLECTOR_HOME": home,
+        "COLLECTOR_LABELLER": labeller.command(),
+    }
+    return Settings(**(named | given))
 
 
 def _configure(app: Flask, interval: float = 30.0, settling: float = 600.0) -> None:
@@ -835,6 +843,292 @@ class TestPilotsAnswers:
 
         assert (walked.published, walked.ended) == (3, True)
         assert set(_held(committed_app)) == SCENARIOS
+
+
+def _verbs(monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    """The verb of each call of the labeller's from here on, in their
+    order."""
+    verbs: list[str] = []
+    run = running.subprocess.run
+
+    def called(command: list[str], **given: Any) -> Any:
+        verbs.append(command[-1])
+        return run(command, **given)
+
+    monkeypatch.setattr(running.subprocess, "run", called)
+    return verbs
+
+
+def _kinds(app: Flask) -> tuple[list[tuple[str, int | None]], set[tuple[str, str]]]:
+    """The Work Unit Kinds Pilot holds, each with its place, in their
+    order, and the nestings."""
+    with _record(app) as record:
+        kinds = record.execute(
+            select(WorkUnitKind.code, WorkUnitKind.position).order_by(
+                WorkUnitKind.position, WorkUnitKind.code
+            )
+        ).all()
+        nestings = record.execute(
+            select(WorkUnitKindNesting.inner_code, WorkUnitKindNesting.outer_code)
+        ).all()
+    return [tuple(kind) for kind in kinds], {tuple(pair) for pair in nestings}
+
+
+def _scenarios_kinds(
+    kinds: tuple[str, ...] = SCENARIO.kinds,
+) -> tuple[list[tuple[str, int]], set[tuple[str, str]]]:
+    """Those the stub declares for kinds of work `kinds`: the scenario's,
+    each but the widest in the one before it."""
+    return (
+        [(kind, place) for place, kind in enumerate(kinds, start=1)],
+        set(zip(kinds[1:], kinds, strict=False)),
+    )
+
+
+def _records(home: Path) -> Path:
+    """The stub labeller's run records on the home."""
+    return home / "plugins" / "data" / labeller.DATA / labeller.RECORDS
+
+
+def _with_kinds(home: Path, *kinds: str) -> None:
+    """Have the run records name those kinds of work."""
+    records = json.loads(_records(home).read_text())
+    _records(home).write_text(json.dumps(records | {"kinds": list(kinds)}))
+
+
+def _no_stamps(caplog: pytest.LogCaptureFixture) -> list[tuple[str, str]]:
+    """The walk's lines that say it has no labeller's stamps, and why."""
+    told = "The walk has no labeller's stamps, and publishes no label: "
+    return [
+        (record.levelname, record.getMessage().removeprefix(told))
+        for record in caplog.records
+        if record.name == LOGGER and record.getMessage().startswith(told)
+    ]
+
+
+def _walks_lines(caplog: pytest.LogCaptureFixture) -> list[str]:
+    """The walk's own lines, one at each walk's end."""
+    return [
+        record.getMessage()
+        for record in caplog.records
+        if record.name == LOGGER and record.getMessage().startswith("A walk over ")
+    ]
+
+
+class TestTheLabeller:
+    """The labeller at every walk, while it publishes no label (F152.6,
+    F152.7): the stamps of every transcript on the home in one call, and the
+    vocabularies declared to Pilot."""
+
+    def test_the_first_walk_declares_its_vocabularies_and_takes_its_stamps(
+        self,
+        committed_app: Flask,
+        walker: Walker,
+        monkeypatch: pytest.MonkeyPatch,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        verbs = _verbs(monkeypatch)
+        sent = _sent(walker, monkeypatch)
+
+        with caplog.at_level(logging.INFO, LOGGER):
+            walked = walker.walk()
+
+        assert verbs == ["stamps", "vocabularies"]
+        assert walked.stamps is not None
+        assert walked.stamps.version == labeller.VERSION
+        assert {
+            session_id if agent_id is None else f"{session_id}/{agent_id}"
+            for session_id, agent_id in walked.stamps.stamps
+        } == SCENARIOS
+        assert _kinds(committed_app) == _scenarios_kinds()
+        assert (walked.published, walked.ended) == (3, True)
+        assert [publication.labelling for publication in sent] == [None] * 3
+        assert (
+            f"The vocabularies of the labeller {labeller.VERSION} are declared to Pilot"
+        ) in caplog.messages
+        assert _walks_lines(caplog)[0].endswith(
+            f"s; the labeller {labeller.VERSION}'s stamps took"
+            f" {walked.stamps.seconds:.2f} s"
+        )
+
+    def test_a_walk_where_nothing_changed_calls_it_once_for_the_stamps(
+        self,
+        committed_app: Flask,
+        walker: Walker,
+        monkeypatch: pytest.MonkeyPatch,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        walker.walk()
+        verbs = _verbs(monkeypatch)
+        sent = _sent(walker, monkeypatch)
+        caplog.clear()
+
+        with caplog.at_level(logging.DEBUG, LOGGER):
+            walked = walker.walk()
+
+        assert verbs == ["stamps"]
+        assert (walked.published, sent, walked.ended) == (0, [], True)
+        (line,) = _walks_lines(caplog)
+        assert f"; the labeller {labeller.VERSION}'s stamps took " in line
+
+    def test_it_declares_again_once_its_declarations_change(
+        self,
+        committed_app: Flask,
+        home: Path,
+        walker: Walker,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        walker.walk()
+        _with_kinds(home, *SCENARIO.kinds, "pinch")
+        verbs = _verbs(monkeypatch)
+
+        walker.walk()
+        walker.walk()
+
+        assert verbs == ["stamps", "vocabularies", "stamps"]
+        assert _kinds(committed_app) == _scenarios_kinds((*SCENARIO.kinds, "pinch"))
+
+    def test_it_declares_again_under_another_version_of_the_labellers(
+        self, walker: Walker, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The same declarations, of another version: a version's labels
+        are published only after its vocabularies are declared."""
+        walker.walk()
+        monkeypatch.setattr(
+            walker._labeller, "_named", labeller.command("--version", "1.0.1")
+        )
+        verbs = _verbs(monkeypatch)
+        declared: list[str] = []
+        declare = walker._pilot.declare
+
+        def kept(vocabularies: VocabulariesSchema) -> None:
+            declared.append(vocabularies.version)
+            declare(vocabularies)
+
+        monkeypatch.setattr(walker._pilot, "declare", kept)
+
+        walker.walk()
+
+        assert (verbs, declared) == (["stamps", "vocabularies"], ["1.0.1"])
+
+    def test_a_collector_that_restarted_declares_once_more(
+        self,
+        pilot_url: str,
+        home: Path,
+        walker: Walker,
+        stop: threading.Event,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        walker.walk()
+        verbs = _verbs(monkeypatch)
+
+        Walker(walker._pilot, _settings(pilot_url, home), stop).walk()
+
+        assert verbs == ["stamps", "vocabularies"]
+
+
+class TestNoLabellerToRun:
+    """A walk no labeller answers publishes as it would with none (F152.6;
+    `labeller.md`, "the collector then labels nothing")."""
+
+    @pytest.mark.parametrize(
+        ("given", "why"),
+        [
+            (
+                {
+                    "COLLECTOR_LABELLER": Settings.model_fields[
+                        "COLLECTOR_LABELLER"
+                    ].default
+                },
+                "no copy is installed: the home has no plugins/installed_plugins.json",
+            ),
+            (
+                {"COLLECTOR_LABELLER": labeller.command("--speaks", "2")},
+                "it refused the `stamps` call: contract: contract 1 is not spoken here",
+            ),
+        ],
+    )
+    def test_none_installed_or_another_contract_publishes_facts_alone(
+        self,
+        committed_app: Flask,
+        pilot_url: str,
+        home: Path,
+        stop: threading.Event,
+        given: dict[str, Any],
+        why: str,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        with Pilot(pilot_url, COLLECTOR_TOKEN) as pilot:
+            walker = Walker(pilot, _settings(pilot_url, home, **given), stop)
+            with caplog.at_level(logging.INFO, LOGGER):
+                walks = [walker.walk(), walker.walk()]
+
+        assert [(walk.published, walk.stamps, walk.ended) for walk in walks] == [
+            (3, None, True),
+            (0, None, True),
+        ]
+        assert set(_held(committed_app)) == SCENARIOS
+        assert _no_stamps(caplog) == [
+            ("WARNING", f"the labeller did not answer: {why}")
+        ]
+        assert _walks_lines(caplog)[0].endswith(" s; no labeller's stamps")
+        assert _kinds(committed_app) == ([], set())
+
+    def test_a_call_that_fails_publishes_facts_and_the_next_that_answers_declares(
+        self,
+        committed_app: Flask,
+        home: Path,
+        walker: Walker,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """Run records that do not parse crash the stub."""
+        kept = _records(home).read_text()
+        _records(home).write_text("{")
+
+        with caplog.at_level(logging.INFO, LOGGER):
+            failed = walker.walk()
+            _records(home).write_text(kept)
+            _grown(_file(home, RIDES))
+            answered = walker.walk()
+
+        assert (failed.published, failed.stamps) == (3, None)
+        assert answered.published == 1
+        assert answered.stamps is not None
+        ((level, why),) = _no_stamps(caplog)
+        assert level == "WARNING"
+        assert why.startswith(
+            "the labeller did not answer: its `stamps` call exited 1:"
+            " json.decoder.JSONDecodeError: "
+        )
+        assert f"The labeller {labeller.VERSION} answers again" in caplog.messages
+        assert _kinds(committed_app) == _scenarios_kinds()
+
+    def test_vocabularies_pilot_refuses_leave_the_walk_with_no_stamps(
+        self,
+        committed_app: Flask,
+        home: Path,
+        walker: Walker,
+        monkeypatch: pytest.MonkeyPatch,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """A kind of work declared twice is a declaration that contradicts
+        itself; it is asked again at the next walk."""
+        _with_kinds(home, "errand", "errand")
+        verbs = _verbs(monkeypatch)
+
+        with caplog.at_level(logging.INFO, LOGGER):
+            walks = [walker.walk(), walker.walk()]
+
+        assert [(walk.published, walk.stamps) for walk in walks] == [
+            (3, None),
+            (0, None),
+        ]
+        assert verbs == ["stamps", "vocabularies"] * 2
+        ((level, why),) = _no_stamps(caplog)
+        assert level == "WARNING"
+        assert why.startswith("Pilot refused the labeller's vocabularies with 400: ")
+        assert "the code `errand` is declared 2 times" in why
+        assert _kinds(committed_app) == ([], set())
 
 
 class TestTheWalksRhythm:

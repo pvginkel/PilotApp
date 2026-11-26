@@ -1,13 +1,13 @@
-"""Pilot as a walk calls it (F152.1, F152.2): its inventory, a publication
-of one transcript and the walk's end, the three routes behind Pilot's door
-for a collector.
+"""Pilot as a walk calls it (F152.1, F152.2, F152.6): its inventory, a
+publication of one transcript, the labeller's vocabularies and the walk's
+end, the four routes behind Pilot's door for a collector.
 
 Every call carries the collector's bearer and names the version of the
 collector's API it speaks. An answer is the call's own, or one of four
 failures a walk tells apart: `NotAppendable`, an appended publication that
 does not continue what Pilot holds, whose transcript is then published
 whole; `Refused`, the same call refused again, which costs the walk that
-transcript; `NotAdmitted`, no call of this collector's taken; and
+transcript, or the vocabularies; `NotAdmitted`, no call of this collector's taken; and
 `Unreachable`, no answer of Pilot's to the call.
 """
 
@@ -16,6 +16,7 @@ from typing import Any, Self
 import httpx
 from pilot_collection.inventory import InventorySchema
 from pilot_collection.publication import CollectorProtocolRangeSchema, PublicationSchema
+from pilot_collection.vocabularies import VocabulariesSchema
 from pydantic import ValidationError
 
 PROTOCOL = 2
@@ -41,8 +42,8 @@ class NotAppendable(Exception):
 
 
 class Refused(Exception):
-    """Pilot refused a publication, and refuses the same call again: it does
-    not validate, or its body is too large."""
+    """Pilot refused a publication or a declaration, and refuses the same
+    call again: it does not validate, or its body is too large."""
 
 
 class NotAdmitted(Exception):
@@ -108,6 +109,25 @@ class Pilot:
         if answer.status_code != 204:
             raise Unreachable(_unexpected(answer))
 
+    def declare(self, vocabularies: VocabulariesSchema) -> None:
+        """Declare the labeller's vocabularies, whole: Pilot then holds them
+        as the call says.
+
+        Raises:
+            Refused: Pilot answered 400 or 413; the message has its reason,
+                the same at each refusal of the same call.
+        """
+        answer = self._call(
+            "PUT",
+            "/vocabularies",
+            content=vocabularies.model_dump_json(),
+            headers={"Content-Type": "application/json"},
+        )
+        if answer.status_code in (400, 413):
+            raise Refused(f"{answer.status_code}: {_reason(answer)}")
+        if answer.status_code != 204:
+            raise Unreachable(_unexpected(answer))
+
     def end_walk(self) -> None:
         """Tell Pilot a walk ended, after the walk's last publication."""
         answer = self._call("POST", "/walks")
@@ -133,6 +153,17 @@ class Pilot:
                 f" and the collector speaks {PROTOCOL}"
             )
         return answer
+
+
+def _reason(answer: httpx.Response) -> str:
+    """The `error` of an answer's body, Pilot's reason for it without the
+    call's own correlation id; the body, where it holds none."""
+    try:
+        said = answer.json()
+    except ValueError:
+        said = None
+    reason = said.get("error") if isinstance(said, dict) else None
+    return (reason if isinstance(reason, str) else answer.text)[:_SAID]
 
 
 def _unexpected(answer: httpx.Response) -> str:

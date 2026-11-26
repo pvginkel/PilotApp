@@ -27,6 +27,16 @@ other is published whole, and so is one, in the same walk and logged with
 the reason, whose carry the file does not continue (F152.17), whose lines
 reach behind the boundary, or whose appended publication Pilot refuses.
 
+**The labeller** (F152.6, F152.7). After the listing a walk asks the
+workflow's labeller, in one call, the stamp it would give now for every
+transcript on the home (`labeller.py`). It declares the labeller's
+vocabularies to Pilot once after the collector starts, and again whenever
+the stamps come from another version of the labeller's, or name another
+digest of its declarations, than those it last declared. A walk that no
+labeller answers, or whose vocabularies Pilot refuses, publishes as it
+would with none, and the reason is logged where it differs from the last
+walk's. The walk's line says what the stamps took.
+
 After its last publication the walk tells Pilot it ended, whether it
 published or not. A walk Pilot does not admit, or cannot be reached by, ends
 where it stands and tells no end; the next starts over from the inventory.
@@ -53,6 +63,7 @@ from pilot_collection.inventory import HeldTranscriptSchema, InventorySchema
 from pilot_collector import VERSION
 from pilot_collector.carry import Carries, Carry
 from pilot_collector.home import PROJECTS, Listed, transcripts
+from pilot_collector.labeller import Labeller, Stamps, Unanswered
 from pilot_collector.pilot import (
     NotAdmitted,
     NotAppendable,
@@ -91,6 +102,9 @@ class Walked:
     """The transcripts left for the next walk, the interval having passed."""
     ended: bool = False
     """Whether Pilot was told the walk ended."""
+    stamps: Stamps | None = None
+    """The labeller's stamps of the walk; none where no labeller answered,
+    or Pilot refused its vocabularies."""
 
 
 def _newest_first(found: list[Listed]) -> list[Listed]:
@@ -147,6 +161,12 @@ class Walker:
         self._carries = Carries(
             settings.COLLECTOR_CARRY_TRANSCRIPTS, settings.COLLECTOR_CARRY_BYTES
         )
+        self._labeller = Labeller(settings)
+        self._declared: tuple[str, str] | None = None
+        """The labeller's version and the digest of its declarations that
+        Pilot was last declared the vocabularies of."""
+        self._unlabelled: str | None = None
+        """Why the last walk had no labeller's stamps; none where it had."""
 
     def run(self) -> None:
         """Walk every interval until `stop` is set."""
@@ -170,13 +190,17 @@ class Walker:
             if walked.published or walked.set_aside or walked.waiting
             else logging.DEBUG,
             "A walk over %d transcripts: %d published, %d of them appended, %d"
-            " set aside, %d left for the next walk, in %.1f s%s",
+            " set aside, %d left for the next walk, in %.1f s; %s%s",
             walked.listed,
             walked.published,
             walked.appended,
             walked.set_aside,
             walked.waiting,
             time.perf_counter() - began,
+            "no labeller's stamps"
+            if walked.stamps is None
+            else f"the labeller {walked.stamps.version}'s stamps took"
+            f" {walked.stamps.seconds:.2f} s",
             "" if walked.ended else "; Pilot was not told it ended",
         )
         return walked
@@ -186,6 +210,7 @@ class Walker:
         self.interval = inventory.walk_interval_seconds
         listed = transcripts(self._projects)
         walked.listed = len(listed)
+        walked.stamps = self._stamped(listed, inventory)
         stands = {
             each.transcript.path: (each.file_size, each.file_modified_at)
             for each in listed
@@ -215,6 +240,40 @@ class Walker:
             self._publish(each, walked)
         self._pilot.end_walk()
         walked.ended = True
+
+    def _stamped(
+        self, listed: list[Listed], inventory: InventorySchema
+    ) -> Stamps | None:
+        """The labeller's stamps of every transcript of `listed`, its
+        vocabularies declared to Pilot first where they are other than those
+        last declared; none where no labeller answers, or Pilot refuses its
+        vocabularies, which is logged where the reason is new."""
+        try:
+            stamps = self._labeller.stamps(listed, inventory)
+            if (stamps.version, stamps.declarations) != self._declared:
+                vocabularies = self._labeller.vocabularies()
+                self._pilot.declare(vocabularies)
+                self._declared = (stamps.version, stamps.declarations)
+                logger.info(
+                    "The vocabularies of the labeller %s are declared to Pilot",
+                    vocabularies.version,
+                )
+        except Unanswered as error:
+            why = f"the labeller did not answer: {error}"
+        except Refused as error:
+            why = f"Pilot refused the labeller's vocabularies with {error}"
+        else:
+            if self._unlabelled is not None:
+                logger.info("The labeller %s answers again", stamps.version)
+            self._unlabelled = None
+            return stamps
+        if why != self._unlabelled:
+            logger.warning(
+                "The walk has no labeller's stamps, and publishes no label: %s",
+                why,
+            )
+        self._unlabelled = why
+        return None
 
     def _publish_changed(
         self, listed: Listed, holds: HeldTranscriptSchema | None, walked: Walked

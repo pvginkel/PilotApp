@@ -8,6 +8,9 @@ from typing import Annotated
 from pydantic import AfterValidator, Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+INSTALL_PATH = "{install_path}"
+"""What `COLLECTOR_LABELLER` names the installed copy's folder by."""
+
 
 def _names_the_id(pattern: re.Pattern[str]) -> re.Pattern[str]:
     if pattern.groups < 1:
@@ -89,4 +92,23 @@ class Settings(BaseSettings):
                 " under, each an absolute path, as a JSON list (F152.4)"
             ),
         )
+    )
+    COLLECTOR_LABELLER: list[str] = Field(
+        default=["python3", "-B", f"{INSTALL_PATH}/tools/labeller.py"],
+        min_length=1,
+        description=(
+            "The command that runs the workflow's labeller, as a JSON list, each"
+            " call's verb appended; `{install_path}` in it is the folder of the"
+            " copy of `dev@aiworkflow` that the home's"
+            " `plugins/installed_plugins.json` names, as the collector sees it"
+            " (F152.6)"
+        ),
+    )
+    COLLECTOR_LABELLER_SECONDS: float = Field(
+        default=60.0,
+        gt=0,
+        description=(
+            "Seconds a call of the labeller may take: past them it is stopped,"
+            " and the walk labels nothing (F152.6)"
+        ),
     )
