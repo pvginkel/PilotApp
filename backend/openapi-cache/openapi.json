@@ -3988,6 +3988,31 @@
         "title": "CustomRatioWriteSchema",
         "type": "object"
       },
+      "DashboardBoundsSchema.467cb1a": {
+        "description": "The dashboard engine's timeout (F154.5); left out or null, the one\nthe app booted with.",
+        "properties": {
+          "timeout_seconds": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Seconds a read of the engine takes at most before it is refused, its wait for a slot and its statements together",
+            "examples": [
+              1e-9,
+              null
+            ],
+            "title": "Timeout Seconds"
+          }
+        },
+        "title": "DashboardBoundsSchema",
+        "type": "object"
+      },
       "DebriefSchema.1fdd8ae": {
         "description": "A done work item's debrief, as its Debrief opens it and the full debrief\nshows it (F26.9, F26.10).",
         "properties": {
@@ -34817,6 +34842,53 @@
           }
         ],
         "summary": "The fake controller's answer to its route at `path`, streams included.",
+        "tags": [],
+        "x-required-role": "editor"
+      }
+    },
+    "/api/testing/dashboard-bounds": {
+      "put": {
+        "description": "Returns:     200: The engine's timeout as the app now holds it     400: A timeout that is not above zero",
+        "operationId": "put__api_testing_dashboard-bounds",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DashboardBoundsSchema.467cb1a"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DashboardBoundsSchema.467cb1a"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Bad Request"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Set the engine's timeout; left out, the one the app booted with. The reads that start from here on take it.",
         "tags": [],
         "x-required-role": "editor"
       }
