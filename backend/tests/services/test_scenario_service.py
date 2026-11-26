@@ -5,7 +5,7 @@ held once however often it is loaded; and the dev seed's history, written the
 same way at its own times."""
 
 import uuid
-from datetime import timedelta
+from datetime import date, timedelta
 
 import pytest
 from pilot_scenario import SCENARIO, TALLY
@@ -48,6 +48,7 @@ from app.models.reference import (
 from app.services.container import ServiceContainer
 from app.services.scenario_service import HISTORY, HISTORY_DAYS, ScenarioService
 from tests.support.database import Written, writes
+from tests.support.workflow_words import workflow_words
 
 RECIPES = "ben-recipebox-51f0c2"
 """The environment the scenario's Turn of Pilot's ran in."""
@@ -643,6 +644,10 @@ class TestLoadTheTally:
 
 
 class TestHistory:
+    def test_its_places_and_a_day_have_no_word_of_the_workflow(self) -> None:
+        assert workflow_words(HISTORY) == set()
+        assert workflow_words(HISTORY.draw(date(2026, 11, 17), 600).scenario) == set()
+
     def test_it_writes_its_days_up_to_now_on_its_places_projects(
         self,
         session: DbSession,

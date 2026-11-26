@@ -15,6 +15,7 @@ from app.models import Launch, TokenCount, Transcript, Turn
 from app.models import Session as AgentSession
 from app.models.call import Call as CallRow
 from app.services.container import ServiceContainer
+from tests.support.workflow_words import workflow_words
 from tools.timing.history import HISTORY, LONG_CALLS, _Writer, in_lock_order
 
 TUESDAY = date(2026, 11, 17)
@@ -53,6 +54,10 @@ class TestTheDays:
             )
             == LONG_CALLS
         )
+
+    def test_its_places_and_a_day_have_no_word_of_the_workflow(self) -> None:
+        assert workflow_words(HISTORY) == set()
+        assert workflow_words(HISTORY.draw(TUESDAY, 3_000).scenario) == set()
 
 
 class TestTheLockOrder:
