@@ -97,7 +97,7 @@ test.describe('The new tab’s panel', () => {
   }) => {
     const project = await aProject(people, projects);
     const name = makeUnique('Saved');
-    await savedViews.save(name, 't=qw&by=model&p=table&m=calls.count&col=none');
+    await savedViews.save(name, 't=d7&by=model&p=table&m=calls.count&col=none');
     await shell.open(`${projectAddress(project)}#dash`);
 
     const system = dashboard.view(dashboard.systemViews, 'Projects');
@@ -113,7 +113,7 @@ test.describe('The new tab’s panel', () => {
     await expect(system.getByTestId('dashboard.panel.view.remove')).toHaveCount(0);
 
     const mine = dashboard.view(dashboard.savedViews, name);
-    await expect(mine.getByTestId('dashboard.panel.view.open')).toHaveAttribute('title', 'Table by Model · This quota week · Calls');
+    await expect(mine.getByTestId('dashboard.panel.view.open')).toHaveAttribute('title', 'Table by Model · Last 7 days · Calls');
     await expect(mine.locator('svg.lucide-table')).toHaveCount(1);
     await expect(mine.getByTestId('dashboard.panel.view.star')).toHaveCSS('opacity', '0');
     await mine.hover();

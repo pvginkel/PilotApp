@@ -11,7 +11,7 @@ import { useState } from 'react';
 import { keepPreviousData, useQuery, useQueryClient, type UseQueryResult } from '@tanstack/react-query';
 import { addressQuery, rowsQuery, stateOf } from '@/lib/dashboard/queries';
 import type { Rows } from '@/lib/dashboard/rows-layout';
-import { readState, withoutLook } from '@/lib/dashboard/state';
+import { readState, withoutLook, type ViewState } from '@/lib/dashboard/state';
 import { useUiStateInstrumentation } from '@/lib/test/ui-state';
 
 /** What failed: what it said, when, and a read's Retry; a write has none. */
@@ -27,6 +27,8 @@ export function failureOf(query: UseQueryResult<unknown>): Failure | null {
 }
 
 interface DashboardView {
+  /** The state in its normal form, the last the server wrote back; none before the first. */
+  state: ViewState | null;
   /** The answer drawn: the state's, else the last one drawn; none before the first. */
   rows: Rows | undefined;
   /** Whether Relative reads the figures drawn (`rel=1`), a look-only part. */
@@ -59,6 +61,7 @@ export function useDashboardView(written: string | null): DashboardView {
   if (rows.data !== undefined && rows.data !== drawn) setDrawn(rows.data);
 
   return {
+    state,
     rows: drawn,
     relative: state?.relative ?? false,
     changing: rows.isPlaceholderData || (written !== null && address.isPending),

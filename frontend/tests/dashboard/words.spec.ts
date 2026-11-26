@@ -3,17 +3,20 @@
  * the zone the spec runs in, the month's short name the page's own and a 24-hour clock, the year
  * where it is not this one; a figure in its format; a place in the address read off its hash; a
  * label cut to its room with the ellipsis, as a measure measures it; what a view draws, in the
- * catalogue's words (F161.4). No browser, no backend and no test suite lock: the modules are pure.
+ * catalogue's words (F161.4), its time as the time picker shows it collapsed; a bound typed in the
+ * time picker, day first or ISO, and the time a view reads, exactly (F162.2). No browser, no
+ * backend and no test suite lock: the modules are pure.
  */
 
 import { expect, test } from '@playwright/test';
 import { placeOf } from '@/lib/dashboard/address';
 import { clip, type Measure } from '@/lib/dashboard/clip';
 import { dayTime } from '@/lib/dashboard/dates';
-import { describe as describeView, type Words } from '@/lib/dashboard/describe';
+import { describe as describeView, timeWords, type Words } from '@/lib/dashboard/describe';
 import type { Catalogue } from '@/lib/dashboard/queries';
 import { readState } from '@/lib/dashboard/state';
 import { figure, multiple, percent, whole } from '@/lib/dashboard/figures';
+import { boundKey, boundText, exactWords, inOrder, parseBound, startedWords } from '@/lib/dashboard/time';
 
 test('a time reads its day and its time of day in the zone given, day first on a 24-hour clock', () => {
   const now = new Date('2026-11-26T12:00:00Z');
@@ -94,7 +97,12 @@ const WORDS: Words = {
   } as unknown as Catalogue,
   time: {
     part: 'time',
-    ranges: [{ key: 'all', label: 'All time' }],
+    ranges: [
+      { key: 'd7', label: 'Last 7 days' },
+      { key: 'qw', label: 'This quota week' },
+      { key: 'lqw', label: 'Last quota week' },
+      { key: 'all', label: 'All time' },
+    ],
     quota_weeks: [
       { starts_at: '2026-11-12T09:00:00Z', week: 46, starts_on: null },
       { starts_at: '2026-11-05T09:00:00Z', week: 45, starts_on: null },
@@ -126,4 +134,75 @@ test('a view’s time reads its quota weeks by their numbers, a week cut short b
 
 test('a view reads a part’s key where the catalogue has not come yet', () => {
   expect(describeView(readState('t=qw&by=project&m=cost.sum&col=none'), { dimensions: undefined, measures: undefined, time: undefined })).toBe('By project · qw · cost');
+});
+
+test('a view’s time reads collapsed as this, the last and a picked quota week by its number, a range by its label, a range of one day as that day', () => {
+  const year = new Date().getFullYear();
+  const of = (day: string) => `${day}${year === 2026 ? '' : ' 2026'}`;
+  const time = (state: string) => timeWords(readState(state).time, WORDS);
+  expect(time('t=qw&by=project')).toBe('Quota week 46');
+  expect(time('t=lqw&by=project')).toBe('Quota week 45');
+  expect(time('t=d7&by=project')).toBe('Last 7 days');
+  expect(time('t=wk,2026-11-05T09%3A00%3A00Z&by=project')).toBe('Quota week 45');
+  expect(time('t=c,2026-11-07,2026-11-13&by=project')).toBe(`${of('7 Nov')} – ${of('13 Nov')}`);
+  expect(time('t=c,2026-11-07,2026-11-07&by=project')).toBe(of('7 Nov'));
+  expect(time('t=c,2026-11-07T09%3A00,2026-11-07T17%3A00&by=project')).toBe(`${of('7 Nov')} 09:00 – ${of('7 Nov')} 17:00`);
+  // The running week cut short, with no Thursday in it.
+  const cut: Words = { ...WORDS, time: { ...WORDS.time!, quota_weeks: WORDS.time!.quota_weeks!.slice(2) } };
+  expect(timeWords(readState('t=qw&by=project').time, cut)).toBe(`Quota week of ${of('1 Nov')}`);
+});
+
+test('a bound is typed day first or ISO, a time of day after it or none, a day with no year this year’s; anything else reads as none', () => {
+  const read = (text: string) => {
+    const bound = parseBound(text, 2026);
+    return bound == null ? bound : boundKey(bound);
+  };
+  expect(read('12 Nov 2026')).toBe('2026-11-12');
+  expect(read('12 november 2026')).toBe('2026-11-12');
+  expect(read('12 Nov')).toBe('2026-11-12');
+  expect(read('12-11-2026')).toBe('2026-11-12');
+  expect(read('12/11')).toBe('2026-11-12');
+  expect(read('12.11.26')).toBe('2026-11-12');
+  expect(read('2026-11-12')).toBe('2026-11-12');
+  expect(read(' 12 Nov 2026  11:00 ')).toBe('2026-11-12T11:00');
+  expect(read('2026-11-12T08:05')).toBe('2026-11-12T08:05');
+  expect(read('12/11 8.30')).toBe('2026-11-12T08:30');
+  expect(read('3 okt')).toBe('2026-10-03');
+  expect(read('')).toBeNull();
+  expect(read('   ')).toBeNull();
+  for (const wrong of ['31 Nov 2026', '2026-13-01', '12 Nox', 'yesterday', '12 Nov 24:00', '12 Nov 11:60', '11:00']) expect(read(wrong), wrong).toBeUndefined();
+  expect(boundText(parseBound('2026-11-12', 2026)!)).toBe('12 Nov 2026');
+  expect(boundText(parseBound('12/11 8:30', 2026)!)).toBe('12 Nov 2026 08:30');
+});
+
+test('a range holds a moment where it starts before it ends, an end that is a day holding it whole', () => {
+  const bound = (text: string) => parseBound(text, 2026)!;
+  expect(inOrder(bound('12 Nov'), bound('12 Nov'))).toBe(true);
+  expect(inOrder(bound('12 Nov 17:00'), bound('12 Nov'))).toBe(true);
+  expect(inOrder(bound('12 Nov 11:00'), bound('12 Nov 11:00'))).toBe(false);
+  expect(inOrder(bound('13 Nov'), bound('12 Nov'))).toBe(false);
+  expect(inOrder(bound('13 Nov'), bound('13 Nov 00:00'))).toBe(false);
+  expect(inOrder(bound('13 Nov'), bound('13 Nov 00:01'))).toBe(true);
+});
+
+test('the time a view reads reads exactly in the zone, two spans that touch one, an end past now “now” but for a range’s own', () => {
+  const now = new Date('2026-11-27T12:00:00Z');
+  const zone = 'Europe/Amsterdam';
+  expect(exactWords(null, zone, false, now)).toBe('All time');
+  expect(exactWords([], zone, false, now)).toBeNull();
+  expect(exactWords([{ start: '2026-11-26T10:00:00Z', end: '2026-12-03T10:00:00Z' }], zone, false, now)).toBe('Thu 26 Nov 2026 11:00 – now, Europe/Amsterdam');
+  expect(
+    exactWords(
+      [
+        { start: '2026-11-12T10:00:00Z', end: '2026-11-19T10:00:00Z' },
+        { start: '2026-11-19T10:00:00Z', end: '2026-11-26T10:00:00Z' },
+      ],
+      zone,
+      false,
+      now,
+    ),
+  ).toBe('Thu 12 Nov 2026 11:00 – Thu 26 Nov 2026 11:00, Europe/Amsterdam');
+  expect(exactWords([{ start: null, end: '2026-12-07T23:00:00Z' }], zone, true, now)).toBe('The start – Tue 8 Dec 2026 00:00, Europe/Amsterdam');
+  expect(startedWords('2026-11-26T10:00:00Z', zone, now)).toBe('Thu 26 Nov 11:00');
+  expect(startedWords('2025-12-31T23:30:00Z', zone, now)).toBe('Thu 1 Jan 00:30');
 });

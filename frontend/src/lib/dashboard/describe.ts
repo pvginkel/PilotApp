@@ -2,8 +2,10 @@
  * What a view draws, in words (F161.4), built on the page, since no route describes a view: what
  * it presents, over what time and which measures, "By Project · All time · Cost, Tokens", a
  * series in order its order dimension's label, which says the order; and a dimension's label,
- * which names a tab by its By (F161.2). Each word is the catalogue's, a part of it that has not
- * come yet reading its key. Pure, with no DOM.
+ * which names a tab by its By (F161.2). A view's time reads in the same words collapsed in the
+ * time picker (F162.2): "Quota week 46" for this, the last and one picked quota week, a range's
+ * label for the others, a range between two times its days, "7 Nov – 13 Nov". Each word is the
+ * catalogue's, a part of it that has not come yet reading its key. Pure, with no DOM.
  */
 
 import type { Catalogue } from './queries';
@@ -51,24 +53,32 @@ function boundWords(bound: string, year: number): string {
   return `${d} ${MONTHS[m - 1]}${y === year ? '' : ` ${y}`}${time === undefined ? '' : ` ${time.slice(0, 5)}`}`;
 }
 
-/** A quota week, by the instant it starts: its number, or for one cut short with no Thursday in it, its first day. */
-function weekWords(start: string, words: Words): string {
+/** A quota week, by the instant it starts: its number, or for one cut short with no Thursday in it, its first day: "46", "of 1 Nov". */
+export function weekWords(start: string, words: Words): string {
   const week = words.time?.quota_weeks?.find((each) => Date.parse(each.starts_at) === Date.parse(start));
   if (week?.week != null) return String(week.week);
   const day = week?.starts_on ?? start.slice(0, 10);
   return `of ${boundWords(day, new Date().getFullYear())}`;
 }
 
-function timeWords(time: ViewState['time'], words: Words): string {
+/** The ranges that are one quota week, by their keys, and which of the weeks newest first each is. */
+const WEEK_RANGES: Record<string, number> = { qw: 0, lqw: 1 };
+
+/** A view's time: a range's label, this and the last quota week by its number; quota weeks by their numbers; a range between two times its days. */
+export function timeWords(time: ViewState['time'], words: Words): string {
   switch (time.kind) {
-    case 'preset':
+    case 'preset': {
+      const week = time.key in WEEK_RANGES ? words.time?.quota_weeks?.[WEEK_RANGES[time.key]] : undefined;
+      if (week !== undefined) return `Quota week ${weekWords(week.starts_at, words)}`;
       return words.time?.ranges?.find((range) => range.key === time.key)?.label ?? time.key;
+    }
     case 'weeks':
       return `${time.starts.length === 1 ? 'Quota week' : 'Quota weeks'} ${time.starts.map((start) => weekWords(start, words)).join(', ')}`;
     case 'between': {
       const year = new Date().getFullYear();
       if (time.start === null) return `Until ${boundWords(time.end!, year)}`;
       if (time.end === null) return `From ${boundWords(time.start, year)}`;
+      if (time.start === time.end && !/[T ]/.test(time.start)) return boundWords(time.start, year);
       return `${boundWords(time.start, year)} – ${boundWords(time.end, year)}`;
     }
     default: {

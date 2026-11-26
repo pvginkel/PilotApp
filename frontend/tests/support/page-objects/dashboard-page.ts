@@ -7,10 +7,9 @@ export const dashboardAddress = (state: string, tab = 't1') => `#dash/${tab}/${s
  * The dashboard (F160), the second screen beside Projects: its screen, and the reads of its module,
  * which the page loads at its first opening (F160.2); the line of view tabs, Close all and the new
  * view's copy-plus (F161.2); the new tab's panel, its find, Start from scratch and its two lists of
- * views (F161.4); the global toolbar, the one view's tab at its left, Reset and Save view, its pane
- * asking a name (F161.5), the banner under it, the main area, which scrolls, and the view's card:
- * the legend, the
- * headings' row, the All row and a row per value of the By, each its label, its time where it has
+ * views (F161.4); the global toolbar, the one view's tab at its left, the time and its picker
+ * (F162.2), Reset and Save view, its pane asking a name (F161.5), the banner under it, the main
+ * area, which scrolls, and the view's card: the legend, the headings' row, the All row and a row per value of the By, each its label, its time where it has
  * one, and a figure per measure; the medians, and the cut past 40 rows.
  */
 export class DashboardPage {
@@ -22,6 +21,19 @@ export class DashboardPage {
   readonly saveName: Locator;
   readonly saveNote: Locator;
   readonly save: Locator;
+  readonly time: Locator;
+  readonly timeWords: Locator;
+  readonly timePicker: Locator;
+  readonly from: Locator;
+  readonly to: Locator;
+  readonly apply: Locator;
+  readonly month: Locator;
+  readonly monthBefore: Locator;
+  readonly monthAfter: Locator;
+  readonly days: Locator;
+  readonly ranges: Locator;
+  readonly weeks: Locator;
+  readonly timeFoot: Locator;
   readonly tab: Locator;
   readonly tabClose: Locator;
   readonly line: Locator;
@@ -63,6 +75,19 @@ export class DashboardPage {
     this.saveName = page.getByTestId('dashboard.save.name');
     this.saveNote = page.getByTestId('dashboard.save.note');
     this.save = page.getByTestId('dashboard.save.save');
+    this.time = page.getByTestId('dashboard.time');
+    this.timeWords = page.getByTestId('dashboard.time.words');
+    this.timePicker = page.getByTestId('dashboard.time-picker');
+    this.from = page.getByTestId('dashboard.time-picker.from');
+    this.to = page.getByTestId('dashboard.time-picker.to');
+    this.apply = page.getByTestId('dashboard.time-picker.apply');
+    this.month = page.getByTestId('dashboard.time-picker.month');
+    this.monthBefore = page.getByTestId('dashboard.time-picker.before');
+    this.monthAfter = page.getByTestId('dashboard.time-picker.after');
+    this.days = page.getByTestId('dashboard.time-picker.day');
+    this.ranges = page.getByTestId('dashboard.time-picker.range');
+    this.weeks = page.getByTestId('dashboard.time-picker.week');
+    this.timeFoot = page.getByTestId('dashboard.time-picker.foot');
     this.tab = page.getByTestId('dashboard.tab');
     this.tabClose = page.getByTestId('dashboard.tab.close');
     this.line = page.getByTestId('dashboard.tabs');
@@ -99,6 +124,11 @@ export class DashboardPage {
   /** The row whose label is `label`. */
   row(label: string): Locator {
     return this.rows.filter({ has: this.page.getByTestId('dashboard.row.label').getByText(label, { exact: true }) });
+  }
+
+  /** The calendar's day `day` of the month it shows. */
+  day(day: number): Locator {
+    return this.days.filter({ hasText: new RegExp(`^${day}$`) });
   }
 
   /** The line's tab named `name`. */

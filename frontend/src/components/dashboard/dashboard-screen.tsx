@@ -10,8 +10,9 @@
  * view, the global toolbar, with one view its tab at the toolbar's left and copy-plus at its end;
  * the banner, what failed; the main area, which scrolls, holding the view's card. The tabs follow
  * the address (`use-view-tabs.ts`), read off the hash as the browser holds it; `#dash` names none
- * and shows the tab at hand as it was left, the panel at the first opening. The toolbar's right
- * holds Reset and Save view, and no Refresh (F160.7): the screen reads again by itself.
+ * and shows the tab at hand as it was left, the panel at the first opening. The toolbar's left
+ * holds the view's time after the one view's tab (`time-picker.tsx`), its right Reset and Save
+ * view, and no Refresh (F160.7): the screen reads again by itself.
  *
  * Each tab's answers are kept for as long as the tab (F160.6): a tab out of sight holds its view's
  * queries without reading them, so that the walk's event leaves them stale and they are read
@@ -26,10 +27,11 @@ import { keepScroll, scrollOf, useViewTabMoves, useViewTabs, useViewTabsAt, type
 import { WriteFailures } from '@/hooks/use-view-writes';
 import { useWalkReads } from '@/hooks/use-walk-reads';
 import { addressQuery, rowsQuery, stateOf } from '@/lib/dashboard/queries';
-import { readState, withoutLook } from '@/lib/dashboard/state';
+import { readState, withoutLook, writeState } from '@/lib/dashboard/state';
 import { Banner, type Wrote } from './banner';
 import { RowsChart } from './rows-chart';
 import { ResetButton, SaveViewButton } from './save-view';
+import { TimePicker } from './time-picker';
 import { NewViewButton, OneTab, ViewTabLine } from './view-tabs';
 import { ViewsPanel } from './views-panel';
 import './dashboard.css';
@@ -75,12 +77,15 @@ interface ViewProps {
 
 function View({ tab, now, one, moves, wrote }: ViewProps) {
   const view = useDashboardView(now);
-  const { rows } = view;
+  const { rows, state } = view;
+  // The answer's window, where the answer drawn is of the time shown.
+  const window = rows !== undefined && state !== null && JSON.stringify(readState(stateOf(rows.address)).time) === JSON.stringify(state.time) ? rows.window : undefined;
   const main = useKeptScroll(tab.id);
   return (
     <>
       <div className="dash-bar" role="toolbar" aria-label="Dashboard" data-testid="dashboard.toolbar">
         {one && <OneTab tab={tab} moves={moves} />}
+        {state !== null && <TimePicker state={state} window={window} onTime={(time) => moves.set(tab.id, writeState({ ...state, time }))} />}
         <span className="grow" />
         <ResetButton tab={tab} now={now} moves={moves} />
         <SaveViewButton tab={tab} now={now} />

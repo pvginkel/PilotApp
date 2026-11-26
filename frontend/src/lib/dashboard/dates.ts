@@ -5,9 +5,9 @@
  * names are the page's own, so that no locale's spelling ("Sept") reaches the screen.
  */
 
-const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+export const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
-interface Wall {
+export interface Wall {
   year: number;
   month: number;
   day: number;
@@ -18,7 +18,7 @@ interface Wall {
 const formats = new Map<string, Intl.DateTimeFormat>();
 
 /** An instant's wall time in `zone`. */
-function wall(at: Date, zone: string): Wall {
+export function wall(at: Date, zone: string): Wall {
   let format = formats.get(zone);
   if (format === undefined) {
     format = new Intl.DateTimeFormat('en-GB', {

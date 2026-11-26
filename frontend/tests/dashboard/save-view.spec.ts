@@ -41,8 +41,8 @@ test.describe('Save view and Reset', () => {
     const name = makeUnique('Kept');
     await shell.open(`${projectAddress(project)}${dashboardAddress(LOOKING, 'look')}`);
     await expect(dashboard.byHeading).toHaveText('Project');
-    // The tab's close, Reset, Save view, copy-plus.
-    await expect(dashboard.toolbar.getByRole('button')).toHaveText(['', 'Reset', 'Save view', '']);
+    // The tab's close, the time, Reset, Save view, copy-plus.
+    await expect(dashboard.toolbar.getByRole('button')).toHaveText(['', 'All time', 'Reset', 'Save view', '']);
     await expect(dashboard.toolbar.getByRole('button', { name: /refresh/i })).toHaveCount(0);
     await expect(dashboard.reset).toBeDisabled();
 
