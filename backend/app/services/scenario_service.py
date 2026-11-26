@@ -168,6 +168,9 @@ class ScenarioService:
         calls = 0
         for back in reversed(range(HISTORY_DAYS)):
             day = HISTORY.draw(today - timedelta(days=back)).before(now)
+            if not day.scenario.sessions:
+                # Today's, drawn early in the day: nothing is over yet.
+                continue
             builder = day.builder()
             self.write(
                 builder,
