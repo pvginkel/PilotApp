@@ -14,7 +14,8 @@ A walk takes Pilot's inventory, lists every transcript on the home with a
   `file_size`, appended publications having been taken since its last whole
   one, and whose file has not changed for the settling time. The most
   recently changed first, until the walk's interval has passed since the walk
-  began; the rest wait for the next walk.
+  began, the time the labeller took not counted; the rest wait for the next
+  walk.
 
 A transcript Pilot holds and the home lacks is left alone, as is a symlink
 (F119.2).
@@ -210,7 +211,9 @@ class Walker:
         self.interval = inventory.walk_interval_seconds
         listed = transcripts(self._projects)
         walked.listed = len(listed)
+        asked = time.perf_counter()
         walked.stamps = self._stamped(listed, inventory)
+        began += time.perf_counter() - asked
         stands = {
             each.transcript.path: (each.file_size, each.file_modified_at)
             for each in listed

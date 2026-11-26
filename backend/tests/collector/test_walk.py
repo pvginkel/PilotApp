@@ -9,6 +9,7 @@ import logging
 import os
 import re
 import shutil
+import sys
 import threading
 import time
 from collections.abc import Generator
@@ -497,6 +498,51 @@ class TestAWalksOrder:
         walked = walker.walk()
 
         assert (walked.published, walked.waiting) == (3, 0)
+        assert {each["collector"] for each in _held(committed_app).values()} == {
+            pilot_collector.VERSION
+        }
+
+    @pytest.mark.parametrize("answers", [True, False], ids=["slow", "cut"])
+    def test_the_labellers_time_is_not_taken_from_the_behinds_turn(
+        self,
+        committed_app: Flask,
+        pilot_url: str,
+        home: Path,
+        walker: Walker,
+        stop: threading.Event,
+        monkeypatch: pytest.MonkeyPatch,
+        answers: bool,
+    ) -> None:
+        """A labeller that answers each call a second late, or is cut at
+        its time limit, past the walk's interval."""
+        with monkeypatch.context() as older:
+            _read_under(older, OLDER)
+            walker.walk()
+        _configure(committed_app, interval=0.5)
+        if answers:
+            given: dict[str, Any] = {}
+            run = running.subprocess.run
+
+            def late(command: list[str], **kwargs: Any) -> Any:
+                time.sleep(1.0)
+                return run(command, **kwargs)
+
+            monkeypatch.setattr(running.subprocess, "run", late)
+        else:
+            given = {
+                "COLLECTOR_LABELLER": [
+                    sys.executable,
+                    "-c",
+                    "import time; time.sleep(30)",
+                ],
+                "COLLECTOR_LABELLER_SECONDS": 1.0,
+            }
+
+        with Pilot(pilot_url, COLLECTOR_TOKEN) as pilot:
+            walked = Walker(pilot, _settings(pilot_url, home, **given), stop).walk()
+
+        assert (walked.published, walked.waiting) == (3, 0)
+        assert (walked.stamps is not None) is answers
         assert {each["collector"] for each in _held(committed_app).values()} == {
             pilot_collector.VERSION
         }
