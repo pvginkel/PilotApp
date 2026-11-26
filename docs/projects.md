@@ -432,9 +432,9 @@ chip, its members and its menu.
 **The head's badge** (`HeadEta`, `project-head.tsx`; `EtaBadge`, [`ui.md`](ui.md)) stands right
 after the project's name on both widths (D248), and shows the badge of one of its running work
 items, which the server picks (`project_estimate`, `backend/app/services/step_estimate.py`): of
-those longer than usual, the first whose running step has outrun its kind, else the marked one with
+those longer than usual, the first `outrun`, else the marked one with
 the most time left; with none, the one with the most time left; of two alike, the first in the
-head's order. So the head reads the alert's "—" where any of its work has outrun its kind, else
+head's order. So the head reads the alert's "—" where the badge of any of its work does, else
 the time left of the marked one with the most, else the most time left
 ([`work.md`](work.md#the-time-it-still-takes)). Its figures
 ([`work.md`](work.md#its-figures)) open with the work item's title, or on the alert with its

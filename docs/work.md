@@ -271,9 +271,14 @@ stands and the Step Timings of its steps' kinds, which a run's finished steps an
 its own on the run's other work items' lists, and orders no kinds: a kind is the run's, read as
 given.
 
-**A kind's timings** are those of the work item's repo, its `repo` label, else its environment's,
-once the repo holds ten timings of the kind, and those of all repos until then; a timing whose
-listing is unknown counts in none of it, the ten here and the five below included. The kind's window is
+**A kind's timings** are read at two levels (D267), the repo being the work item's `repo` label,
+else its environment's. A step not begun is priced, and the repeats' share comes, from the repo's
+own timings of its kind as soon as the repo's window holds one listed ahead, and from all repos'
+until then, a repo with ten or more of the kind and none listed in its window included. A running
+step, its row of the figures and "longer than usual" with it, is read against the repo's own
+timings once the repo holds ten of the kind, and all repos' until then. Either needs five timings
+of the kind in all repos, a price read from fewer of the repo's own too; a timing whose
+listing is unknown counts in none of it, the ten and the five included. The kind's window is
 its last `ESTIMATE_WINDOW_STEPS` timings by their end, 20 by default; a step's **price** is the
 window's total time divided by the number of its timings that were listed ahead, the mean with the
 unlisted repeats in it, not the median; and the **repeats' share** is the price less the mean of
@@ -300,17 +305,17 @@ the window's listed timings, never below zero.
 included; once the work item is done, though its Session runs on; while no step is left to do,
 none published or every one done; while a step left to do has no kind; while a kind it needs, a
 step's left to do or a done step's that still owes its share, has fewer than five timings in all
-repos, or a running step's had fewer when it began, however many have ended since; and while a
-kind's window holds no listed timing.
+repos, or a running step's had fewer when it began, however many have ended since; and while the
+window a kind is priced from holds no listed timing, which is all repos' once the repo's holds none.
 
 **Longer than usual** (D250) is the badge's alert. Once every timing a running step is read against
 ran shorter than it has run, the step has outrun its kind: the alert stands with an em dash, "—",
 where the time stood, and no time left is given. A running step the workflow marked
 ([`mcp.md`](mcp.md)) that has outrun nothing turns the badge to the alert too, with the time left
-as the estimate gives it, or the alert alone where the work item has no estimate. With no estimate
-an outrun step shows nothing; only a marked one does. A marked step that has also outrun its kind
-shows the em dash where the work item has an estimate, the alert alone where it has none, and its
-sentence says its run marks it either way (D268, [below](#its-figures)).
+as the estimate gives it, or the alert alone where the work item has no estimate. With no estimate,
+for want of a step's kind or a kind's timings, an outrun step shows nothing; only a marked one
+does, and with the em dash, as where there is an estimate (D286). Its sentence says its run marks
+it either way (D268, [below](#its-figures)).
 
 **The rounding** is the server's (`WorkEstimate.minutes`): under 55 minutes the time left to the
 nearest five minutes and at least five, from 55 to 89 an hour, from 90 the nearest hour.
@@ -319,9 +324,10 @@ A work item's status carries it as **`estimate`** ([Its status](#its-status)), `
 longer_than_usual, marked, kind, ran_seconds, step_figures, run_figures}`, as it read when the
 status was built (`EstimateSchema`, `backend/app/schemas/timeline.py`): `minutes` the time left as
 rounded, 5 to 55 by fives, 60, then whole hours as 120 or 180, null where the badge shows no time;
-`longer_than_usual` `outrun` where a running step has outrun its kind, marked or not, `marked`
-where the workflow marked one and none has outrun, or null on a badge at rest, where `minutes` is
-always set; `marked` whether the workflow marks a running step, outrun or not; `kind` the first
+`longer_than_usual` `outrun` where a running step has outrun its kind, any one where the work item
+has an estimate but for the outrun and a marked one where it has none, `marked` where the workflow
+marked a running step and none shows outrun, or null on a badge at rest, where `minutes` is always
+set; `marked` whether the workflow marks a running step, outrun or not; `kind` the first
 running step's kind as published, null where no step runs or it has none; `ran_seconds` the run's
 time so far in whole seconds, as its row of the figures counts it, which the alert's sentence says;
 and `step_figures` and `run_figures` the figures' rows ([below](#its-figures)). It is null wherever
