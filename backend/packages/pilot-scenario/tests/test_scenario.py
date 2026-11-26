@@ -1,14 +1,15 @@
 """The one scenario: in the dev seed's own world, a story that holds
 together, and in a vocabulary of its own, with no kind of the workflow's
-(F122.4)."""
+(F122.4), the stub labeller's words among it."""
 
 import re
 from collections.abc import Iterator
 from dataclasses import fields, is_dataclass, replace
+from datetime import UTC, datetime
 from typing import Any
 
 import pytest
-from pilot_scenario import SCENARIO, Scenario
+from pilot_scenario import SCENARIO, Builder, Scenario, labeller
 from pilot_scenario.script import Call, Group, Session, Unit
 
 WORKFLOW = {"slice", "stage", "phase"}
@@ -16,13 +17,17 @@ WORKFLOW = {"slice", "stage", "phase"}
 
 
 def _words(part: Any) -> Iterator[str]:
-    """Every word a part of a script is written in, in lower case: a string
-    is split at whatever is no letter and at a capital inside it."""
+    """Every word a part of a script, or what is said of it, is written in,
+    in lower case: a string is split at whatever is no letter and at a
+    capital inside it; of a mapping its values are."""
     if isinstance(part, str):
         for word in re.findall(r"[A-Z]?[a-z]+|[A-Z]+", part):
             yield word.lower()
-    elif isinstance(part, tuple):
+    elif isinstance(part, tuple | list):
         for each in part:
+            yield from _words(each)
+    elif isinstance(part, dict):
+        for each in part.values():
             yield from _words(each)
     elif is_dataclass(part):
         for field in fields(part):
@@ -107,6 +112,24 @@ class TestItsVocabulary:
         self, scenario: Scenario, found: set[str]
     ) -> None:
         assert _workflow_words(scenario) == found
+
+    def test_the_stub_labeller_says_no_word_of_the_workflow(self) -> None:
+        """Its lists, the run records it reads of the scenario and the
+        labels it gives the scenario's files."""
+        builder = Builder(SCENARIO, datetime(2026, 11, 12, 9, 30, tzinfo=UTC))
+        records = builder.records()
+        said = [
+            labeller.vocabularies(records),
+            records,
+            *(publication["labelling"] for publication in builder.publications()),
+        ]
+
+        assert {w for w in _words(said) if w.removesuffix("s") in WORKFLOW} == set()
+        assert {
+            w
+            for w in _words(labeller.vocabularies({"kinds": ["errand", "phase"]}))
+            if w.removesuffix("s") in WORKFLOW
+        } == {"phase"}
 
     def test_its_kinds_of_work_are_its_own(self) -> None:
         assert SCENARIO.kinds == ("errand", "leg")

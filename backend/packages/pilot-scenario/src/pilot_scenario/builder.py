@@ -1,11 +1,13 @@
 """The builder: one scenario turned into what a layer reads.
 
 For a collector that is each thread of the scenario's conversations as a
-file in Claude Code's line shapes, in a home laid out as the fleet's is; for
-the backend's ingest, those conversations as a collector publishes them, one
-whole publication a thread, in the shape of the collector's call (protocol
-version 1), and the Turns of Pilot's its sessions ran under, which Pilot's
-side holds before a collector reads the transcript.
+file in Claude Code's line shapes, in a home laid out as the fleet's is, with
+the run records the stub labeller reads (`pilot_scenario.labeller`); for the
+backend's ingest, those conversations as a collector publishes them under the
+stub, one whole publication a thread, in the shape of the collector's call,
+the stub's vocabularies as a collector declares them, and the Turns of
+Pilot's its sessions ran under, which Pilot's side holds before a collector
+reads the transcript.
 
 A publication is what its thread's file says: the file's size and time, and
 each fact as the lines carry it. The files hold the lines these facts are
@@ -21,14 +23,20 @@ and on any Call what was injected before it, a compaction's summary among
 it. Beside a sub-agent's file lies its record: its type, its description and
 the call that started it, a main thread's or another sub-agent's.
 
+A publication's labelling and group are the stub's answer for its thread's
+file, labelled whole, with Pilot handing nothing for its conversation: what a
+collector publishes under the stub where Pilot holds no Session of it.
+
 A conversation's ids are the scenario's own, the same in every build, so
 that a scenario published again is the same conversations again. A build's
 last moment falls at `until`, cut to the millisecond a line's time is
 written to, the scenario's times laid back from there.
 """
 
+import json
 import os
 import uuid
+from collections import Counter
 from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime, timedelta
@@ -36,6 +44,7 @@ from functools import cached_property
 from pathlib import Path
 from typing import Any
 
+from pilot_scenario import labeller
 from pilot_scenario.script import (
     Call,
     Carried,
@@ -45,19 +54,16 @@ from pilot_scenario.script import (
     Session,
     SubAgent,
     ToolUse,
+    Unit,
 )
 from pilot_scenario.transcript import MANAGED, HomeFile, Lines, Spawned, request, text
 
 COLLECTOR = "1.4.0"
 """The version of the collector the publications say read the files."""
 
-LABELLER = "1.0.0"
-"""The version of the labeller the publications that name a group say
-labelled the files."""
-
-_STAMP = "1:scenario"
-"""The stamp a publication that names a group gives of what its labeller
-read."""
+_UNKEPT = ("batchable_condition",)
+"""The lists the stub declares that the record keeps no place for, which a
+collector's declaration leaves out."""
 
 CLAUDE_CODE = "claude-code"
 """The component whose version a Launch's lines carry."""
@@ -112,17 +118,33 @@ class _Spawning:
 
 @dataclass(frozen=True)
 class _Built:
-    """A thread as it is built: its publication and its files, the
-    transcript's first."""
+    """A thread as it is built: its publication, its files, the transcript's
+    first, and the transcript as a collector hands it to the labeller to
+    label whole, but for its Calls."""
 
     publication: dict[str, Any]
     files: list[HomeFile]
+    handed: dict[str, Any]
+    launch_of: dict[str, int]
+    """A main thread's Launch of each Call, by its `message_id`."""
 
 
 def _given(**facts: Any) -> dict[str, Any]:
     """The facts that are given: a call leaves out what its file does not
     have."""
     return {name: fact for name, fact in facts.items() if fact not in (None, [])}
+
+
+def _assistants(content: bytes) -> list[str]:
+    """The `message.id` of each assistant line of a file, in the order of its
+    first: the Calls a collector hands the labeller, a line Claude Code wrote
+    itself among them."""
+    ids: dict[str, None] = {}
+    for raw in content.splitlines():
+        line = json.loads(raw)
+        if line.get("type") == "assistant":
+            ids.setdefault(line["message"]["id"], None)
+    return list(ids)
 
 
 def _moments(steps: Sequence[Step]) -> Iterator[int]:
@@ -520,13 +542,90 @@ class Builder:
 
     def write(self, home: Path) -> None:
         """Write the scenario's files under `home`, the folder that holds
-        `projects`, each at the time its publication gives."""
+        `projects`, each at the time its publication gives, and the stub
+        labeller's run records where it reads them under `plugins`."""
         for file in self.files():
             target = home / file.path
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_bytes(file.content)
             at = (file.modified_at - _EPOCH) // timedelta(microseconds=1) * 1000
             os.utime(target, ns=(at, at))
+        records = home / "plugins" / "data" / labeller.DATA / labeller.RECORDS
+        records.parent.mkdir(parents=True, exist_ok=True)
+        records.write_text(json.dumps(self.records(), indent=2) + "\n")
+
+    def records(self) -> dict[str, Any]:
+        """The stub labeller's run records of the scenario: its kinds of work;
+        its units, each named by its key, a unit its session ran with that
+        session's times and served, one cut into parts with their count; the
+        unit each session ran, by its conversation; and each group with the
+        conversations it adopts."""
+        units = {unit.name: unit for unit in self.scenario.units}
+
+        def key(unit: Unit) -> str:
+            if unit.within is None:
+                return f"{unit.project}|{unit.name}"
+            return f"{key(units[unit.within])}|{unit.name}"
+
+        ran = {
+            session.unit: session
+            for session in self.scenario.sessions
+            if session.unit is not None
+        }
+        parts = Counter(unit.within for unit in self.scenario.units)
+        rows = []
+        for unit in self.scenario.units:
+            row: dict[str, Any] = {
+                "key": key(unit),
+                "kind": unit.kind,
+                "title": unit.name,
+                "part_of": None if unit.within is None else key(units[unit.within]),
+            }
+            session = ran.get(unit.name)
+            if session is not None:
+                moments = list(_session_moments(session))
+                row |= {
+                    "started_at": self.time(min(moments)),
+                    "ended_at": self.time(max(moments)),
+                    "outcome": labeller.SERVED,
+                }
+            if parts[unit.name]:
+                row["measures"] = [{"measure": "parts", "amount": parts[unit.name]}]
+            rows.append(row)
+        groups: dict[str, dict[str, Any]] = {}
+        for session in self.scenario.sessions:
+            if session.group is None:
+                continue
+            group = groups.setdefault(
+                session.group.key,
+                asdict(session.group)
+                | {"repository": session.repository, "conversations": []},
+            )
+            group["conversations"].append(self.conversation(session))
+        return {
+            "kinds": list(self.scenario.kinds),
+            "units": rows,
+            "ran": {
+                self.conversation(session): key(units[name])
+                for name, session in ran.items()
+            },
+            "groups": list(groups.values()),
+        }
+
+    def vocabularies(self) -> dict[str, Any]:
+        """The stub labeller's vocabularies of the scenario as a collector
+        declares them to Pilot: its version, every list the record keeps and
+        the nestings, its groups left out."""
+        declared = labeller.vocabularies(self.records())
+        return {
+            "version": declared["version"],
+            "lists": {
+                name: values
+                for name, values in declared["lists"].items()
+                if name not in _UNKEPT
+            },
+            "nesting": declared["nesting"],
+        }
 
     @cached_property
     def _threads(self) -> list[_Built]:
@@ -546,7 +645,73 @@ class Builder:
                 )
                 built.append(sub_agent)
                 spawned |= started.spawned
+        records = self.records()
+        groups = {
+            group["key"]: {name: group[name] for name in ("key", "name", "summary")}
+            for group in labeller.vocabularies(records)["groups"]
+        }
+        for each in built:
+            self._labelled(each, records, groups)
         return built
+
+    def _labelled(
+        self,
+        thread: _Built,
+        records: Mapping[str, Any],
+        groups: Mapping[str, dict[str, Any]],
+    ) -> None:
+        """Give the thread's publication the stub's labelling of its file,
+        labelled whole with nothing handed for its conversation, as a
+        collector publishes it. The labeller is handed every Call it reads,
+        a line Claude Code wrote itself among them, each in its Launch, the
+        one of the Call before it where the publication holds none of its
+        own; the labelling holds the labels of the publication's Calls and
+        the Segments they fall in, a main thread's adopted group as its
+        `group`, and the batchable condition, which the record keeps no
+        place for, left out."""
+        publication = thread.publication
+        content = thread.files[0].content
+        held = {call["message_id"] for call in publication["calls"]}
+        calls = []
+        launch: int | None = None
+        for position, message_id in enumerate(_assistants(content), start=1):
+            call: dict[str, Any] = {"id": message_id, "position": position}
+            if thread.launch_of:
+                launch = thread.launch_of.get(message_id, launch or 1)
+                call["launch"] = launch
+            calls.append(call)
+        answer = labeller.label(
+            content,
+            thread.handed | {"calls": calls},
+            {"session_id": publication["session_id"], "sessions": [], "documents": []},
+            frozenset(),
+            records,
+        )
+        labels = {
+            name: rows
+            for name, rows in answer["labels"].items()
+            if name != "transcript"
+        }
+        labels["calls"] = [
+            {name: label for name, label in call.items() if name not in _UNKEPT}
+            for call in labels["calls"]
+            if call["id"] in held
+        ]
+        named = {call["segment"] for call in labels["calls"]}
+        labels["segments"] = [
+            segment for segment in labels["segments"] if segment["position"] in named
+        ]
+        publication["labelling"] = {
+            "version": labeller.VERSION,
+            "stamp": answer["stamp"],
+            "labels": labels,
+            "units": answer["units"],
+            "test_suites": answer["test_suites"],
+            "ci_builds": answer["ci_builds"],
+        }
+        for transcript in answer["labels"]["transcript"]:
+            if transcript["adopted_group"] is not None:
+                publication["group"] = groups[transcript["adopted_group"]]
 
     def _lines(self, session: Session, agent: SubAgent | None = None) -> Lines:
         entrypoint = "sdk-cli" if session.person is None else "cli"
@@ -585,6 +750,8 @@ class Builder:
         lines = self._lines(session)
         thread = _Thread(self, _Ids(), lines, self._agents(session))
         launches: list[dict[str, Any]] = []
+        ends: list[int] = []
+        """The count of the thread's Calls by each Launch's end."""
         place = 0
         killed: str | None = None
         for launch in session.launches:
@@ -690,20 +857,29 @@ class Builder:
                     prompts=prompts,
                 )
             )
+            ends.append(len(thread.calls))
         publication, files = self._thread(session, lines, _main_moments(session))
         publication |= _given(
             environment=session.environment,
-            group=None if session.group is None else asdict(session.group),
-            labelling=(
-                None
-                if session.group is None
-                else {"version": LABELLER, "stamp": _STAMP, "labels": {}}
-            ),
             launches=launches,
             compactions=thread.compactions,
             calls=thread.calls,
         )
-        return _Built(publication, files), thread
+        handed = {
+            "agent_id": None,
+            "mode": "whole",
+            "launches": [
+                {"n": n, "started_at": launch["started_at"]}
+                for n, launch in enumerate(launches, start=1)
+            ],
+        }
+        launch_of = {
+            call["message_id"]: next(
+                n for n, end in enumerate(ends, start=1) if position <= end
+            )
+            for position, call in enumerate(thread.calls, start=1)
+        }
+        return _Built(publication, files, handed, launch_of), thread
 
     def _sub_agent(
         self, session: Session, agent: SubAgent, spawning: _Spawning, ids: _Ids
@@ -747,4 +923,6 @@ class Builder:
             compactions=thread.compactions,
             calls=thread.calls,
         )
-        return _Built(publication, [transcript, record, *saved]), thread
+        handed = {"agent_id": named, "agent_type": agent.type, "mode": "whole"}
+        built = _Built(publication, [transcript, record, *saved], handed, {})
+        return built, thread

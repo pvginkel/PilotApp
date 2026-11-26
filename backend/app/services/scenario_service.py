@@ -14,9 +14,12 @@ serves its conversations' readings where it is the backend's collector
 
 The conversations' ids are the scenario's own, so a second load is a whole
 publication of the same transcripts and replaces the first: the record holds
-the scenario once, however often it is loaded. The conversation the scenario
-names a group for is adopted by the group's adopted Project, which the first
-load makes and a later one finds by the group's key (F152.8).
+the scenario once, however often it is loaded. Each publication carries the
+labels the stub labeller gives its file (F122.5), whose vocabularies the load
+declares first, as a collector does before it publishes a label of them; the
+conversation the stub adopts for the scenario's group is adopted by the
+group's adopted Project, which the first load makes and a later one finds by
+the group's key (F152.8).
 """
 
 import hashlib
@@ -24,6 +27,7 @@ import uuid
 from collections.abc import Mapping
 
 from pilot_collection.publication import PublicationSchema
+from pilot_collection.vocabularies import VocabulariesSchema
 from pilot_scenario import SCENARIO, Builder, SentTurn
 from sqlalchemy import func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -36,6 +40,7 @@ from app.models.reference import SessionState, TurnCause
 from app.services.fake_collector import FakeCollector
 from app.services.launch_placement import conversation_turn
 from app.services.publication_service import PublicationService
+from app.services.vocabulary_service import VocabularyService
 
 
 class ScenarioService:
@@ -43,10 +48,12 @@ class ScenarioService:
         self,
         db: Session,
         publication_service: PublicationService,
+        vocabulary_service: VocabularyService,
         fake_collector: FakeCollector,
     ) -> None:
         self.db = db
         self.publication_service = publication_service
+        self.vocabulary_service = vocabulary_service
         self.fake_collector = fake_collector
 
     def load(self, projects: Mapping[str, uuid.UUID]) -> list[Transcript]:
@@ -87,6 +94,9 @@ class ScenarioService:
             standing[name] = project
         for turn in turns:
             self._session(standing[turn.project], turn)
+        self.vocabulary_service.declare(
+            VocabulariesSchema.model_validate(builder.vocabularies())
+        )
         transcripts = [
             self.publication_service.publish(
                 PublicationSchema.model_validate(publication)

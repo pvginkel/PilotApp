@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from pilot_scenario import SCENARIO, Builder, HomeFile, Scenario
+from pilot_scenario import SCENARIO, Builder, HomeFile, Scenario, labeller
 from pilot_scenario.script import (
     Call,
     Carried,
@@ -695,7 +695,12 @@ class TestTheHome:
             for path in tmp_path.rglob("*")
             if path.is_file()
         )
-        assert written == sorted(file.path for file in builder.files())
+        assert written == sorted(
+            [
+                *(file.path for file in builder.files()),
+                f"plugins/data/{labeller.DATA}/{labeller.RECORDS}",
+            ]
+        )
         for file in builder.files():
             on_disk = tmp_path / file.path
             assert on_disk.read_bytes() == file.content

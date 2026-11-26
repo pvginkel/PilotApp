@@ -744,6 +744,7 @@ class ServiceContainer(containers.DeclarativeContainer):
         ScenarioService,
         db=db_session,
         publication_service=publication_service,
+        vocabulary_service=vocabulary_service,
         fake_collector=fake_collector,
     )
 

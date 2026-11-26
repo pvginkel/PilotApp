@@ -7,7 +7,7 @@ import uuid
 from datetime import timedelta
 
 import pytest
-from pilot_scenario import SCENARIO
+from pilot_scenario import SCENARIO, labeller
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session as DbSession
 
@@ -19,7 +19,9 @@ from app.exceptions import (
 )
 from app.models import (
     Call,
+    CallClass,
     Compaction,
+    ComponentVersion,
     Document,
     Environment,
     Event,
@@ -31,6 +33,8 @@ from app.models import (
     Transcript,
     Turn,
     User,
+    WorkUnit,
+    WorkUnitKind,
 )
 from app.models.reference import ProjectState, SessionState, UserKind
 from app.services.container import ServiceContainer
@@ -172,6 +176,68 @@ class TestLoad:
         assert gears.adopted_project_id == adopted.id
         assert (halving.adopted_project_id, counting.adopted_project_id) == (None, None)
 
+    def test_its_threads_hold_the_labels_the_stub_labeller_gives_their_files(
+        self, session: DbSession, loaded: list[Transcript]
+    ) -> None:
+        """F122.5: the stub's vocabularies declared, and each publication's
+        labelling written under its version and stamp (DB decision 81)."""
+        halving, counting, gears = loaded
+
+        versions = {
+            transcript.id: session.scalars(
+                select(ComponentVersion).where(
+                    ComponentVersion.id == transcript.labelled_under_id
+                )
+            ).one()
+            for transcript in loaded
+        }
+        assert {
+            (version.component_code, version.version) for version in versions.values()
+        } == {("labeller", labeller.VERSION)}
+        assert all(
+            transcript.records_stamp and transcript.records_stamp.startswith("1:")
+            for transcript in loaded
+        )
+        assert [call.call_class_code for call in _calls(session, halving)] == [
+            "look",
+            "send",
+            "spill",
+            "stir",
+            "run",
+            "muse",
+        ]
+        assert [call.call_class_code for call in _calls(session, counting)] == [
+            "run",
+            "spill",
+            "muse",
+        ]
+        units = {unit.id: unit.key for unit in session.scalars(select(WorkUnit))}
+        assert set(units.values()) == {
+            "recipe-box|Scale the recipes",
+            "recipe-box|Scale the recipes|Halve the stew",
+        }
+        launch = session.scalars(
+            select(Launch).where(Launch.transcript_id == halving.id)
+        ).one()
+        assert launch.work_unit_id is not None
+        assert (
+            units[launch.work_unit_id] == "recipe-box|Scale the recipes|Halve the stew"
+        )
+        assert session.scalars(
+            select(CallClass.code)
+            .where(CallClass.position.is_not(None))
+            .order_by(CallClass.position)
+        ).all() == ["look", "stir", "run", "send", "spill", "muse", "other"]
+        assert session.scalars(
+            select(WorkUnitKind.code).order_by(WorkUnitKind.position)
+        ).all() == ["errand", "leg"]
+        burnt = session.scalars(select(Event).where(Event.labelled.is_(True))).one()
+        assert (burnt.call_id, burnt.kind_code, burnt.detail) == (
+            _calls(session, halving)[2].id,
+            "burnt",
+            "scale.py",
+        )
+
     def test_the_session_a_person_ran_lands_under_where_it_ran(
         self, session: DbSession, loaded: list[Transcript]
     ) -> None:
@@ -201,7 +267,7 @@ class TestLoad:
         ).one()
         pilots = _calls(session, halving)
         adas = _calls(session, gears)
-        error = session.scalars(select(Event)).one()
+        error = session.scalars(select(Event).where(Event.labelled.is_(False))).one()
 
         assert [call.compaction_id for call in pilots] == [
             None,

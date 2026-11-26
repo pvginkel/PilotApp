@@ -7,10 +7,11 @@ A day of the history is a scenario of the scenario's own script
 (`pilot_scenario.script`), its conversations drawn from the day's seed,
 `SEED` and the day, so that a day is the same in every history that holds
 it, and a larger history is a smaller one with earlier days before it. The
-scenario's builder turns the day into publications, which the app's own
-publication writes (`PublicationService.publish`), as a collector's are, so
-that a Call's cost, its caches and its Launch's placement are the
-publication's. What Pilot holds of its own conversations is written before
+scenario's builder turns the day into publications, labelled by the stub
+labeller, which the app's own publication writes
+(`PublicationService.publish`), as a collector's are, the stub's
+vocabularies declared first, so that a Call's cost, its caches, its Launch's
+placement and its labels are the publication's. What Pilot holds of its own conversations is written before
 them, as the scenario's load writes it (`ScenarioService`): a Session of each
 of Pilot's, with its Turns, and its work item or its chat; a few are never
 collected, their Turns standing in with their own cost and tokens.
@@ -44,6 +45,7 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 from pilot_collection.publication import PublicationSchema
+from pilot_collection.vocabularies import VocabulariesSchema
 from pilot_scenario import Builder
 from pilot_scenario.script import (
     Call,
@@ -811,6 +813,9 @@ class _Writer:
             sessions.append(self._pilots(builder, day, session, plan))
             if plan.standing_in:
                 standing.add(builder.conversation(session))
+        self.container.vocabulary_service().declare(  # type: ignore[attr-defined]
+            VocabulariesSchema.model_validate(builder.vocabularies())
+        )
         publication = self.container.publication_service()  # type: ignore[attr-defined]
         for published in in_lock_order(builder.publications()):
             if published["session_id"] in standing:

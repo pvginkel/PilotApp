@@ -13,8 +13,7 @@ from typing import Any
 
 import pilot_scenario
 import pytest
-from pilot_scenario import COLLECTOR, SCENARIO, Builder, Scenario, SentTurn
-from pilot_scenario.builder import LABELLER
+from pilot_scenario import COLLECTOR, SCENARIO, Builder, Scenario, SentTurn, labeller
 from pilot_scenario.script import (
     Call,
     Carried,
@@ -28,6 +27,7 @@ from pilot_scenario.script import (
     Tokens,
     ToolUse,
 )
+from pilot_scenario.transcript import stamp
 
 UNTIL = datetime(2026, 11, 12, 9, 30, tzinfo=UTC)
 LENGTH = 972
@@ -133,7 +133,8 @@ class TestAMainThread:
         assert {
             name: fact
             for name, fact in halving.items()
-            if name not in ("session_id", "launches", "compactions", "calls")
+            if name
+            not in ("session_id", "launches", "compactions", "calls", "labelling")
         } == {
             "file_size": len(Builder(SCENARIO, UNTIL).files()[0].content),
             "file_modified_at": _at(221),
@@ -503,11 +504,11 @@ class TestAMainThread:
         assert gears["working_directory"] == "/work/BikeLog"
         assert "agent_id" not in gears
 
-    def test_a_session_of_a_group_names_it_on_its_main_thread_with_a_labelling(
+    def test_a_session_of_a_group_names_it_on_its_main_thread_as_the_stub_adopts_it(
         self,
     ) -> None:
-        """A group is a label, which a publication carries with a labelling
-        alone."""
+        """A group is a label, the stub labeller's adoption of the main
+        thread, which a publication carries with its labelling."""
         built = _built()
 
         assert built["gears"]["group"] == {
@@ -518,15 +519,8 @@ class TestAMainThread:
                 " the log."
             ),
         }
-        assert built["gears"]["labelling"] == {
-            "version": LABELLER,
-            "stamp": "1:scenario",
-            "labels": {},
-        }
         assert "group" not in built["halving"]
         assert "group" not in built["counting"]
-        assert "labelling" not in built["halving"]
-        assert "labelling" not in built["counting"]
 
     def test_a_launch_ends_at_its_last_lines_time_whatever_came_before(
         self,
@@ -905,6 +899,210 @@ class TestASubAgent:
         assert spawning["returned_at"] == _at(78)
         assert _calls(built["counting"], "completed_at") == [_at(46), _at(58), _at(74)]
         assert _calls(built["counting"], "sent_at") == [_at(34), _at(49), _at(60)]
+
+
+HALVING = "8766dbc8-267a-5322-9a1d-cc49ad56eedd"
+GEARS = "037915e7-de88-5550-9746-3e7a4472413a"
+STEW = "recipe-box|Scale the recipes|Halve the stew"
+"""The key of the unit the halving ran."""
+
+
+class TestItsLabels:
+    def test_every_thread_carries_the_stubs_labelling_of_its_file(self) -> None:
+        """What a collector publishes under the stub, where Pilot hands
+        nothing for the conversation: the `label` line's stamp, labels,
+        units, suites and builds under the stub's version, but for the
+        transcript's own label, which is the `group`, and the batchable
+        condition, which the record keeps no place for."""
+        builder = Builder(SCENARIO, UNTIL)
+        publications = builder.publications()
+        contents = [
+            file.content for file in builder.files() if file.path.endswith(".jsonl")
+        ]
+
+        for publication, content in zip(publications, contents, strict=True):
+            main = "agent_id" not in publication
+            handed = {
+                "agent_id": publication.get("agent_id"),
+                "mode": "whole",
+                "calls": [
+                    {
+                        "id": call["message_id"],
+                        "position": n,
+                        "launch": 1 if main else None,
+                    }
+                    for n, call in enumerate(publication["calls"], start=1)
+                ],
+                "launches": [
+                    {"n": 1, "started_at": publication["launches"][0]["started_at"]}
+                ]
+                if main
+                else [],
+            }
+            if not main:
+                handed["agent_type"] = publication["agent_type"]
+            answer = labeller.label(
+                content,
+                handed,
+                {"session_id": publication["session_id"]},
+                frozenset(),
+                builder.records(),
+            )
+            labelling = publication["labelling"]
+            assert labelling["version"] == labeller.VERSION
+            assert labelling["stamp"] == answer["stamp"]
+            assert set(labelling["labels"]) == set(answer["labels"]) - {"transcript"}
+            assert labelling["labels"]["calls"] == [
+                {
+                    name: label
+                    for name, label in call.items()
+                    if name != "batchable_condition"
+                }
+                for call in answer["labels"]["calls"]
+            ]
+            for name in ("launches", "segments", "tool_calls", "events", "documents"):
+                assert labelling["labels"][name] == answer["labels"][name]
+            for name in ("units", "test_suites", "ci_builds"):
+                assert labelling[name] == answer[name]
+
+    def test_the_halvings_labels_are_the_scenarios_own(self) -> None:
+        halving = _built()["halving"]["labelling"]
+
+        assert halving["labels"]["launches"] == [{"n": 1, "work_unit": STEW}]
+        assert [unit["key"] for unit in halving["units"]] == [
+            "recipe-box|Scale the recipes",
+            STEW,
+        ]
+        assert [
+            (call["call_class"], call["segment"], call["wait_cause"])
+            for call in halving["labels"]["calls"]
+        ] == [
+            ("look", 1, "lighting"),
+            ("send", 2, "stove"),
+            ("spill", 2, "helper"),
+            ("stir", 2, "stove"),
+            ("run", 3, "stove"),
+            ("muse", 4, "stove"),
+        ]
+        assert halving["labels"]["segments"] == [
+            {"position": 1, "kind": "prep"},
+            {"position": 2, "kind": "cook"},
+            {"position": 3, "kind": "simmer"},
+            {"position": 4, "kind": "cook"},
+        ]
+        assert halving["labels"]["events"] == [
+            {
+                "call": "msg_0003",
+                "kind": "burnt",
+                "at": stamp(datetime.fromisoformat(_at(95))),
+                "detail": "scale.py",
+            }
+        ]
+
+    def test_a_line_claude_code_wrote_itself_is_handed_and_its_labels_left_out(
+        self,
+    ) -> None:
+        """The labeller counts each assistant line's message as a Call, a
+        request that failed for good among them, which the publication holds
+        as an Event of the Call before it: its labels are not the
+        publication's, and every Call it holds names a Segment."""
+        scenario = _one(
+            Call(
+                at=6,
+                tokens=Tokens(input=10, output=2),
+                occurred=(Occurrence(7, "api_error", detail="429"),),
+            ),
+            Call(at=12, tokens=Tokens(input=10, output=2)),
+        )
+
+        (publication,) = Builder(scenario, UNTIL).publications()
+
+        labels = publication["labelling"]["labels"]
+        assert [call["id"] for call in labels["calls"]] == ["msg_0001", "msg_0002"]
+        assert [call["segment"] for call in labels["calls"]] == [1, 1]
+        assert labels["segments"] == [{"position": 1, "kind": "cook"}]
+
+    def test_a_sub_agent_carries_no_unit_and_its_breach_of_a_rule(self) -> None:
+        counting = _built()["counting"]["labelling"]
+
+        assert counting["labels"]["launches"] == []
+        assert counting["units"] == []
+        assert [
+            (row["command_class"], row["rules"])
+            for row in counting["labels"]["tool_calls"]
+        ] == [("search", []), (None, ["no_pantry_token"]), ("fetch", [])]
+
+    def test_its_run_records_are_its_units_what_ran_them_and_its_groups(self) -> None:
+        assert Builder(SCENARIO, UNTIL).records() == {
+            "kinds": ["errand", "leg"],
+            "units": [
+                {
+                    "key": "recipe-box|Scale the recipes",
+                    "kind": "errand",
+                    "title": "Scale the recipes",
+                    "part_of": None,
+                    "measures": [{"measure": "parts", "amount": 2}],
+                },
+                {
+                    "key": STEW,
+                    "kind": "leg",
+                    "title": "Halve the stew",
+                    "part_of": "recipe-box|Scale the recipes",
+                    "started_at": _at(0),
+                    "ended_at": _at(224),
+                    "outcome": labeller.SERVED,
+                },
+                {
+                    "key": "recipe-box|Scale the recipes|Halve the dumplings",
+                    "kind": "leg",
+                    "title": "Halve the dumplings",
+                    "part_of": "recipe-box|Scale the recipes",
+                },
+            ],
+            "ran": {HALVING: STEW},
+            "groups": [
+                {
+                    "key": "bike-log-first-rides",
+                    "name": "Bike log: the first rides",
+                    "summary": (
+                        "The gear tables and ride notes Ada kept by hand, before"
+                        " Pilot kept the log."
+                    ),
+                    "repository": "BikeLog",
+                    "conversations": [GEARS],
+                }
+            ],
+        }
+
+    def test_they_are_written_where_the_stub_reads_them(self, tmp_path: Path) -> None:
+        builder = Builder(SCENARIO, UNTIL)
+
+        builder.write(tmp_path)
+
+        held = tmp_path / "plugins" / "data" / labeller.DATA / labeller.RECORDS
+        assert json.loads(held.read_text()) == builder.records()
+
+    def test_its_vocabularies_are_the_stubs_as_a_collector_declares_them(
+        self,
+    ) -> None:
+        """Every list the record keeps, the kinds of work the scenario's,
+        and the nestings; the groups and the batchable condition left
+        out."""
+        builder = Builder(SCENARIO, UNTIL)
+        declared = labeller.vocabularies(builder.records())
+
+        vocabularies = builder.vocabularies()
+
+        assert set(vocabularies) == {"version", "lists", "nesting"}
+        assert vocabularies["version"] == labeller.VERSION
+        assert set(vocabularies["lists"]) == set(declared["lists"]) - {
+            "batchable_condition"
+        }
+        assert [kind["code"] for kind in vocabularies["lists"]["work_unit_kind"]] == [
+            "errand",
+            "leg",
+        ]
+        assert vocabularies["nesting"] == [{"inner": "leg", "outer": "errand"}]
 
 
 class TestTheTurnsOfPilots:
