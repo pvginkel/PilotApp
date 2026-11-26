@@ -19,7 +19,6 @@
 
 import { useLayoutEffect, useRef, useState, type RefObject } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { useRouterState } from '@tanstack/react-router';
 import { useDashboardView, type Failure } from '@/hooks/use-dashboard-view';
 import { ScreenInView } from '@/hooks/use-screens';
 import { keepScroll, scrollOf, useViewTabMoves, useViewTabs, useViewTabsAt, type ViewTab } from '@/hooks/use-view-tabs';
@@ -27,7 +26,6 @@ import { WriteFailures } from '@/hooks/use-view-writes';
 import { useWalkReads } from '@/hooks/use-walk-reads';
 import { addressQuery, rowsQuery, stateOf } from '@/lib/dashboard/queries';
 import { readState, withoutLook } from '@/lib/dashboard/state';
-import { hashOf } from '@/lib/screens';
 import { Banner, type Wrote } from './banner';
 import { RowsChart } from './rows-chart';
 import { NewViewButton, OneTab, ViewTabLine } from './view-tabs';
@@ -36,8 +34,7 @@ import './dashboard.css';
 
 export function DashboardScreen({ shown }: { shown: boolean }) {
   useWalkReads();
-  const href = useRouterState({ select: (state) => state.location.href });
-  useViewTabsAt(shown, hashOf(href));
+  useViewTabsAt(shown);
   const { tabs, at } = useViewTabs();
   const moves = useViewTabMoves();
   // A write's failure, until its banner is closed.

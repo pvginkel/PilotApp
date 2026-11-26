@@ -13,7 +13,7 @@
  */
 
 import { useLayoutEffect, useSyncExternalStore } from 'react';
-import { useRouter } from '@tanstack/react-router';
+import { useRouter, useRouterState } from '@tanstack/react-router';
 import { browserState, rememberViewTabs, type KeptViewTab, type KeptViewTabs } from '@/lib/browser-state';
 import { placeOf } from '@/lib/dashboard/address';
 import { DASH, hashOf } from '@/lib/screens';
@@ -78,12 +78,19 @@ export function useViewTabs(): { tabs: readonly ViewTab[]; at: ViewTab | null } 
   return { tabs: now.tabs, at: now.tabs.find((tab) => tab.id === now.seen[0]) ?? null };
 }
 
-/** The address, `hash`, taken by the tabs while the dashboard shows; written back in place where it names no tab of its own. */
-export function useViewTabsAt(shown: boolean, hash: string): void {
+/**
+ * The address taken by the tabs while the dashboard shows; written back in place where it names no
+ * tab of its own. It is read off the history as the effect runs, not as the render saw it:
+ * StrictMode runs a mounting effect twice over one render, and the second run finds the address
+ * the first wrote back.
+ */
+export function useViewTabsAt(shown: boolean): void {
   const router = useRouter();
+  const href = useRouterState({ select: (state) => state.location.href });
   useLayoutEffect(() => {
     if (!shown) return;
-    const place = placeOf(hash);
+    const { href: at, state } = router.history.location;
+    const place = placeOf(hashOf(at));
     const named = place.tab === null ? null : tabOf(place.tab);
     if (named !== null) {
       if (named.now !== place.state) change(named.id, { now: place.state, opened: named.opened ?? place.state });
@@ -95,11 +102,8 @@ export function useViewTabsAt(shown: boolean, hash: string): void {
       return;
     }
     const tab = add(place.tab, place.state);
-    if (tab.id !== place.tab) {
-      const { href, state } = router.history.location;
-      router.history.replace(href.slice(0, href.length - hashOf(href).length) + addressOf(tab), state);
-    }
-  }, [shown, hash, router]);
+    if (tab.id !== place.tab) router.history.replace(at.slice(0, at.length - hashOf(at).length) + addressOf(tab), state);
+  }, [shown, href, router]);
 }
 
 /** Where the main area of the tab `id` was scrolled to. */

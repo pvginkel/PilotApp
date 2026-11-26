@@ -13,6 +13,7 @@
 import type { Locator, Page, Request } from '@playwright/test';
 import { test, expect } from '../support/fixtures';
 import { TALLY, type Collection } from '../support/collection';
+import { NONE_LEFT } from '../support/dashboard-bounds';
 import { expectConsoleError, makeUnique } from '../support/helpers';
 import { dashboardAddress, type DashboardPage } from '../support/page-objects/dashboard-page';
 import type { People } from '../support/people';
@@ -52,6 +53,10 @@ const lineTab = (dashboard: DashboardPage, name: string) => dashboard.lineTab(na
 
 /** Opens the view named `name` from a list of the panel. */
 const open = (dashboard: DashboardPage, list: Locator, name: string) => dashboard.view(list, name).getByTestId('dashboard.panel.view.open').click();
+
+/** The tabs the browser keeps, each its id and its state now. */
+const keptTabs = (page: Page) =>
+  page.evaluate(() => (JSON.parse(localStorage.getItem('pilot') ?? '{}').viewTabs?.tabs ?? []).map((each: { id: string; now: string | null }) => ({ id: each.id, now: each.now })));
 
 /** Where the browser keeps the tab `id`'s scroll. */
 const keptScroll = (page: Page, id: string) =>
@@ -343,6 +348,31 @@ test.describe('The view tabs', () => {
     expect(await historyLength(page)).toBe(entries + 1);
   });
 
+  test('a link opened cold opens one tab of its own, the address written back in place to name it, where it names no tab and where it names one the page cannot take', async ({
+    page,
+    people,
+    projects,
+    shell,
+    dashboard,
+  }) => {
+    const project = await aProject(people, projects);
+    const byModel = 't=qw&by=model&m=cost.sum&col=none';
+    await shell.open(`${projectAddress(project)}#dash/${SCRATCH}`);
+
+    await expect(dashboard.tab).toHaveText('Project');
+    await expect(dashboard.line).toHaveCount(0);
+    const [opened] = await keptTabs(page);
+    expect(await keptTabs(page)).toEqual([{ id: opened.id, now: SCRATCH }]);
+    await expect(page).toHaveURL(`${projectAddress(project)}#dash/${opened.id}/${SCRATCH}`);
+
+    await page.goto(`${projectAddress(project)}#dash/not_one/${byModel}`);
+    await expect(dashboard.lineNames).toHaveText(['Project', 'Model']);
+    const tabs = await keptTabs(page);
+    expect(tabs).toHaveLength(2);
+    expect(tabs[1]).toEqual({ id: expect.stringMatching(/^[a-z0-9]{4}$/), now: byModel });
+    await expect(page).toHaveURL(`${projectAddress(project)}#dash/${tabs[1].id}/${byModel}`);
+  });
+
   test('keep their answers while another shows, never reading them; after the walk’s event the tab in view is read again, another as it is brought into view', async ({
     page,
     people,
@@ -382,6 +412,31 @@ test.describe('The view tabs', () => {
     await expect(dashboard.rows).toHaveCount(TALLY.calls * 2);
     expect(answered()).toHaveLength(2);
     expect(answered()[1]).toContain('by=call');
+  });
+
+  test('keep a tab’s answers out of sight for as long as the tab, past the five minutes a query no one reads is kept for: brought into view it draws them with every read refused', async ({
+    page,
+    people,
+    projects,
+    collection,
+    shell,
+    dashboard,
+    dashboardBounds,
+  }) => {
+    await page.clock.install();
+    const { first, chip } = await fourProjects(people, projects, collection);
+    await shell.open(`${projectAddress(first)}${dashboardAddress(`t=all&by=project&m=cost.sum&${chip}`, 'byproj')}`);
+    await expect(dashboard.rows).toHaveCount(2);
+    await dashboard.go(dashboardAddress(`t=all&by=call&m=cost.sum&${chip}`, 'bycall'));
+    await expect(dashboard.rows).toHaveCount(TALLY.calls);
+
+    // Past the five minutes a query no one reads is kept for, the engine refusing every read from then on.
+    await page.clock.fastForward('06:00');
+    await expectConsoleError(page, /409/);
+    await dashboardBounds.set({ timeout_seconds: NONE_LEFT });
+    await lineTab(dashboard, 'Project').click();
+    await expect(lineTab(dashboard, 'Project')).toHaveAttribute('aria-selected', 'true');
+    await expect(dashboard.rows).toHaveCount(2);
   });
 
   test('come back after a reload, each one’s state, the tab at hand and its scroll; Dashboard opens on the tab the browser holds; a window beside it keeps its own', async ({
