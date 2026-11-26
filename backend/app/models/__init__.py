@@ -33,6 +33,18 @@ from app.models.document import Document, DocumentVersion
 from app.models.environment import Environment
 from app.models.item import Item
 from app.models.item_sighting import ItemSighting
+from app.models.label import (
+    CIBuild,
+    CIWait,
+    RuleBreach,
+    Segment,
+    Test,
+    TestFailure,
+    TestRun,
+    TestSuite,
+    WorkUnit,
+    WorkUnitMeasure,
+)
 from app.models.pilot_note import PilotNote, SendAlert
 from app.models.plan import PlanNote, PlanNoteReference, PlanTask
 from app.models.project import Project, ProjectMember, ProjectTransition

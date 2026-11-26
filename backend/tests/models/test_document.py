@@ -6,8 +6,17 @@ import pytest
 from sqlalchemy import text
 from sqlalchemy.orm import Session as DbSession
 
-from app.models import Document, DocumentVersion, Environment, Item, Project, Session
+from app.models import (
+    AskCategory,
+    Document,
+    DocumentVersion,
+    Environment,
+    Item,
+    Project,
+    Session,
+)
 from app.models.reference import DocumentRole, VersionCause
+from tests.support import labels
 from tests.support.database import violated_constraint
 
 _HASH = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
@@ -195,6 +204,32 @@ class TestDocument:
         draft_document.writing_since = datetime.now(UTC)
 
         assert violated_constraint(session) == "ck_documents_writing"
+
+    def test_its_ask_category_is_a_label(self, session: DbSession, item: Item) -> None:
+        labels.declared(session, AskCategory, "menu_question")
+        document = _prose_document(item, ask_category_code="menu_question")
+        session.add(document)
+        session.flush()
+        session.expire(document)
+
+        assert document.ask_category_code == "menu_question"
+
+    def test_one_no_labeller_covered_has_no_ask_category(
+        self, session: DbSession, item: Item
+    ) -> None:
+        document = _prose_document(item)
+        session.add(document)
+        session.flush()
+        session.expire(document)
+
+        assert document.ask_category_code is None
+
+    def test_its_ask_category_is_a_declared_value(
+        self, session: DbSession, item: Item
+    ) -> None:
+        session.add(_prose_document(item, ask_category_code="other"))
+
+        assert violated_constraint(session) == "documents_ask_category_code_fkey"
 
 
 class TestDocumentVersion:

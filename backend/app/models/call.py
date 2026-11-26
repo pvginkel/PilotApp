@@ -5,7 +5,8 @@ and 81).
 
 The reference entities here are the collector's: a row is written when a
 publication first names its code, and no revision writes one (DB §7.2). Event
-Kind and Context Part Kind hold the labeller's values beside them.
+Kind and Context Part Kind hold the labeller's values beside them, and an
+Event and a Context Part the labeller gave stand beside the collector's.
 """
 
 import uuid
@@ -27,6 +28,7 @@ from sqlalchemy import (
     Numeric,
     Text,
     UniqueConstraint,
+    false,
     text,
 )
 from sqlalchemy.orm import Mapped, mapped_column
@@ -104,6 +106,10 @@ class Call(db.Model):  # type: ignore[name-defined]
     before them wrote, until the step after a deploy's revisions derives
     them. That its Launch is of its Transcript, or of its Transcript's main
     thread, is the publication's to keep.
+
+    Its labels are `wait_cause_code`, `segment_position`, `call_class_code`
+    and `avoidable_kind_code`. `segment_position` names the Segment it falls
+    in by its place, a Segment of its own Transcript (DB 555).
     """
 
     __tablename__ = "calls"
@@ -129,6 +135,12 @@ class Call(db.Model):  # type: ignore[name-defined]
         ForeignKeyConstraint(
             ["transcript_id", "compaction_id"],
             ["compactions.transcript_id", "compactions.id"],
+        ),
+        # Checked at each statement: a write holds a Segment before a Call
+        # names its position, and removes one only once no Call does.
+        ForeignKeyConstraint(
+            ["transcript_id", "segment_position"],
+            ["segments.transcript_id", "segments.position"],
         ),
         CheckConstraint("position >= 1", name="ck_calls_position"),
         # The model asked for is held where it differs.
@@ -188,6 +200,12 @@ class Call(db.Model):  # type: ignore[name-defined]
     past_ttl: Mapped[bool | None] = mapped_column(Boolean)
     launch_id: Mapped[int | None] = mapped_column(
         ForeignKey("launches.id", ondelete="SET NULL")
+    )
+    wait_cause_code: Mapped[str | None] = mapped_column(ForeignKey("wait_causes.code"))
+    segment_position: Mapped[int | None] = mapped_column(Integer)
+    call_class_code: Mapped[str | None] = mapped_column(ForeignKey("call_classes.code"))
+    avoidable_kind_code: Mapped[str | None] = mapped_column(
+        ForeignKey("avoidable_kinds.code")
     )
 
 
@@ -261,7 +279,12 @@ class DenialKind(db.Model):  # type: ignore[name-defined]
 
 class ToolCall(db.Model):  # type: ignore[name-defined]
     """A call of one tool a Call requested, with its result. It carries its
-    Call's Transcript, within which its `tool_use_id` is unique."""
+    Call's Transcript, within which its `tool_use_id` is unique.
+
+    Its labels are `command_class_code`, `effect_kind_code` and
+    `effect_subject`, the id of what that change touched, a card's or a
+    fieldnote's.
+    """
 
     __tablename__ = "tool_calls"
     __table_args__ = (
@@ -271,6 +294,9 @@ class ToolCall(db.Model):  # type: ignore[name-defined]
             ondelete="CASCADE",
         ),
         UniqueConstraint("transcript_id", "tool_use_id"),
+        # What a Test Run's key references, so a Tool Call's run carries its
+        # Transcript.
+        UniqueConstraint("transcript_id", "id"),
         Index("ix_tool_calls_call_id", "call_id"),
         # An exit code is held where it was not zero.
         CheckConstraint("exit_code <> 0", name="ck_tool_calls_exit_code"),
@@ -282,6 +308,11 @@ class ToolCall(db.Model):  # type: ignore[name-defined]
         CheckConstraint(
             "result_characters >= 0 AND saved_characters >= 0",
             name="ck_tool_calls_characters",
+        ),
+        # A subject is of the change it touched.
+        CheckConstraint(
+            "effect_subject IS NULL OR effect_kind_code IS NOT NULL",
+            name="ck_tool_calls_effect_subject",
         ),
     )
 
@@ -301,6 +332,13 @@ class ToolCall(db.Model):  # type: ignore[name-defined]
     )
     result_characters: Mapped[int | None] = mapped_column(Integer)
     saved_characters: Mapped[int | None] = mapped_column(Integer)
+    command_class_code: Mapped[str | None] = mapped_column(
+        ForeignKey("command_classes.code")
+    )
+    effect_kind_code: Mapped[str | None] = mapped_column(
+        ForeignKey("tool_effect_kinds.code")
+    )
+    effect_subject: Mapped[str | None] = mapped_column(Text)
 
 
 RECORDED_ELSEWHERE = (
@@ -349,7 +387,9 @@ class EventKind(db.Model):  # type: ignore[name-defined]
 
 class Event(db.Model):  # type: ignore[name-defined]
     """An occurrence in a Transcript, at one moment, that no other entity
-    records, held on the last Call before it, else the first."""
+    records, held on the last Call before it, else the first. `labelled` is
+    whether it is a label, one the labeller marked, and not an occurrence
+    the collector read off the file."""
 
     __tablename__ = "events"
     __table_args__ = (
@@ -367,6 +407,7 @@ class Event(db.Model):  # type: ignore[name-defined]
     kind_code: Mapped[str] = mapped_column(ForeignKey("event_kinds.code"))
     at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     detail: Mapped[str | None] = mapped_column(Text)
+    labelled: Mapped[bool] = mapped_column(Boolean, server_default=false())
 
 
 class ContextPartKind(db.Model):  # type: ignore[name-defined]
@@ -393,7 +434,8 @@ class ContextPartKind(db.Model):  # type: ignore[name-defined]
 
 class ContextPart(db.Model):  # type: ignore[name-defined]
     """A component of what a Call carried that no earlier Call of its Launch
-    did; `name` which one of its kind."""
+    did; `name` which one of its kind. `labelled` is whether it is a label,
+    one the labeller gave, as an Event's is."""
 
     __tablename__ = "context_parts"
     __table_args__ = (
@@ -406,3 +448,4 @@ class ContextPart(db.Model):  # type: ignore[name-defined]
     kind_code: Mapped[str] = mapped_column(ForeignKey("context_part_kinds.code"))
     name: Mapped[str | None] = mapped_column(Text)
     characters: Mapped[int] = mapped_column(Integer)
+    labelled: Mapped[bool] = mapped_column(Boolean, server_default=false())

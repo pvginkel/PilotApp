@@ -38,6 +38,7 @@ class Document(db.Model):  # type: ignore[name-defined]
     both kept here (DB §7.3): a Prose Item's `id` is its Item's, and its
     `summary` a cache of the published text (DB §7.4); a Project Document has
     `project_id` and `role_code` and none of the Prose Item's columns.
+    `ask_category_code` is a label: the category of the asks it puts.
     """
 
     __tablename__ = "documents"
@@ -130,6 +131,9 @@ class Document(db.Model):  # type: ignore[name-defined]
     )
     project_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("projects.id"))
     role_code: Mapped[DocumentRole | None] = mapped_column(DOCUMENT_ROLE)
+    ask_category_code: Mapped[str | None] = mapped_column(
+        ForeignKey("ask_categories.code")
+    )
 
 
 class DocumentVersion(db.Model):  # type: ignore[name-defined]

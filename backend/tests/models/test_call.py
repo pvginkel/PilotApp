@@ -12,7 +12,10 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session as DbSession
 
 from app.models import (
+    AvoidableKind,
     Call,
+    CallClass,
+    CommandClass,
     ComponentVersion,
     ContextPart,
     ContextPartKind,
@@ -23,14 +26,18 @@ from app.models import (
     MissCause,
     Model,
     Price,
+    Segment,
+    SegmentKind,
     StopReason,
     TokenKind,
     Tool,
     ToolCall,
+    ToolEffectKind,
     Transcript,
+    WaitCause,
 )
 from app.models.call import PRICED_KINDS
-from tests.support import transcripts
+from tests.support import labels, transcripts
 from tests.support.database import violated_constraint
 from tests.support.transcripts import HAIKU, OPUS, OTHER, STARTED, SUB_AGENT
 
@@ -67,6 +74,15 @@ def request_(session: DbSession, thread: Transcript) -> Call:
 
 def _count(db: DbSession, entity: type) -> int:
     return db.scalar(select(func.count()).select_from(entity)) or 0
+
+
+def _segment(db: DbSession, thread: Transcript, position: int, kind: str) -> Segment:
+    """The Transcript's Segment at `position`, of the declared kind."""
+    labels.declared(db, SegmentKind, kind)
+    segment = Segment(transcript_id=thread.id, position=position, kind_code=kind)
+    db.add(segment)
+    db.flush()
+    return segment
 
 
 def _violated_at_commit(session: DbSession) -> str:
@@ -358,6 +374,9 @@ class TestCall:
             ("requested_model_code", "calls_requested_model_code_fkey"),
             ("stop_reason_code", "calls_stop_reason_code_fkey"),
             ("miss_cause_code", "calls_miss_cause_code_fkey"),
+            ("wait_cause_code", "calls_wait_cause_code_fkey"),
+            ("call_class_code", "calls_call_class_code_fkey"),
+            ("avoidable_kind_code", "calls_avoidable_kind_code_fkey"),
         ],
     )
     def test_what_classifies_it_is_held(
@@ -366,6 +385,88 @@ class TestCall:
         setattr(request_, column, "other")
 
         assert violated_constraint(session) == constraint
+
+    def test_it_holds_its_labels(
+        self, session: DbSession, thread: Transcript, request_: Call
+    ) -> None:
+        labels.declared(session, WaitCause, "oven")
+        labels.declared(session, CallClass, "stir")
+        labels.declared(session, AvoidableKind, "spilt")
+        _segment(session, thread, 1, "cook")
+        request_.wait_cause_code = "oven"
+        request_.call_class_code = "stir"
+        request_.avoidable_kind_code = "spilt"
+        request_.segment_position = 1
+        session.flush()
+        session.expire(request_)
+
+        assert (
+            request_.wait_cause_code,
+            request_.call_class_code,
+            request_.avoidable_kind_code,
+            request_.segment_position,
+        ) == ("oven", "stir", "spilt", 1)
+
+    def test_one_no_labeller_covered_holds_no_label(
+        self, session: DbSession, request_: Call
+    ) -> None:
+        session.expire(request_)
+
+        assert (
+            request_.wait_cause_code,
+            request_.call_class_code,
+            request_.avoidable_kind_code,
+            request_.segment_position,
+        ) == (None, None, None, None)
+
+    def test_it_falls_in_a_segment_of_its_own_transcript(
+        self, session: DbSession, other: Transcript, request_: Call
+    ) -> None:
+        """DB 555."""
+        _segment(session, other, 1, "cook")
+        request_.segment_position = 1
+
+        assert (
+            violated_constraint(session) == "calls_transcript_id_segment_position_fkey"
+        )
+
+    def test_the_segment_it_falls_in_stays_while_it_does(
+        self, session: DbSession, thread: Transcript, request_: Call
+    ) -> None:
+        _segment(session, thread, 1, "cook")
+        request_.segment_position = 1
+        session.flush()
+
+        with pytest.raises(IntegrityError) as raised:
+            session.execute(
+                Segment.__table__.delete().where(Segment.transcript_id == thread.id)
+            )
+
+        assert (
+            raised.value.orig.diag.constraint_name
+            == "calls_transcript_id_segment_position_fkey"
+        )
+
+    def test_a_relabel_gives_the_segment_it_falls_in_another_kind_in_place(
+        self, session: DbSession, thread: Transcript, request_: Call
+    ) -> None:
+        segment = _segment(session, thread, 1, "cook")
+        request_.segment_position = 1
+        session.flush()
+        labels.declared(session, SegmentKind, "plate")
+
+        segment.kind_code = "plate"
+        session.flush()
+
+        assert (
+            session.scalar(
+                select(Segment.kind_code).where(
+                    Segment.transcript_id == thread.id,
+                    Segment.position == request_.segment_position,
+                )
+            )
+            == "plate"
+        )
 
     def test_the_model_asked_for_is_held_where_it_differs(
         self, session: DbSession, request_: Call
@@ -612,6 +713,8 @@ class TestToolCall:
         [
             ("tool_code", "tool_calls_tool_code_fkey"),
             ("denial_kind_code", "tool_calls_denial_kind_code_fkey"),
+            ("command_class_code", "tool_calls_command_class_code_fkey"),
+            ("effect_kind_code", "tool_calls_effect_kind_code_fkey"),
         ],
     )
     def test_what_classifies_it_is_held(
@@ -621,6 +724,43 @@ class TestToolCall:
         setattr(requested, column, "other")
 
         assert violated_constraint(session) == constraint
+
+    def test_it_holds_its_labels(self, session: DbSession, request_: Call) -> None:
+        labels.declared(session, CommandClass, "timer")
+        labels.declared(session, ToolEffectKind, "order_placed")
+        requested = transcripts.tool_call(
+            session,
+            request_,
+            command_class_code="timer",
+            effect_kind_code="order_placed",
+            effect_subject="ORD-12",
+        )
+        session.expire(requested)
+
+        assert (
+            requested.command_class_code,
+            requested.effect_kind_code,
+            requested.effect_subject,
+        ) == ("timer", "order_placed", "ORD-12")
+
+    def test_one_that_changed_nothing_outside_holds_no_effect(
+        self, session: DbSession, request_: Call
+    ) -> None:
+        requested = transcripts.tool_call(session, request_)
+        session.expire(requested)
+
+        assert (
+            requested.command_class_code,
+            requested.effect_kind_code,
+            requested.effect_subject,
+        ) == (None, None, None)
+
+    def test_a_subject_is_of_a_change_it_made(
+        self, session: DbSession, request_: Call
+    ) -> None:
+        session.add(_tool_call(request_, effect_subject="ORD-12"))
+
+        assert violated_constraint(session) == "ck_tool_calls_effect_subject"
 
     def test_an_exit_code_is_held_where_it_was_not_zero(
         self, session: DbSession, request_: Call
@@ -731,6 +871,44 @@ class TestEvent:
         ).all()
         assert events == [("api_error", "529", True), ("interrupt", None, False)]
 
+    def test_one_the_collector_read_is_no_label(
+        self, session: DbSession, request_: Call
+    ) -> None:
+        transcripts.reference(session, EventKind, "api_error", is_error=True)
+        event = Event(call_id=request_.id, kind_code="api_error", at=STARTED)
+        session.add(event)
+        session.flush()
+        session.expire(event)
+
+        assert event.labelled is False
+
+    def test_one_the_labeller_marked_is_told_apart_from_the_collectors(
+        self, session: DbSession, request_: Call
+    ) -> None:
+        """Slice 047's I2: the record itself tells a label from a fact."""
+        transcripts.reference(session, EventKind, "api_error", is_error=True)
+        labels.declared(session, EventKind, "burnt", is_error=False)
+        session.add_all(
+            [
+                Event(call_id=request_.id, kind_code="api_error", at=STARTED),
+                Event(
+                    call_id=request_.id,
+                    kind_code="burnt",
+                    at=STARTED,
+                    detail="the sauce",
+                    labelled=True,
+                ),
+            ]
+        )
+        session.flush()
+
+        marked = session.execute(
+            select(Event.kind_code, Event.labelled)
+            .where(Event.call_id == request_.id)
+            .order_by(Event.id)
+        ).all()
+        assert marked == [("api_error", False), ("burnt", True)]
+
     def test_it_is_classified_by_an_event_kind(
         self, session: DbSession, request_: Call
     ) -> None:
@@ -811,6 +989,46 @@ class TestContextPart:
             ("system_prompt", None, 9_000),
             ("skill_body", "garden:planting", 0),
         ]
+
+    def test_one_the_collector_read_is_no_label(
+        self, session: DbSession, request_: Call
+    ) -> None:
+        transcripts.reference(session, ContextPartKind, "system_prompt")
+        part = ContextPart(
+            call_id=request_.id, kind_code="system_prompt", characters=9_000
+        )
+        session.add(part)
+        session.flush()
+        session.expire(part)
+
+        assert part.labelled is False
+
+    def test_one_the_labeller_gave_is_told_apart_from_the_collectors(
+        self, session: DbSession, request_: Call
+    ) -> None:
+        """Slice 047's I2: the record itself tells a label from a fact."""
+        transcripts.reference(session, ContextPartKind, "prompt")
+        labels.declared(session, ContextPartKind, "recipe_card")
+        session.add_all(
+            [
+                ContextPart(call_id=request_.id, kind_code="prompt", characters=1_800),
+                ContextPart(
+                    call_id=request_.id,
+                    kind_code="recipe_card",
+                    name="Soup",
+                    characters=600,
+                    labelled=True,
+                ),
+            ]
+        )
+        session.flush()
+
+        marked = session.execute(
+            select(ContextPart.kind_code, ContextPart.labelled)
+            .where(ContextPart.call_id == request_.id)
+            .order_by(ContextPart.id)
+        ).all()
+        assert marked == [("prompt", False), ("recipe_card", True)]
 
     def test_it_is_classified_by_a_context_part_kind(
         self, session: DbSession, request_: Call

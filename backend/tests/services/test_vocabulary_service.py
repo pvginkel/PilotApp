@@ -36,6 +36,7 @@ from app.models import (
     UnitMeasure,
     UnitOutcome,
     WaitCause,
+    WorkUnit,
     WorkUnitKind,
     WorkUnitKindNesting,
 )
@@ -374,6 +375,46 @@ class TestNoLongerDeclared:
 
         assert _nestings(session) == [("course", "menu")]
         assert _places(session, WorkUnitKind) == [("course", 2), ("menu", 1)]
+
+    def test_a_value_a_label_names_stays_with_no_place(
+        self, session: DbSession, service: VocabularyService, request_: Call
+    ) -> None:
+        service.declare(vocabularies())
+        request_.wait_cause_code = "oven"
+        session.flush()
+
+        service.declare(vocabularies(lists=lists(wait_cause=listed("delivery"))))
+
+        assert _places(session, WaitCause) == [("delivery", 1), ("oven", None)]
+
+    def test_a_nesting_a_unit_sits_in_stays_and_its_kinds_with_it(
+        self, session: DbSession, service: VocabularyService
+    ) -> None:
+        service.declare(vocabularies())
+        menu = WorkUnit(key="RecipeBox/autumn_menu", kind_code="menu", title="Autumn")
+        session.add(menu)
+        session.flush()
+        session.add(
+            WorkUnit(
+                key="RecipeBox/autumn_menu|starter",
+                kind_code="course",
+                title="Starter",
+                part_of_id=menu.id,
+                part_of_kind_code="menu",
+            )
+        )
+        session.flush()
+
+        service.declare(
+            vocabularies(lists=lists(work_unit_kind=listed("dish")), nesting=[])
+        )
+
+        assert _nestings(session) == [("course", "menu")]
+        assert _places(session, WorkUnitKind) == [
+            ("course", None),
+            ("dish", 1),
+            ("menu", None),
+        ]
 
 
 class TestBesideTheCollectors:

@@ -76,13 +76,17 @@ class Transcript(db.Model):  # type: ignore[name-defined]
     of that name once a thread of its conversation holds it (DB decision
     79.16). `adopted_project_id` is a label of a main thread's: the adopted
     Project of the group its last publication named for it, none where it
-    named none. `first_call_at` and `last_call_at` are the `completed_at` of
-    its first and of its last Call by `position`, none while it has no Call
-    (DB §7.4). That a thread's main has no `agent_id` (DB 534), that its
-    spawning call lies under that main (DB 535), and that an adopted
+    named none. `labelled_under_id` is the labeller's own version that wrote
+    its labels, held whole, and `records_stamp` the stamp the labeller handed
+    back with them, of all it read for them besides the file (DB decision
+    81.3); a stamp is handed back with labels alone. `first_call_at` and
+    `last_call_at` are the `completed_at` of its first and of its last Call
+    by `position`, none while it has no Call (DB §7.4). That a thread's main has no `agent_id` (DB 534), that its
+    spawning call lies under that main (DB 535), that an adopted
     Transcript's Project is `adopted` and no Launch of it is run by a Session
-    (DB 539) are the publication's and the placement's to keep: no key
-    reaches them.
+    (DB 539), and that `read_under_id` and `labelled_under_id` are versions
+    of the collector's and of the labeller's Component are the publication's
+    and the placement's to keep: no key reaches them.
     """
 
     __tablename__ = "transcripts"
@@ -127,6 +131,10 @@ class Transcript(db.Model):  # type: ignore[name-defined]
             "(first_call_at IS NULL) = (last_call_at IS NULL)",
             name="ck_transcripts_call_times",
         ),
+        CheckConstraint(
+            "records_stamp IS NULL OR labelled_under_id IS NOT NULL",
+            name="ck_transcripts_records_stamp",
+        ),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
@@ -157,6 +165,10 @@ class Transcript(db.Model):  # type: ignore[name-defined]
     collected_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     replayed_size: Mapped[int] = mapped_column(BigInteger)
     read_under_id: Mapped[int] = mapped_column(ForeignKey("component_versions.id"))
+    labelled_under_id: Mapped[int | None] = mapped_column(
+        ForeignKey("component_versions.id")
+    )
+    records_stamp: Mapped[str | None] = mapped_column(Text)
     first_call_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     last_call_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
@@ -170,7 +182,8 @@ class Launch(db.Model):  # type: ignore[name-defined]
     `session_id` and `turn_seq` are Pilot's: the Session that ran it and,
     of that Session, the Turn that started it or during which its driver
     did, none for a Launch started between two Turns (DB decision 79 point
-    7). `launch_placement` sets them.
+    7). `launch_placement` sets them. `work_unit_id` is a label: the lowest
+    Work Unit it carried out (DB 553).
 
     That its Transcript is a main thread (DB 536), that it runs with a
     Component Version (DB 389) and that its Session's `conversation_id` is
@@ -198,6 +211,7 @@ class Launch(db.Model):  # type: ignore[name-defined]
     ended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     session_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("sessions.id"))
     turn_seq: Mapped[int | None] = mapped_column(Integer)
+    work_unit_id: Mapped[int | None] = mapped_column(ForeignKey("work_units.id"))
 
 
 class LaunchComponent(db.Model):  # type: ignore[name-defined]

@@ -30,7 +30,7 @@ from app.models import (
     Walk,
 )
 from app.models.reference import SessionState
-from tests.support import transcripts
+from tests.support import labels, transcripts
 from tests.support.adoption import adopted_project
 from tests.support.database import violated_constraint
 from tests.support.transcripts import CAMP, OTHER, STARTED, SUB_AGENT
@@ -332,6 +332,7 @@ class TestTranscript:
             ),
             ("repository_id", 404, "transcripts_repository_id_fkey"),
             ("read_under_id", 404, "transcripts_read_under_id_fkey"),
+            ("labelled_under_id", 404, "transcripts_labelled_under_id_fkey"),
         ],
     )
     def test_what_it_names_is_held(
@@ -345,6 +346,50 @@ class TestTranscript:
         setattr(thread, column, value)
 
         assert violated_constraint(session) == constraint
+
+    def test_one_no_labeller_covered_holds_no_labellers_version_and_no_stamp(
+        self, session: DbSession, thread: Transcript
+    ) -> None:
+        session.expire(thread)
+
+        assert (thread.labelled_under_id, thread.records_stamp) == (None, None)
+
+    def test_it_holds_the_labellers_version_and_the_stamp_its_labels_came_with(
+        self, session: DbSession, thread: Transcript
+    ) -> None:
+        """DB §2.6: the labeller's own version, held whole (P-455)."""
+        labeller = transcripts.component_version(session, "labeller", "1.2.0")
+        thread.labelled_under_id = labeller.id
+        thread.records_stamp = "1:9f2c41d07a"
+        session.flush()
+        session.expire(thread)
+
+        held = session.execute(
+            select(ComponentVersion.component_code, ComponentVersion.version)
+            .join(Transcript, Transcript.labelled_under_id == ComponentVersion.id)
+            .where(Transcript.id == thread.id)
+        ).one()
+        assert (held.component_code, held.version, thread.records_stamp) == (
+            "labeller",
+            "1.2.0",
+            "1:9f2c41d07a",
+        )
+
+    def test_it_keeps_its_labellers_version_with_no_stamp(
+        self, session: DbSession, thread: Transcript
+    ) -> None:
+        labeller = transcripts.component_version(session, "labeller", "1.2.0")
+        thread.labelled_under_id = labeller.id
+        session.flush()
+
+        assert thread.records_stamp is None
+
+    def test_a_stamp_comes_with_the_labellers_version(
+        self, session: DbSession, thread: Transcript
+    ) -> None:
+        thread.records_stamp = "1:9f2c41d07a"
+
+        assert violated_constraint(session) == "ck_transcripts_records_stamp"
 
     def test_a_sub_agents_spawning_call_is_a_tool_call(
         self, session: DbSession, collector: ComponentVersion
@@ -407,6 +452,34 @@ class TestLaunch:
         session.add(Launch(transcript_id=uuid.uuid4(), started_at=STARTED))
 
         assert violated_constraint(session) == "launches_transcript_id_fkey"
+
+    def test_it_holds_the_lowest_work_unit_it_carried_out(
+        self, session: DbSession, start: Launch
+    ) -> None:
+        """DB 553."""
+        menu = labels.work_unit(session, "RecipeBox/autumn_menu")
+        course = labels.work_unit(
+            session, "RecipeBox/autumn_menu|starter", labels.COURSE, menu
+        )
+        start.work_unit_id = course.id
+        session.flush()
+        session.expire(start)
+
+        assert start.work_unit_id == course.id
+
+    def test_one_that_served_no_unit_carries_out_none(
+        self, session: DbSession, start: Launch
+    ) -> None:
+        session.expire(start)
+
+        assert start.work_unit_id is None
+
+    def test_its_work_unit_is_a_work_unit(
+        self, session: DbSession, start: Launch
+    ) -> None:
+        start.work_unit_id = 404
+
+        assert violated_constraint(session) == "launches_work_unit_id_fkey"
 
     def test_one_no_session_of_pilots_ran_has_no_session_and_no_turn(
         self, session: DbSession, start: Launch
