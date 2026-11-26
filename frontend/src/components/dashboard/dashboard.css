@@ -1,0 +1,124 @@
+/* The dashboard (PilotAppSpecs design/mockup/dashboard/dashboard.css), loaded with its screen's
+   module: the global toolbar and the one view's tab, the banner, the main area and the view's card,
+   the legend and the Rows presentation's chart, its text, lines and surfaces on the app's tokens.
+   The one palette the app has no token for is the categorical one, --series-0 to --series-19 and
+   --series-other, the color's values: dark's set is brighter and more saturated than light's, to
+   read on the dark surfaces. Where the section stands and when it shows is the shell's (shell.css,
+   "The two screens"). */
+
+@layer components {
+  .dash {
+    --series-0: #4e79a7; --series-1: #f28e2b; --series-2: #59a14f; --series-3: #e15759; --series-4: #76b7b2;
+    --series-5: #edc948; --series-6: #b07aa1; --series-7: #ff9da7; --series-8: #9c755f; --series-9: #2f4b7c;
+    --series-10: #a0cbe8; --series-11: #ffbe7d; --series-12: #8cd17d; --series-13: #ff9d9a; --series-14: #86bcb6;
+    --series-15: #f1ce63; --series-16: #d4a6c8; --series-17: #665191; --series-18: #d7b5a6; --series-19: #499894;
+    --series-other: #c4c8d0;
+    font-size: var(--text-sm);
+    line-height: 1.5;
+  }
+  :root[data-theme="dark"] .dash {
+    --series-0: #4f9dff; --series-1: #ff9a2e; --series-2: #45d16a; --series-3: #ff5c6c; --series-4: #22d3c5;
+    --series-5: #ffd43b; --series-6: #e07ad0; --series-7: #ff7eb6; --series-8: #e0a15e; --series-9: #8a7dff;
+    --series-10: #6fd0ff; --series-11: #ffb86b; --series-12: #9cf27e; --series-13: #ff948f; --series-14: #6ff5d6;
+    --series-15: #fff07a; --series-16: #f0a8ff; --series-17: #b48cff; --series-18: #ffc9a8; --series-19: #1fbf9f;
+    --series-other: #6c7488;
+  }
+  .dash .lbl { color: hsl(var(--muted-foreground)); white-space: nowrap; }
+  .dash .empty { padding: 12px 0; color: hsl(var(--muted-foreground)); }
+
+  /* The global toolbar: a strip across the screen, the document tab line's relative (its rule
+     inset at the bottom) at the height a small button needs, in the project head's margins. */
+  .dash .dash-bar {
+    flex: none;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    height: 44px;
+    padding: 0 24px;
+    box-shadow: inset 0 -1px 0 hsl(var(--border));
+  }
+  /* The one view, with no line: a tab at the toolbar's left, a small button high, the tab's own
+     look without the line's primary: its icon and its name, cut short past 300px. */
+  .dash .dash-onetab {
+    flex: 0 1 auto;
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    min-width: 0;
+    max-width: 300px;
+    height: 28px;
+    margin-right: 6px;
+    padding: 0 10px;
+    border: 1px solid hsl(var(--border));
+    border-radius: var(--radius);
+    background: hsl(var(--background));
+    color: hsl(var(--foreground));
+    font-size: var(--text-base);
+  }
+  .dash .dash-onetab > .icon { flex: none; }
+  .dash .dash-onetab .t { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+  /* What failed, under the toolbar until it is closed. */
+  .dash .dash-banner {
+    flex: none;
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    padding: 8px 16px 8px 24px;
+    border-bottom: 1px solid hsl(var(--destructive) / 0.3);
+    background: hsl(var(--destructive) / 0.08);
+    color: hsl(var(--destructive-text));
+  }
+  .dash .dash-banner .text { flex: 1; min-width: 0; max-height: 9em; overflow: auto; padding: 3px 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+
+  /* The main area, which scrolls. (No padding at its top, which a row that sticks would stand
+     under.) */
+  .dash .dash-main { flex: 1; min-height: 0; overflow-y: auto; padding: 0 24px 40px; }
+
+  /* The chart's card: the timeline's item. Under it the legend and the chart. While an answer for
+     another state is on its way, the one drawn fades a little; a read again in place does not. */
+  .dash .dash-card {
+    margin-top: 12px;
+    border: 1px solid hsl(var(--border));
+    border-radius: var(--radius);
+    background: hsl(var(--card));
+  }
+  .dash .dash-card.changing { cursor: progress; opacity: 0.65; transition: opacity 0.2s 0.15s; }
+  .dash .dash-chart { padding: 12px 16px 14px; }
+
+  /* The headings' row stays in sight while the main area scrolls: the page's own elements over
+     the chart's columns, their text where the chart would draw it (its baseline 14px down), the
+     columns' rules drawn through. */
+  .dash .dash-heads { position: sticky; top: 0; z-index: 2; background: hsl(var(--card)); }
+  .dash .rowheads { font-size: 11.5px; font-weight: 600; line-height: 20px; color: hsl(var(--muted-foreground)); }
+  .dash .rowheads > * { position: absolute; top: 0; }
+  .dash .rowheads > svg { left: 0; }
+  .dash .rowheads .colhead { display: inline-flex; align-items: baseline; gap: 4px; white-space: nowrap; }
+  .dash .rowheads .colhead .t { overflow: hidden; text-overflow: ellipsis; }
+  .dash .rowheads .mcol { height: 20px; }
+
+  /* The legend's items 10px apart and its lines 4px, each item's margins making the gaps, the
+     first at the chart's left edge. */
+  .dash .legend { display: flex; flex-wrap: wrap; align-items: center; margin: -2px -5px 6px; }
+  .dash .legend > * { margin: 2px 5px; }
+  .dash .lg { display: flex; align-items: center; gap: 5px; }
+  .dash .sw { display: inline-block; flex: none; width: 11px; height: 11px; border-radius: 2px; }
+  .dash .lg .amt { color: hsl(var(--muted-foreground)); font-variant-numeric: tabular-nums; }
+  .dash .showall { padding: 10px 0; color: hsl(var(--muted-foreground)); }
+
+  .dash svg.chart { display: block; }
+  .dash svg.chart text { font-size: 12px; fill: hsl(var(--foreground)); }
+  .dash svg.chart .muted { fill: hsl(var(--muted-foreground)); }
+  .dash svg.chart .at { font-size: 10.5px; }
+  .dash svg.chart .grid { stroke: hsl(var(--border)); }
+  .dash svg.chart .medlab { font-size: 10.5px; fill: hsl(var(--muted-foreground)); }
+
+  /* The rows. */
+  .dash svg.rowschart .row .bg { fill: transparent; }
+  .dash svg.rowschart .row:hover .bg { fill: hsl(var(--accent)); }
+  .dash svg.rowschart .row.marked .bg { fill: hsl(var(--warning) / 0.15); }
+  .dash svg.rowschart .allbg { fill: hsl(var(--muted)); }
+  .dash svg.rowschart .alltext { font-weight: 600; }
+  .dash svg.rowschart .markline { fill: hsl(var(--warning-text)); }
+  .dash svg.rowschart .medtick { stroke: hsl(var(--foreground)); stroke-width: 1.2; stroke-dasharray: 2 3; opacity: 0.55; pointer-events: none; }
+}
