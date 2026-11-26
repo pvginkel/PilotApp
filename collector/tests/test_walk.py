@@ -14,6 +14,7 @@ from pilot_collection.inventory import InventorySchema
 
 from pilot_collector import VERSION
 from pilot_collector.home import Listed, Transcript
+from pilot_collector.labeller import Stamps
 from pilot_collector.pilot import Pilot
 from pilot_collector.walk import Walker, Work, plan
 from tests.support import AGENT, FOLDER, SESSION, filed, settings, typed
@@ -192,6 +193,94 @@ class TestAWalksWork:
             "new-c",
         ]
         assert [each.transcript.name for each in work.behind] == [OTHER, THIRD, SESSION]
+
+
+HELD = "1:Qm9hdHMgb24gdGhlIGxha2U"
+"""The stamp `_held` holds."""
+
+
+def _stamps(version: str = "1.0.0", stamp: str | None = HELD) -> Stamps:
+    """The labeller `version` answering, its stamp of `SESSION`'s main
+    thread `stamp`."""
+    return Stamps(version, "d", "f", {(SESSION, None): stamp}, 0.1)
+
+
+class TestWhatTheLabellerMakesDiffer:
+    """A transcript Pilot holds as its file stands is labelled again whole
+    where the labeller's major or its stamp differs (F152.6, F152.7)."""
+
+    @pytest.mark.parametrize("version", ["1.3.0", "1.2.1", "1.2.0"])
+    def test_one_held_under_another_minor_or_patch_is_left(self, version: str) -> None:
+        inventory = _inventory(_held(labeller="1.2.0"))
+
+        assert plan([_listed()], inventory, NOW, _stamps(version)) == Work([], [])
+
+    @pytest.mark.parametrize(
+        "held",
+        [{"labeller": "1.2.0"}, {"stamp": "1:QW5vdGhlciBsYWtl"}, {"stamp": None}],
+        ids=["another major", "another stamp", "no stamp"],
+    )
+    def test_one_held_under_another_major_or_stamp_is_behind(
+        self, held: dict[str, Any]
+    ) -> None:
+        listed = _listed()
+
+        work = plan(
+            [listed],
+            _inventory(_held(**held)),
+            NOW,
+            _stamps("2.0.0" if "labeller" in held else "1.0.0"),
+        )
+
+        assert work == Work([], [listed], frozenset({listed.transcript.path}))
+
+    def test_one_no_labeller_labelled_is_behind(self) -> None:
+        listed = _listed()
+
+        work = plan(
+            [listed], _inventory(_held(labeller=None, stamp=None)), NOW, _stamps()
+        )
+
+        assert work == Work([], [listed], frozenset({listed.transcript.path}))
+
+    @pytest.mark.parametrize(
+        "stamps", [None, _stamps(stamp=None)], ids=["no labeller", "no stamp"]
+    )
+    def test_one_no_labeller_stamps_now_is_left(self, stamps: Stamps | None) -> None:
+        inventory = _inventory(_held(labeller=None, stamp=None))
+
+        assert plan([_listed()], inventory, NOW, stamps) == Work([], [])
+
+    def test_one_whose_labels_pilot_refused_under_its_stamp_is_left(self) -> None:
+        listed = _listed()
+        refused = {listed.transcript.path: (61_000, STOOD, "1.0.0", HELD)}
+        inventory = _inventory(_held(stamp=None))
+
+        assert plan([listed], inventory, NOW, _stamps(), refused) == Work([], [])
+        for given in [
+            (61_000, STOOD, "1.0.1", HELD),
+            (61_000, STOOD, "1.0.0", "1:QW5vdGhlciBsYWtl"),
+            (61_001, STOOD, "1.0.0", HELD),
+        ]:
+            work = plan(
+                [listed], inventory, NOW, _stamps(), {listed.transcript.path: given}
+            )
+            assert work.behind == [listed]
+
+    def test_a_changed_file_or_another_collector_is_not_the_labellers_alone(
+        self,
+    ) -> None:
+        changed, behind = _listed(size=61_400), _listed(OTHER)
+        inventory = _inventory(
+            _held(stamp=None), _held(OTHER, collector="0.9.0", stamp=None)
+        )
+        stamps = Stamps(
+            "1.0.0", "d", "f", {(SESSION, None): HELD, (OTHER, None): HELD}, 0.1
+        )
+
+        work = plan([changed, behind], inventory, NOW, stamps)
+
+        assert work == Work([changed], [behind])
 
 
 class TestAWalkWithNoPilot:

@@ -7,7 +7,7 @@ its stdout, under the labeller's contract 1 (the plugin's `docs/labeller.md`
 lists, its stamps and its index are taken as it hands them.
 
 Every request names the contract and the home as the collector sees it, its
-`projects` and its `plugins`. Two verbs are called here:
+`projects` and its `plugins`. Three verbs are called here:
 
 - `stamps`, at every walk: the stamp the labeller would give now for every
   transcript on the home, each handed in its conversation with what Pilot's
@@ -17,26 +17,40 @@ Every request names the contract and the home as the collector sees it, its
   (§ The stamp).
 - `vocabularies`: every list the labeller declares, its nestings and its
   groups, of which Pilot takes the version, the nestings and the lists its
-  shape names (§ The vocabularies).
+  shape names, and a main thread's publication the group its labels name
+  (§ The vocabularies).
+- `label`, over a batch of transcripts: each handed as `stamps` hands it,
+  with its file's path, its Launches and the Calls the labeller reads in it,
+  labelled whole; its answer one line per transcript, its labels or an
+  error, of which a publication carries the labels of the rows it holds
+  (§ The label request and answer).
 
 A call that gives no answer the collector takes raises `Unanswered`: no copy
 installed, a refusal (exit 2), a crash (exit 1), no answer within the time
-the settings give, or an answer that is not the call's.
+the settings give, or an answer that is not the call's. A `label` call cut
+short by a crash or by its time keeps the lines it gave before the cut.
 """
 
 import json
 import os
 import subprocess
 import time
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
-from typing import Any
+from typing import Any, Literal
 
 from pilot_collection.inventory import InventorySchema
+from pilot_collection.publication import (
+    PublicationSchema,
+    PublishedGroupSchema,
+    PublishedLabellingSchema,
+)
 from pilot_collection.vocabularies import DeclaredListsSchema, VocabulariesSchema
-from pydantic import BaseModel, Field, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from pilot_collector.home import PROJECTS, Listed, record_of
+from pilot_collector.reader import Read
 from pilot_collector.settings import INSTALL_PATH, Settings
 
 CONTRACT = 1
@@ -58,8 +72,18 @@ _CACHE = "cache"
 _SAID = 2_000
 """The characters of what a failed call said that a message quotes."""
 
+_UNKEPT = ("batchable_condition",)
+"""What a Call's labels hold that Pilot's record keeps no place for."""
+
 type Ids = tuple[str, str | None]
 """A transcript's two ids, its conversation's and its sub-agent's."""
+
+
+def major(version: str) -> str:
+    """The major of the labeller's version, which alone relabels a
+    transcript whole where it differs (`labeller.md`, "Pilot relabels a
+    conversation whole when the major differs")."""
+    return version.split(".", 1)[0]
 
 
 class Unanswered(Exception):
@@ -93,9 +117,40 @@ class _Stamps(_Answer):
     stamps: list[_Stamp]
 
 
+class _Group(BaseModel):
+    key: str
+    name: str
+    summary: str | None
+
+
 class _Vocabularies(_Answer):
     lists: dict[str, Any]
     nesting: list[Any]
+    groups: list[_Group]
+
+
+class _Line(BaseModel):
+    """A transcript's line of a `label` answer."""
+
+    session_id: str
+    agent_id: str | None
+    answer: str
+
+
+class _Done(BaseModel):
+    done: Literal[True]
+    index: str | None
+
+
+class _LabelsLine(_Line):
+    model_config = ConfigDict(extra="ignore")
+
+    answer: Literal["labels"]
+    stamp: str
+    labels: dict[str, list[dict[str, Any]]]
+    units: list[Any]
+    test_suites: list[dict[str, Any]]
+    ci_builds: list[dict[str, Any]]
 
 
 @dataclass(frozen=True)
@@ -113,6 +168,29 @@ class Stamps:
     be computed."""
     seconds: float
     """How long the stamps took, the request's making and the call."""
+
+
+@dataclass(frozen=True)
+class Declared:
+    """The labeller's `vocabularies` answer as the collector takes it."""
+
+    vocabularies: VocabulariesSchema
+    """What Pilot is declared."""
+    groups: dict[str, PublishedGroupSchema]
+    """Each group it declares, by its key, as a publication names one."""
+
+
+@dataclass(frozen=True)
+class Labels:
+    """The labeller's `label` answer of one batch."""
+
+    version: str
+    """The labeller's own version that answered."""
+    lines: dict[Ids, dict[str, Any]]
+    """Each transcript's line, its labels or its error, by its ids; none
+    for one the answer was cut short of."""
+    cut: str | None
+    """Why the answer was cut short, none where it gave every line."""
 
 
 class Labeller:
@@ -142,16 +220,14 @@ class Labeller:
             Unanswered: The labeller gave no answer the collector takes.
         """
         began = time.perf_counter()
-        conversations = self._conversations(listed, inventory)
+        types: dict[Path, tuple[tuple[int, int, int], str | None]] = {}
+        conversations = self._conversations(listed, inventory, types)
+        self._types = types
         answer = self._answer(
             "stamps",
             _Stamps,
             {
-                "pilot": {
-                    "conversations": [
-                        each.session_id for each in inventory.conversations
-                    ]
-                },
+                "pilot": _pilot(inventory),
                 "index": self._index,
                 "conversations": conversations,
             },
@@ -177,10 +253,11 @@ class Labeller:
             seconds=time.perf_counter() - began,
         )
 
-    def vocabularies(self) -> VocabulariesSchema:
-        """The labeller's vocabularies as Pilot takes them: its version, its
-        nestings and the lists Pilot's shape names, its groups and every
-        other list left out.
+    def vocabularies(self) -> Declared:
+        """The labeller's vocabularies as Pilot takes them, its version, its
+        nestings and the lists Pilot's shape names, every other list left
+        out; and its groups as a publication names one, a group the labeller
+        gives no summary of with an empty one.
 
         Raises:
             Unanswered: The labeller gave no answer the collector takes, or
@@ -189,29 +266,102 @@ class Labeller:
         """
         answer = self._answer("vocabularies", _Vocabularies, {"index": self._index})
         try:
-            return VocabulariesSchema.model_validate(
+            return Declared(
+                VocabulariesSchema.model_validate(
+                    {
+                        "version": answer.version,
+                        "lists": {
+                            name: answer.lists[name]
+                            for name in DeclaredListsSchema.model_fields
+                            if name in answer.lists
+                        },
+                        "nesting": answer.nesting,
+                    }
+                ),
                 {
-                    "version": answer.version,
-                    "lists": {
-                        name: answer.lists[name]
-                        for name in DeclaredListsSchema.model_fields
-                        if name in answer.lists
-                    },
-                    "nesting": answer.nesting,
-                }
+                    group.key: PublishedGroupSchema(
+                        key=group.key, name=group.name, summary=group.summary or ""
+                    )
+                    for group in answer.groups
+                },
             )
         except ValidationError as error:
             raise Unanswered(
                 f"its vocabularies are not the shape Pilot takes: {error}"[:_SAID]
             ) from error
 
+    def label(
+        self, batch: Sequence[tuple[Listed, Read]], inventory: InventorySchema
+    ) -> Labels:
+        """The labeller's labels of each transcript of `batch`, in one call,
+        each labelled whole as its reading took it and handed in its
+        conversation as `stamps` hands it.
+
+        Raises:
+            Unanswered: The labeller gave no answer the collector takes, not
+                even the first line of one.
+        """
+        handed = {
+            (listed.transcript.session_id, listed.transcript.agent_id): {
+                "path": str(
+                    listed.transcript.path.relative_to(listed.transcript.projects)
+                ),
+                "mode": "whole",
+            }
+            | _handed(taken)
+            for listed, taken in batch
+        }
+        said, failed = self._run(
+            "label",
+            {
+                "pilot": _pilot(inventory),
+                "index": self._index,
+                "conversations": self._conversations(
+                    [listed for listed, _ in batch], inventory, self._types, handed
+                ),
+            },
+        )
+        written = said.split(b"\n")[:-1]
+        try:
+            answer = _Answer.model_validate_json(written[0] if written else b"")
+        except ValidationError as error:
+            raise Unanswered(
+                failed or f"its `label` answer is not the call's: {error}"[:_SAID]
+            ) from error
+        if answer.contract != CONTRACT:
+            raise Unanswered(
+                f"its `label` answer is of contract {answer.contract}, and the"
+                f" collector speaks {CONTRACT}"
+            )
+        lines: dict[Ids, dict[str, Any]] = {}
+        cut: str | None = failed or "its `label` answer ends before its `done` line"
+        for raw in written[1:]:
+            try:
+                line = json.loads(raw)
+                if isinstance(line, dict) and "done" in line:
+                    self._index = _Done.model_validate(line).index
+                    cut = failed
+                    break
+                each = _Line.model_validate(line)
+            except (ValueError, ValidationError) as error:
+                cut = f"its `label` answer has a line that is not the call's: {error}"
+                break
+            lines[each.session_id, each.agent_id] = line
+        return Labels(answer.version, lines, None if cut is None else cut[:_SAID])
+
     def _conversations(
-        self, listed: list[Listed], inventory: InventorySchema
+        self,
+        listed: list[Listed],
+        inventory: InventorySchema,
+        types: dict[Path, tuple[tuple[int, int, int], str | None]],
+        handed: Mapping[Ids, dict[str, Any]] | None = None,
     ) -> list[dict[str, Any]]:
         """`listed` as the labeller is handed it: by conversation, each with
         its Sessions and Documents as `inventory` gives them, both empty
         where it holds none, and its main thread before its sub-agents; each
-        transcript with the stamp `inventory` holds for it."""
+        transcript with the stamp `inventory` holds for it, and what
+        `handed` holds for it besides. `types` gains each sub-agent's
+        `agent_type` as its record was read."""
         held = {
             (each.session_id, each.agent_id): each.stamp
             for each in inventory.transcripts
@@ -223,7 +373,6 @@ class Labeller:
         threads: dict[str, list[Listed]] = {}
         for each in listed:
             threads.setdefault(each.transcript.session_id, []).append(each)
-        types: dict[Path, tuple[tuple[int, int, int], str | None]] = {}
         conversations = []
         for session_id in sorted(threads):
             transcripts = []
@@ -240,17 +389,18 @@ class Labeller:
                 if record is not None:
                     transcript["agent_type"] = self._agent_type(record, types)
                 transcript["held"] = held.get((session_id, agent_id))
+                if handed is not None:
+                    transcript |= handed[session_id, agent_id]
                 transcripts.append(transcript)
-            handed = given.get(session_id, {})
+            context = given.get(session_id, {})
             conversations.append(
                 {
                     "session_id": session_id,
-                    "sessions": handed.get("sessions", []),
-                    "documents": handed.get("documents", []),
+                    "sessions": context.get("sessions", []),
+                    "documents": context.get("documents", []),
                     "transcripts": transcripts,
                 }
             )
-        self._types = types
         return conversations
 
     def _agent_type(
@@ -296,6 +446,18 @@ class Labeller:
 
     def _call(self, verb: str, request: dict[str, Any]) -> bytes:
         """What the labeller wrote to its stdout for one call."""
+        said, failed = self._run(verb, request)
+        if failed is not None:
+            raise Unanswered(failed)
+        return said
+
+    def _run(self, verb: str, request: dict[str, Any]) -> tuple[bytes, str | None]:
+        """What the labeller wrote to its stdout for one call, and why the
+        call failed: none where it exited 0.
+
+        Raises:
+            Unanswered: Its command cannot be run, or it refused the call.
+        """
         command = [*self._command(), verb]
         sent = json.dumps({"contract": CONTRACT, "home": self._home} | request)
         try:
@@ -306,10 +468,11 @@ class Labeller:
                 timeout=self._seconds,
                 check=False,
             )
-        except subprocess.TimeoutExpired:
-            raise Unanswered(
-                f"its `{verb}` gave no answer within {self._seconds:g} s"
-            ) from None
+        except subprocess.TimeoutExpired as cut:
+            return (
+                cut.stdout or b"",
+                f"its `{verb}` gave no answer within {self._seconds:g} s",
+            )
         except OSError as error:
             raise Unanswered(f"its command cannot be run: {error}") from error
         refusal = _refusal(done.stdout) if done.returncode == 2 else None
@@ -317,11 +480,12 @@ class Labeller:
             raise Unanswered(f"it refused the `{verb}` call: {refusal}")
         if done.returncode != 0:
             said = done.stderr.decode(errors="replace").strip().splitlines()
-            raise Unanswered(
+            return (
+                done.stdout,
                 f"its `{verb}` call exited {done.returncode}:"
-                f" {said[-1] if said else 'it wrote nothing to its stderr'}"[:_SAID]
+                f" {said[-1] if said else 'it wrote nothing to its stderr'}"[:_SAID],
             )
-        return done.stdout
+        return done.stdout, None
 
     def _command(self) -> list[str]:
         """The command the settings name, the installed copy's folder in it
@@ -365,6 +529,161 @@ class Labeller:
                 f" {PLUGINS}/{_CACHE}"
             )
         return self._plugins.joinpath(*parts)
+
+
+def _pilot(inventory: InventorySchema) -> dict[str, Any]:
+    """The request's `pilot` header: the conversations a Session of Pilot's
+    ran."""
+    return {"conversations": [each.session_id for each in inventory.conversations]}
+
+
+def _handed(taken: Read) -> dict[str, Any]:
+    """What a whole `label` request hands of a transcript as `taken` read
+    it: a main thread's Launches, and the Calls the labeller reads in its
+    file, each with its place and, on a main thread, its Launch: the one
+    holding its Prompt, as Pilot places it (DB 543), else, as for a Call
+    Pilot holds none of, the Launch of the Call before it, the first for the
+    first."""
+    publication = taken.publication
+    if publication.agent_id is not None or not publication.launches:
+        return {
+            "calls": [
+                {"id": named, "position": position}
+                for position, named in enumerate(taken.calls, start=1)
+            ]
+        }
+    prompted: dict[int, int] = {}
+    for n, launched in enumerate(publication.launches, start=1):
+        first = len(prompted) + 1
+        prompted |= dict.fromkeys(range(first, first + len(launched.prompts)), n)
+    prompts = {call.message_id: call.prompt for call in publication.calls}
+    calls = []
+    within = 1
+    for position, named in enumerate(taken.calls, start=1):
+        prompt = prompts.get(named)
+        within = within if prompt is None else prompted.get(prompt, within)
+        calls.append({"id": named, "position": position, "launch": within})
+    return {
+        "launches": [
+            {"n": n, "started_at": launched.started_at.isoformat()}
+            for n, launched in enumerate(publication.launches, start=1)
+        ],
+        "calls": calls,
+    }
+
+
+def with_labels(
+    publication: PublicationSchema,
+    line: Mapping[str, Any],
+    version: str,
+    groups: Mapping[str, PublishedGroupSchema],
+) -> PublicationSchema:
+    """`publication` with the labels a `label` answer's `line` gives of its
+    transcript, under the labeller's `version`: those of the rows it holds,
+    the Calls of its own and their Tool Calls, and the Segments they fall
+    in, renumbered from 1 where a Segment of none of them falls out, since
+    Pilot holds a whole call's Segments at 1 to their number; a main
+    thread's adopted group as its `group`, from `groups`; and of a Call's
+    labels what Pilot's record keeps.
+
+    Raises:
+        Unanswered: The line is no labels of the call's shape, or names a
+            group the labeller does not declare.
+    """
+    try:
+        answer = _LabelsLine.model_validate(line)
+    except ValidationError as error:
+        raise Unanswered(
+            f"its labels are not the shape of the call's: {error}"[:_SAID]
+        ) from error
+    labels = answer.labels
+    held = {call.message_id for call in publication.calls}
+    requested = {
+        tool_call.tool_use_id
+        for call in publication.calls
+        for tool_call in call.tool_calls
+    }
+    calls = [row for row in labels.get("calls", []) if row.get("id") in held]
+    named = {row.get("segment") for row in calls}
+    kept = [row for row in labels.get("segments", []) if row.get("position") in named]
+    renumbered = {row.get("position"): place for place, row in enumerate(kept, 1)}
+    waits = [
+        row for row in labels.get("ci_waits", []) if row.get("tool_use_id") in requested
+    ]
+    runs = [
+        row
+        for row in labels.get("test_runs", [])
+        if row.get("tool_use_id") is None or row.get("tool_use_id") in requested
+    ]
+    built = {(row.get("job"), row.get("number")) for row in waits}
+    suites = {row.get("suite") for row in runs}
+    adopted = [row.get("adopted_group") for row in labels.get("transcript", [])]
+    key = adopted[0] if adopted else None
+    if key is not None and key not in groups:
+        raise Unanswered(
+            f"its labels name the group `{key}`, which it does not declare"
+        )
+    try:
+        labelling = PublishedLabellingSchema.model_validate(
+            {
+                "version": version,
+                "stamp": answer.stamp,
+                "labels": {
+                    "launches": labels.get("launches", []),
+                    "calls": [
+                        {
+                            name: renumbered.get(label, label)
+                            if name == "segment"
+                            else label
+                            for name, label in row.items()
+                            if name not in _UNKEPT
+                        }
+                        for row in calls
+                    ],
+                    "segments": [
+                        row | {"position": renumbered[row.get("position")]}
+                        for row in kept
+                    ],
+                    "tool_calls": [
+                        row
+                        for row in labels.get("tool_calls", [])
+                        if row.get("tool_use_id") in requested
+                    ],
+                    "events": [
+                        row
+                        for row in labels.get("events", [])
+                        if row.get("call") in held
+                    ],
+                    "context_parts": [
+                        row
+                        for row in labels.get("context_parts", [])
+                        if row.get("call") in held
+                    ],
+                    "test_runs": runs,
+                    "ci_waits": waits,
+                    "documents": labels.get("documents", []),
+                },
+                "units": answer.units,
+                "test_suites": [
+                    row for row in answer.test_suites if row.get("code") in suites
+                ],
+                "ci_builds": [
+                    row
+                    for row in answer.ci_builds
+                    if (row.get("job"), row.get("number")) in built
+                ],
+            }
+        )
+    except ValidationError as error:
+        raise Unanswered(
+            f"its labels are not the shape Pilot takes: {error}"[:_SAID]
+        ) from error
+    return publication.model_copy(
+        update={
+            "labelling": labelling,
+            "group": None if key is None else groups[key],
+        }
+    )
 
 
 def _refusal(said: bytes) -> str | None:

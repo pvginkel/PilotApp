@@ -1795,6 +1795,66 @@ class TestCalls:
         assert call.tokens == {"input": 5, "output": 22}
 
 
+class TestTheLabellersCalls:
+    """The Calls the labeller reads in what a reading took, which it is
+    handed: every assistant line's `message.id`, in the order of its first
+    (`labeller.md` § Names both sides compute)."""
+
+    def test_a_line_claude_code_wrote_itself_and_one_with_no_time_are_among_them(
+        self, tmp_path: Path
+    ) -> None:
+        untimed = assistant(6, "msg_untimed")
+        del untimed["timestamp"]
+
+        taken = read(
+            filed(
+                tmp_path,
+                [
+                    typed(0),
+                    assistant(4, "msg_01", output=1),
+                    synthetic(5, "API Error: 529 overloaded"),
+                    untimed,
+                    assistant(7, "msg_02", output=1),
+                    assistant(8, "msg_01", output=2),
+                ],
+            ),
+            SETTINGS,
+        )
+
+        assert taken.calls == ("msg_01", "msg_synthetic", "msg_untimed", "msg_02")
+        assert [call.message_id for call in taken.publication.calls] == [
+            "msg_01",
+            "msg_02",
+        ]
+
+    def test_a_forks_copies_of_its_parents_calls_are_among_them(
+        self, tmp_path: Path
+    ) -> None:
+        named = filed(tmp_path, _forked(), AGENT)
+        recorded(tmp_path, **FORKED)
+
+        taken = read(named, SETTINGS)
+
+        assert taken.calls == ("msg_01", "msg_02", "msg_03")
+        assert [call.message_id for call in taken.publication.calls] == ["msg_03"]
+
+    @pytest.mark.parametrize(
+        ("cut", "calls"),
+        [(0, ("msg_01", "msg_02")), (40, ("msg_01",))],
+        ids=["it parses", "it does not"],
+    )
+    def test_the_files_last_line_with_no_newline_yet_is_read_where_it_parses(
+        self, tmp_path: Path, cut: int, calls: tuple[str, ...]
+    ) -> None:
+        whole = support.content([typed(0), assistant(4, "msg_01", output=3)])
+        begun = support.content([assistant(9, "msg_02", output=5)])[: -1 - cut]
+
+        taken = read(filed(tmp_path, whole + begun), SETTINGS)
+
+        assert taken.calls == calls
+        assert [call.message_id for call in taken.publication.calls] == ["msg_01"]
+
+
 class TestASendingTime:
     def test_a_call_was_sent_when_the_request_its_lines_name_was_written(
         self, tmp_path: Path

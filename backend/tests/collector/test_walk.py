@@ -1,8 +1,9 @@
 """The collector's walk against Pilot's routes (F152.2): a home of the
 scenario's transcript files, walked by the collector's own code over HTTP
 with the stub labeller (F122.5), and what Pilot's record then holds, of a
-file published whole and of one that grew, published appended (F152.15), and
-of the labeller's vocabularies (F152.6)."""
+file published whole with its labels (F152.6, F152.7), of one that grew,
+published appended where no labeller answers (F152.15), and of the
+labeller's vocabularies."""
 
 import json
 import logging
@@ -43,17 +44,23 @@ from app.models import (
     Call,
     Compaction,
     ComponentVersion,
+    Environment,
     Event,
     HookRun,
     Launch,
     LaunchComponent,
+    Project,
     Prompt,
+    Segment,
     ToolCall,
     Transcript,
+    User,
     Walk,
     WorkUnitKind,
     WorkUnitKindNesting,
 )
+from app.models import Session as PilotSession
+from app.models.reference import SessionState, UserKind
 from app.services import publication_service
 from tests.support.publications import COLLECTOR_TOKEN, collector_headers
 
@@ -78,11 +85,27 @@ LOGGER = "pilot_collector.walk"
 PUBLICATIONS = "app.services.publication_service"
 """The logger of Pilot's side of a publication."""
 
+UNLABELLED = {"COLLECTOR_LABELLER": labeller.command("--speaks", "2")}
+"""The settings of a collector whose labeller speaks a contract it does
+not, so that its walk labels nothing: a file that grew is then published
+appended, where a walk a labeller answers publishes it whole."""
+
 
 @pytest.fixture
 def pilot_url(committed_app: Flask) -> Generator[str]:
     """Pilot served over HTTP on a database of its own, where every call's
-    commit is real."""
+    commit is real, with the service user that makes the project of a group
+    a publication first names (DB 338)."""
+    with _record(committed_app) as record:
+        record.add(
+            User(
+                kind_code=UserKind.SERVICE,
+                subject="subject-fleet",
+                handle="fleet",
+                name="KubeCoder fleet",
+            )
+        )
+        record.commit()
     server = make_server("127.0.0.1", 0, committed_app, threaded=True)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
@@ -111,6 +134,17 @@ def walker(pilot_url: str, home: Path, stop: threading.Event) -> Generator[Walke
     """The collector's walk of that home for that Pilot."""
     with Pilot(pilot_url, COLLECTOR_TOKEN) as pilot:
         yield Walker(pilot, _settings(pilot_url, home), stop)
+
+
+class _Unlabelled:
+    """What a walk that labels nothing publishes of a file that grew."""
+
+    @pytest.fixture
+    def walker(
+        self, pilot_url: str, home: Path, stop: threading.Event
+    ) -> Generator[Walker]:
+        with Pilot(pilot_url, COLLECTOR_TOKEN) as pilot:
+            yield Walker(pilot, _settings(pilot_url, home, **UNLABELLED), stop)
 
 
 def _settings(pilot_url: str, home: Path, **given: Any) -> Settings:
@@ -366,18 +400,24 @@ class TestAWalk:
         assert max(collected()) <= second
 
     def test_a_new_file_and_a_changed_one_are_published_and_the_rest_left(
-        self, committed_app: Flask, home: Path, walker: Walker
+        self,
+        committed_app: Flask,
+        pilot_url: str,
+        home: Path,
+        stop: threading.Event,
     ) -> None:
         """A file that grew, one at the same size at another time, and one
-        the home did not have: the first is published appended, the others
-        whole (F152.17)."""
-        walker.walk()
-        before = _held(committed_app)
-        _grown(_file(home, RECIPES))
-        _aged(_file(home, SCALER), minutes=3)
-        _copied(home)
+        the home did not have: where no labeller answers, the first is
+        published appended, the others whole (F152.17)."""
+        with Pilot(pilot_url, COLLECTOR_TOKEN) as pilot:
+            walker = Walker(pilot, _settings(pilot_url, home, **UNLABELLED), stop)
+            walker.walk()
+            before = _held(committed_app)
+            _grown(_file(home, RECIPES))
+            _aged(_file(home, SCALER), minutes=3)
+            _copied(home)
 
-        walked = walker.walk()
+            walked = walker.walk()
 
         assert (walked.published, walked.appended) == (3, 1)
         held = _held(committed_app)
@@ -548,7 +588,7 @@ class TestAWalksOrder:
         }
 
 
-class TestTheReplayAtRest:
+class TestTheReplayAtRest(_Unlabelled):
     @pytest.fixture
     def appended(
         self, committed_app: Flask, pilot_url: str, home: Path, walker: Walker
@@ -962,9 +1002,9 @@ def _walks_lines(caplog: pytest.LogCaptureFixture) -> list[str]:
 
 
 class TestTheLabeller:
-    """The labeller at every walk, while it publishes no label (F152.6,
-    F152.7): the stamps of every transcript on the home in one call, and the
-    vocabularies declared to Pilot."""
+    """The labeller at every walk (F152.6, F152.7): the stamps of every
+    transcript on the home in one call, and the vocabularies declared to
+    Pilot."""
 
     def test_the_first_walk_declares_its_vocabularies_and_takes_its_stamps(
         self,
@@ -974,12 +1014,11 @@ class TestTheLabeller:
         caplog: pytest.LogCaptureFixture,
     ) -> None:
         verbs = _verbs(monkeypatch)
-        sent = _sent(walker, monkeypatch)
 
         with caplog.at_level(logging.INFO, LOGGER):
             walked = walker.walk()
 
-        assert verbs == ["stamps", "vocabularies"]
+        assert verbs == ["stamps", "vocabularies", "label"]
         assert walked.stamps is not None
         assert walked.stamps.version == labeller.VERSION
         assert {
@@ -987,8 +1026,7 @@ class TestTheLabeller:
             for session_id, agent_id in walked.stamps.stamps
         } == SCENARIOS
         assert _kinds(committed_app) == _scenarios_kinds()
-        assert (walked.published, walked.ended) == (3, True)
-        assert [publication.labelling for publication in sent] == [None] * 3
+        assert (walked.published, walked.labelled, walked.ended) == (3, 3, True)
         assert (
             f"The vocabularies of the labeller {labeller.VERSION} are declared to Pilot"
         ) in caplog.messages
@@ -1127,7 +1165,9 @@ class TestNoLabellerToRun:
         walker: Walker,
         caplog: pytest.LogCaptureFixture,
     ) -> None:
-        """Run records that do not parse crash the stub."""
+        """Run records that do not parse crash the stub. Once it answers,
+        what was published meanwhile is labelled whole, the file that grew
+        and the two Pilot holds with no stamp."""
         kept = _records(home).read_text()
         _records(home).write_text("{")
 
@@ -1137,8 +1177,8 @@ class TestNoLabellerToRun:
             _grown(_file(home, RIDES))
             answered = walker.walk()
 
-        assert (failed.published, failed.stamps) == (3, None)
-        assert answered.published == 1
+        assert (failed.published, failed.labelled, failed.stamps) == (3, 0, None)
+        assert (answered.published, answered.labelled) == (3, 3)
         assert answered.stamps is not None
         ((level, why),) = _no_stamps(caplog)
         assert level == "WARNING"
@@ -1175,6 +1215,483 @@ class TestNoLabellerToRun:
         assert why.startswith("Pilot refused the labeller's vocabularies with 400: ")
         assert "the code `errand` is declared 2 times" in why
         assert _kinds(committed_app) == ([], set())
+
+
+def _labelled_under(app: Flask) -> dict[str, tuple[str | None, str | None]]:
+    """Each Transcript Pilot holds, by its name, with the labeller's version
+    its labels were written under and their stamp."""
+    with _record(app) as record:
+        rows = record.execute(
+            select(
+                Transcript.session_id,
+                Transcript.agent_id,
+                ComponentVersion.version,
+                Transcript.records_stamp,
+            ).outerjoin(
+                ComponentVersion, ComponentVersion.id == Transcript.labelled_under_id
+            )
+        ).all()
+    return {
+        row.session_id
+        if row.agent_id is None
+        else f"{row.session_id}/{row.agent_id}": (row.version, row.records_stamp)
+        for row in rows
+    }
+
+
+def _labels(app: Flask) -> dict[str, tuple[Any, ...]]:
+    """What Pilot holds of each Transcript's labels, by its name: its
+    adopted project, its Segments' kinds and its Calls' classes."""
+    with _record(app) as record:
+        held: dict[str, tuple[Any, ...]] = {}
+        for thread in record.scalars(select(Transcript)):
+            name = (
+                thread.session_id
+                if thread.agent_id is None
+                else f"{thread.session_id}/{thread.agent_id}"
+            )
+            held[name] = (
+                thread.adopted_project_id,
+                list(
+                    record.scalars(
+                        select(Segment.kind_code)
+                        .where(Segment.transcript_id == thread.id)
+                        .order_by(Segment.position)
+                    )
+                ),
+                list(
+                    record.scalars(
+                        select(Call.call_class_code)
+                        .where(Call.transcript_id == thread.id)
+                        .order_by(Call.position)
+                    )
+                ),
+            )
+    return held
+
+
+def _stub(walker: Walker, monkeypatch: pytest.MonkeyPatch, *options: str) -> None:
+    """Have the walker's labeller be the stub, run with `options`."""
+    monkeypatch.setattr(walker._labeller, "_named", labeller.command(*options))
+
+
+def _built() -> dict[str, dict[str, Any]]:
+    """The builder's publications of the scenario, by a transcript's name."""
+    return {
+        built["session_id"]
+        if built.get("agent_id") is None
+        else f"{built['session_id']}/{built['agent_id']}": built
+        for built in Builder(SCENARIO, UNTIL).publications()
+    }
+
+
+def _named(publication: PublicationSchema) -> str:
+    if publication.agent_id is None:
+        return publication.session_id
+    return f"{publication.session_id}/{publication.agent_id}"
+
+
+def _refused_labels(caplog: pytest.LogCaptureFixture) -> list[str]:
+    """The walk's lines for the transcripts whose labels Pilot refused."""
+    return [
+        record.getMessage()
+        for record in caplog.records
+        if record.name == LOGGER
+        and record.getMessage().startswith("Pilot refused the labels of ")
+    ]
+
+
+class TestTheLabels:
+    """The labeller's labels published with the facts (F152.6, F152.7): a
+    transcript labelled whole, and labelled again whole where the labeller's
+    major or its stamp differs."""
+
+    def test_the_collectors_publications_carry_the_builders_labels_and_group(
+        self,
+        committed_app: Flask,
+        walker: Walker,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        sent = _sent(walker, monkeypatch)
+
+        walked = walker.walk()
+
+        assert walked.stamps is not None
+        built = _built()
+        assert {_named(each) for each in sent} == SCENARIOS
+        for publication in sent:
+            expected = PublicationSchema.model_validate(built[_named(publication)])
+            assert publication.labelling == expected.labelling
+            assert publication.group == expected.group
+        assert any(publication.group is not None for publication in sent)
+        assert _labelled_under(committed_app) == {
+            (session_id if agent_id is None else f"{session_id}/{agent_id}"): (
+                labeller.VERSION,
+                stamp,
+            )
+            for (session_id, agent_id), stamp in walked.stamps.stamps.items()
+        }
+        labels = _labels(committed_app)
+        assert labels[RIDES][0] is not None
+        assert all(classes and None not in classes for _, _, classes in labels.values())
+
+    def test_a_minor_or_a_patch_relabels_nothing_and_a_major_relabels_all(
+        self,
+        committed_app: Flask,
+        walker: Walker,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """P-455: labels written under the labeller's 1.2.0 are kept under
+        1.3.0 and 1.2.1, and written again under 2.0.0."""
+        _stub(walker, monkeypatch, "--version", "1.2.0")
+        walker.walk()
+        verbs = _verbs(monkeypatch)
+        walked: dict[str, tuple[int, int]] = {}
+        under: dict[str, set[str | None]] = {}
+
+        for version in ("1.3.0", "1.2.1", "2.0.0"):
+            _stub(walker, monkeypatch, "--version", version)
+            walk = walker.walk()
+            walked[version] = (walk.published, walk.labelled)
+            under[version] = {
+                held for held, _ in _labelled_under(committed_app).values()
+            }
+
+        assert walked == {"1.3.0": (0, 0), "1.2.1": (0, 0), "2.0.0": (3, 3)}
+        assert under == {"1.3.0": {"1.2.0"}, "1.2.1": {"1.2.0"}, "2.0.0": {"2.0.0"}}
+        assert verbs == [
+            *("stamps", "vocabularies") * 2,
+            *("stamps", "vocabularies", "label"),
+        ]
+
+    def test_a_plugin_release_that_leaves_the_labeller_alone_relabels_nothing(
+        self,
+        committed_app: Flask,
+        pilot_url: str,
+        home: Path,
+        stop: threading.Event,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """The installed copy moves from the plugin's 0.10.200 to its
+        0.10.201, the stub in both."""
+        installed = home / "plugins" / "installed_plugins.json"
+        cache = "/home/ubuntu/.claude/plugins/cache/aiworkflow/dev"
+        for release in ("0.10.200", "0.10.201"):
+            tools = (
+                home / "plugins" / "cache" / "aiworkflow" / "dev" / release / "tools"
+            )
+            tools.mkdir(parents=True)
+            shutil.copyfile(labeller.__file__, tools / "labeller.py")
+
+        def release(version: str) -> None:
+            installed.write_text(
+                json.dumps(
+                    {
+                        "plugins": {
+                            "dev@aiworkflow": [{"installPath": f"{cache}/{version}"}]
+                        }
+                    }
+                )
+            )
+
+        release("0.10.200")
+        default = Settings.model_fields["COLLECTOR_LABELLER"].default
+        with Pilot(pilot_url, COLLECTOR_TOKEN) as pilot:
+            walker = Walker(
+                pilot, _settings(pilot_url, home, COLLECTOR_LABELLER=default), stop
+            )
+            first = walker.walk()
+            release("0.10.201")
+            verbs = _verbs(monkeypatch)
+            again = walker.walk()
+
+        assert (first.published, first.labelled) == (3, 3)
+        assert (again.published, verbs) == (0, ["stamps"])
+        assert again.stamps is not None and again.stamps.version == labeller.VERSION
+
+    def test_a_stamp_that_differs_relabels_its_transcript_alone(
+        self,
+        committed_app: Flask,
+        home: Path,
+        walker: Walker,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """The errand the recipes' session served is cut into three parts
+        now: its main thread's stamp covers its units, its sub-agent's does
+        not."""
+        walker.walk()
+        before = _labelled_under(committed_app)
+        records = json.loads(_records(home).read_text())
+        records["units"][0]["measures"][0]["amount"] = 3
+        _records(home).write_text(json.dumps(records))
+        sent = _sent(walker, monkeypatch)
+
+        walked = walker.walk()
+
+        assert (walked.published, walked.labelled) == (1, 1)
+        assert [_named(each) for each in sent] == [RECIPES]
+        after = _labelled_under(committed_app)
+        assert after[RECIPES] != before[RECIPES]
+        assert {name: after[name] for name in (SCALER, RIDES)} == {
+            name: before[name] for name in (SCALER, RIDES)
+        }
+        assert walker.walk().published == 0
+
+    def test_a_batch_cut_short_publishes_the_rest_with_their_facts(
+        self,
+        committed_app: Flask,
+        walker: Walker,
+        monkeypatch: pytest.MonkeyPatch,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """The stub pausing before each transcript's line, past the time a
+        call may take after the first: what it labelled is published with
+        its labels, the rest with their facts, and labelled at the next
+        walk."""
+        _stub(walker, monkeypatch, "--pause", "0.6")
+        monkeypatch.setattr(walker._labeller, "_seconds", 1.0)
+
+        with caplog.at_level(logging.WARNING, LOGGER):
+            cut = walker.walk()
+        _stub(walker, monkeypatch)
+        again = walker.walk()
+
+        assert (cut.published, cut.labelled) == (3, 1)
+        assert (again.published, again.labelled) == (2, 2)
+        assert (
+            "The labeller labels nothing further in this walk: its answer was cut"
+            " short: its `label` gave no answer within 1 s"
+        ) in caplog.messages
+        assert {held for held, _ in _labelled_under(committed_app).values()} == {
+            labeller.VERSION
+        }
+
+    def test_one_it_answers_an_error_for_is_published_with_its_facts_alone(
+        self,
+        committed_app: Flask,
+        home: Path,
+        walker: Walker,
+        monkeypatch: pytest.MonkeyPatch,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """A Call left out of what it is handed of the rides' thread, as
+        where its file gained a Call since its reading: the stub answers
+        `calls_mismatch` for it, and labels the others. Its file new, it is
+        published with its facts; then only its stamp differs, and it is
+        left for the next walk. A file that grew meets it often, so it is
+        no warning."""
+        handed = running._handed
+
+        def short(taken: reader.Read) -> dict[str, Any]:
+            given = handed(taken)
+            if taken.publication.session_id == RIDES:
+                given["calls"] = given["calls"][:-1]
+            return given
+
+        monkeypatch.setattr(running, "_handed", short)
+        with caplog.at_level(logging.INFO, LOGGER):
+            first = walker.walk()
+            records = json.loads(_records(home).read_text())
+            records["groups"][0]["summary"] = "The gear tables, kept by hand."
+            _records(home).write_text(json.dumps(records))
+            left = walker.walk()
+        monkeypatch.setattr(running, "_handed", handed)
+        labelled = walker.walk()
+
+        assert (first.published, first.labelled) == (3, 2)
+        assert (left.published, left.waiting) == (0, 1)
+        assert (labelled.published, labelled.labelled) == (1, 1)
+        given = [
+            (record.levelname, record.getMessage())
+            for record in caplog.records
+            if record.getMessage().startswith("The labeller gave the transcript ")
+        ]
+        assert [level for level, _ in given] == ["INFO", "INFO"]
+        for _, message in given:
+            assert message.startswith(f"The labeller gave the transcript {RIDES}, ")
+            assert "no labels: it answered an error, calls_mismatch: Call " in message
+            assert ": handed None, the file has " in message
+        assert _labelled_under(committed_app)[RIDES][0] == labeller.VERSION
+
+    def test_a_labeller_that_does_not_answer_removes_no_label(
+        self,
+        committed_app: Flask,
+        home: Path,
+        walker: Walker,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """While it refuses the contract, a file that grew is published
+        with its facts and the labels and the adoption Pilot holds stand;
+        one whose stamp would now differ is not published. Once it answers,
+        both are labelled whole."""
+        walker.walk()
+        before = _labels(committed_app)
+        _stub(walker, monkeypatch, "--speaks", "2")
+        _grown(_file(home, RIDES))
+        records = json.loads(_records(home).read_text())
+        records["units"][0]["measures"][0]["amount"] = 3
+        _records(home).write_text(json.dumps(records))
+        sent = _sent(walker, monkeypatch)
+
+        unanswered = walker.walk()
+
+        assert (unanswered.published, unanswered.labelled) == (1, 0)
+        assert [(_named(each), each.labelling, each.group) for each in sent] == [
+            (RIDES, None, None)
+        ]
+        assert _labels(committed_app) == before
+        assert _labelled_under(committed_app)[RIDES] == (labeller.VERSION, None)
+
+        _stub(walker, monkeypatch)
+        answered = walker.walk()
+
+        assert (answered.published, answered.labelled) == (2, 2)
+        assert {_named(each) for each in sent[1:]} == {RIDES, RECIPES}
+        assert _labels(committed_app) == before
+        assert None not in {
+            stamp for _, stamp in _labelled_under(committed_app).values()
+        }
+
+    def test_pilot_refusing_its_labels_has_the_vocabularies_declared_again(
+        self,
+        committed_app: Flask,
+        pilot_url: str,
+        home: Path,
+        walker: Walker,
+        monkeypatch: pytest.MonkeyPatch,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """Another declaration in between, a scenario's load's on its stage,
+        took the place from the kinds of work the stub declares: the labels
+        of the recipes' thread that grew are refused, the vocabularies
+        declared again and the labels taken."""
+        walker.walk()
+        other = Builder(SCENARIO, UNTIL).vocabularies()
+        other["lists"]["work_unit_kind"] = [
+            {"code": "pinch", "name": "Pinch", "description": "A pinch.", "position": 1}
+        ]
+        other["nesting"] = []
+        answer = httpx.put(
+            f"{pilot_url}/api/collector/vocabularies",
+            json=other,
+            headers=collector_headers(),
+        )
+        assert answer.status_code == 204, answer.text
+        _grown(_file(home, RECIPES))
+        verbs = _verbs(monkeypatch)
+
+        with caplog.at_level(logging.INFO, LOGGER):
+            walked = walker.walk()
+
+        assert (walked.published, walked.labelled) == (1, 1)
+        assert verbs == ["stamps", "label", "vocabularies"]
+        assert _kinds(committed_app)[0][:2] == _scenarios_kinds()[0]
+        assert _refused_labels(caplog) == []
+
+    def test_labels_pilot_refuses_again_wait_on_their_file_or_stamp(
+        self,
+        committed_app: Flask,
+        home: Path,
+        walker: Walker,
+        monkeypatch: pytest.MonkeyPatch,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """The recipes' errand now sits in a leg, which no nesting allows:
+        Pilot refuses its main thread's labels whatever is declared. Only
+        its stamp differing, it is left; its file grown, it is published
+        with its facts alone; and it is labelled once its stamp changes
+        again."""
+        walker.walk()
+        records = json.loads(_records(home).read_text())
+        records["units"].insert(
+            0, {"key": "recipe-box|Pantry", "kind": "leg", "title": "Pantry"}
+        )
+        records["units"][1]["part_of"] = "recipe-box|Pantry"
+        _records(home).write_text(json.dumps(records))
+        verbs = _verbs(monkeypatch)
+
+        with caplog.at_level(logging.WARNING, LOGGER):
+            refused = walker.walk()
+            waits = walker.walk()
+            _grown(_file(home, RECIPES))
+            grown = walker.walk()
+        records["units"].pop(0)
+        records["units"][0]["part_of"] = None
+        _records(home).write_text(json.dumps(records))
+        labelled = walker.walk()
+
+        assert (refused.published, refused.waiting) == (0, 1)
+        assert (waits.published, waits.waiting) == (0, 0)
+        assert (grown.published, grown.labelled) == (1, 0)
+        assert (labelled.published, labelled.labelled) == (1, 1)
+        assert verbs[:6] == [
+            "stamps",
+            "label",
+            "vocabularies",
+            "stamps",
+            "stamps",
+            "label",
+        ]
+        (first, *_) = lines = _refused_labels(caplog)
+        assert len(lines) == 2
+        assert first.startswith(
+            f"Pilot refused the labels of the transcript {RECIPES}, "
+        )
+        assert "no nesting pairs a `errand` in a `leg`" in first
+
+    def test_a_group_pilot_refuses_is_published_without_it(
+        self,
+        committed_app: Flask,
+        walker: Walker,
+        monkeypatch: pytest.MonkeyPatch,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """A Session of Pilot's ran the rides' conversation, and the stub,
+        not handed that, adopts it: Pilot refuses the group (DB 539) and
+        takes its labels without it."""
+        with _record(committed_app) as record:
+            person = User(
+                kind_code=UserKind.PERSON,
+                subject="subject-ada",
+                handle="ada",
+                name="Ada Example",
+                avatar_slot=1,
+            )
+            record.add(person)
+            record.flush()
+            project = Project(created_by_user_id=person.id)
+            environment = Environment(
+                id="example-1", name="Example-1", exempt=False, last_seen_at=UNTIL
+            )
+            record.add_all([project, environment])
+            record.flush()
+            record.add(
+                PilotSession(
+                    project_id=project.id,
+                    environment_id=environment.id,
+                    kind_code="work",
+                    cwd="/work/BikeLog",
+                    token_hash="1" * 64,
+                    state_code=SessionState.RUNNING,
+                    conversation_id=RIDES,
+                )
+            )
+            record.commit()
+        monkeypatch.setattr(running, "_pilot", lambda inventory: {"conversations": []})
+        sent = _sent(walker, monkeypatch)
+
+        with caplog.at_level(logging.WARNING, LOGGER):
+            walked = walker.walk()
+
+        assert (walked.published, walked.labelled) == (3, 3)
+        rides = [each for each in sent if _named(each) == RIDES]
+        assert [each.group is None for each in rides] == [False, True]
+        assert _labels(committed_app)[RIDES][0] is None
+        assert _labelled_under(committed_app)[RIDES][0] == labeller.VERSION
+        assert any(
+            message.startswith(f"The main thread {RIDES} is published with no group: ")
+            for message in caplog.messages
+        )
 
 
 class TestTheWalksRhythm:
@@ -1606,6 +2123,9 @@ class TestASubAgentsSpawningCall:
         }
         calls = _calls_of(committed_app, f"{main['session_id']}/{FORK}")
         assert calls == (3 if copied else 1)
+        assert _labelled_under(committed_app)[f"{main['session_id']}/{FORK}"][0] == (
+            labeller.VERSION
+        )
 
 
 def _calls_of(app: Flask, name: str) -> int:
@@ -1619,7 +2139,7 @@ def _calls_of(app: Flask, name: str) -> int:
         )
 
 
-class TestAFileThatGrows:
+class TestAFileThatGrows(_Unlabelled):
     """F152.15, F152.16."""
 
     @pytest.mark.parametrize(
@@ -1759,7 +2279,8 @@ class TestAFileThatGrows:
             walker.walk()
 
         assert (
-            "A walk over 4 transcripts: 2 published, 1 of them appended, 0 set aside,"
+            "A walk over 4 transcripts: 2 published, 1 of them appended and 0"
+            " labelled, 0 set aside,"
             " 0 left for the next walk, in "
         ) in caplog.text
 
@@ -1807,7 +2328,7 @@ def steps_before_the_first(lines: list[bytes]) -> int:
     )
 
 
-class TestAFilePublishedWholeInstead:
+class TestAFilePublishedWholeInstead(_Unlabelled):
     """Where a transcript the collector holds a carry of is published whole
     in the same walk (F152.15, F152.17)."""
 
@@ -1822,7 +2343,9 @@ class TestAFilePublishedWholeInstead:
         walker.walk()
         _grown(_file(home, RIDES))
 
-        walked = Walker(walker._pilot, _settings(pilot_url, home), stop).walk()
+        walked = Walker(
+            walker._pilot, _settings(pilot_url, home, **UNLABELLED), stop
+        ).walk()
 
         assert (walked.published, walked.appended) == (1, 0)
         held = _held(committed_app)[RIDES]
@@ -1843,7 +2366,7 @@ class TestAFilePublishedWholeInstead:
         path = _file(home, RIDES)
         walker.walk()
         _grown(path)
-        Walker(walker._pilot, _settings(pilot_url, home), stop).walk()
+        Walker(walker._pilot, _settings(pilot_url, home, **UNLABELLED), stop).walk()
         _grown(path)
 
         with caplog.at_level(logging.INFO, LOGGER):
@@ -2072,7 +2595,7 @@ class TestAFilePublishedWholeInstead:
         assert (walked.published, walked.appended) == (1, 0)
 
 
-class TestTheBoundarysPlaces:
+class TestTheBoundarysPlaces(_Unlabelled):
     """The four places an appended call names, against Pilot's check of
     them: Pilot refuses a call whose first Launch or Prompt is another than
     the row it holds at the boundary's place, and the transcript is then
@@ -2221,7 +2744,7 @@ class TestTheBoundarysPlaces:
         assert _held(committed_app)[RIDES]["stands"][0] == whole.publication.file_size
 
 
-class TestTheCarrysBound:
+class TestTheCarrysBound(_Unlabelled):
     def test_past_it_the_transcript_that_grew_longest_ago_is_published_whole_once(
         self,
         committed_app: Flask,
@@ -2235,7 +2758,7 @@ class TestTheCarrysBound:
         carry takes the place of the older of the two."""
         bound = Walker(
             walker._pilot,
-            _settings(pilot_url, home, COLLECTOR_CARRY_TRANSCRIPTS=2),
+            _settings(pilot_url, home, COLLECTOR_CARRY_TRANSCRIPTS=2, **UNLABELLED),
             stop,
         )
         bound.walk()

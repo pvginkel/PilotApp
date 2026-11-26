@@ -1,8 +1,9 @@
 """The workflow's labeller as the collector runs it (F152.6, F152.7): the
 command its settings name, the stamps of every transcript on a home in one
-call and the vocabularies as Pilot takes them, proved against the stub
-labeller (F122.5) on a home the scenario's builder wrote, and every way a
-call gives no answer the collector takes."""
+call, the vocabularies as Pilot takes them and a batch's labels as a
+publication carries them, proved against the stub labeller (F122.5) on a
+home the scenario's builder wrote, and every way a call gives no answer the
+collector takes."""
 
 import json
 import os
@@ -16,13 +17,27 @@ from typing import Any
 
 import pytest
 from pilot_collection.inventory import InventorySchema
+from pilot_collection.publication import PublicationSchema, PublishedGroupSchema
 from pilot_collection.vocabularies import VocabulariesSchema
 from pilot_scenario import SCENARIO, Builder, labeller
 
 from pilot_collector import labeller as running
-from pilot_collector.home import transcripts
-from pilot_collector.labeller import Labeller, Unanswered
-from tests.support import settings
+from pilot_collector.home import Listed, transcripts
+from pilot_collector.labeller import Labeller, Unanswered, with_labels
+from pilot_collector.reader import Read, read
+from tests import support
+from tests.support import (
+    AGENT,
+    SESSION,
+    assistant,
+    filed,
+    recorded,
+    requesting,
+    result,
+    settings,
+    synthetic,
+    typed,
+)
 
 UNTIL = datetime(2026, 11, 12, 9, 30, tzinfo=UTC)
 RECIPES = "8766dbc8-267a-5322-9a1d-cc49ad56eedd"
@@ -311,11 +326,32 @@ class TestTheVocabularies:
     ) -> None:
         """The stub's groups and its batchable conditions are no part of the
         call: the builder's declaration leaves them out."""
-        declared = _stub(home).vocabularies()
+        declared = _stub(home).vocabularies().vocabularies
 
         builder = Builder(SCENARIO, UNTIL)
         assert declared == VocabulariesSchema.model_validate(builder.vocabularies())
         assert declared.version == labeller.VERSION
+
+    def test_its_groups_are_kept_as_a_publication_names_one(self, home: Path) -> None:
+        groups = _stub(home).vocabularies().groups
+
+        built = Builder(SCENARIO, UNTIL).publications()
+        named = [each["group"] for each in built if "group" in each]
+        assert named
+        assert groups == {
+            group["key"]: PublishedGroupSchema.model_validate(group) for group in named
+        }
+
+    def test_a_group_it_gives_no_summary_of_has_an_empty_one(self, home: Path) -> None:
+        """A group of its own the installed labeller declares with a null
+        summary; Pilot's adopted project then holds its name alone."""
+        answer = labeller.vocabularies(Builder(SCENARIO, UNTIL).records())
+        (group,) = answer["groups"]
+        group["summary"] = None
+
+        groups = _answering(home, json.dumps(answer)).vocabularies().groups
+
+        assert groups[group["key"]].summary == ""
 
     def test_one_that_lacks_a_list_pilot_keeps_is_none(self, home: Path) -> None:
         answer = labeller.vocabularies(Builder(SCENARIO, UNTIL).records())
@@ -325,6 +361,444 @@ class TestTheVocabularies:
             Unanswered, match="not the shape Pilot takes: (?s:.*)lists.rule"
         ):
             _answering(home, json.dumps(answer)).vocabularies()
+
+
+def _read(home: Path) -> list[tuple[Listed, Read]]:
+    """Every transcript on the home, each as a walk lists it and as a whole
+    reading takes it."""
+    listed = transcripts(home / "projects")
+    taken = settings(COLLECTOR_HOME=home)
+    return [(each, read(each.transcript, taken)) for each in listed]
+
+
+def _ids(each: Listed) -> tuple[str, str | None]:
+    return each.transcript.session_id, each.transcript.agent_id
+
+
+def _built() -> dict[tuple[str, str | None], PublicationSchema]:
+    """The builder's publications of the scenario, its stub's labels and
+    group in each, by a transcript's ids."""
+    return {
+        (built["session_id"], built.get("agent_id")): PublicationSchema.model_validate(
+            built
+        )
+        for built in Builder(SCENARIO, UNTIL).publications()
+    }
+
+
+class TestTheLabels:
+    def test_a_batch_is_labelled_in_one_call_as_the_builder_labels_it(
+        self, home: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The collector's publications of the scenario's files carry what
+        the builder's do, labels and group, the batchable conditions and the
+        transcript's own row left out."""
+        stub, batch = _stub(home), _read(home)
+        declared = stub.vocabularies()
+        calls = _calls(monkeypatch)
+
+        labels = stub.label(batch, _inventory())
+
+        assert [verb for verb, _ in calls] == ["label"]
+        assert (labels.version, labels.cut) == (labeller.VERSION, None)
+        built = _built()
+        for listed, taken in batch:
+            ids = _ids(listed)
+            published = with_labels(
+                taken.publication, labels.lines[ids], labels.version, declared.groups
+            )
+            assert published.labelling == built[ids].labelling
+            assert published.group == built[ids].group
+            assert (
+                published.model_copy(update={"labelling": None, "group": None})
+                == taken.publication
+            )
+        assert any(each.group is not None for each in built.values())
+
+    def test_each_is_handed_as_the_stamps_hand_it_with_its_file_and_calls(
+        self, home: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A main thread with its Launches, each Call in the Launch its
+        Prompt is of; a sub-agent with none; both with the path under the
+        home's `projects`, labelled whole."""
+        stub, batch = _stub(home), _read(home)
+        inventory = _inventory(_held(RIDES), **{RIDES: [_session()]})
+        stub.stamps([listed for listed, _ in batch], inventory)
+        calls = _calls(monkeypatch)
+
+        stub.label(batch, inventory)
+
+        ((verb, request),) = calls
+        assert verb == "label"
+        assert set(request) == {"contract", "home", "pilot", "index", "conversations"}
+        assert request["pilot"] == {"conversations": [RIDES]}
+        assert request["index"] is not None
+        handed = {
+            (conversation["session_id"], transcript["agent_id"]): transcript
+            for conversation in request["conversations"]
+            for transcript in conversation["transcripts"]
+        }
+        assert set(handed) == {(RECIPES, None), (RECIPES, COUNTING), (RIDES, None)}
+        assert handed[RIDES, None]["held"] == STAMP
+        assert handed[RECIPES, COUNTING]["agent_type"] == "Explore"
+        for listed, taken in batch:
+            transcript = handed[_ids(listed)]
+            assert transcript["mode"] == "whole"
+            assert transcript["path"] == str(
+                listed.transcript.path.relative_to(home / "projects")
+            )
+            assert [call["id"] for call in transcript["calls"]] == list(taken.calls)
+            assert [call["position"] for call in transcript["calls"]] == list(
+                range(1, len(taken.calls) + 1)
+            )
+            if listed.transcript.agent_id is not None:
+                assert "launches" not in transcript
+                assert all("launch" not in call for call in transcript["calls"])
+                continue
+            launches = taken.publication.launches
+            assert transcript["launches"] == [
+                {"n": n, "started_at": launch.started_at.isoformat()}
+                for n, launch in enumerate(launches, start=1)
+            ]
+            ends = [
+                sum(len(launch.prompts) for launch in launches[:n])
+                for n in range(1, len(launches) + 1)
+            ]
+            within = {call["id"]: call["launch"] for call in transcript["calls"]}
+            assert {
+                call.message_id: within[call.message_id]
+                for call in taken.publication.calls
+                if call.prompt is not None
+            } == {
+                call.message_id: next(
+                    n for n, end in enumerate(ends, start=1) if call.prompt <= end
+                )
+                for call in taken.publication.calls
+                if call.prompt is not None
+            }
+            assert len(set(within.values())) == len(launches) > 0
+        rides = next(
+            conversation
+            for conversation in request["conversations"]
+            if conversation["session_id"] == RIDES
+        )
+        assert (
+            rides["sessions"]
+            == inventory.conversations[0].model_dump(mode="json")["sessions"]
+        )
+
+    def test_its_stamp_is_the_one_the_stamps_give(self, home: Path) -> None:
+        stub, batch = _stub(home), _read(home)
+        inventory = _inventory(**{RIDES: [_session()]})
+
+        stamps = stub.stamps([listed for listed, _ in batch], inventory)
+        labels = stub.label(batch, inventory)
+
+        assert {ids: line["stamp"] for ids, line in labels.lines.items()} == (
+            stamps.stamps
+        )
+
+    def test_the_index_it_hands_back_is_handed_at_its_next_call(
+        self, home: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        stub, batch = _stub(home), _read(home)
+        calls = _calls(monkeypatch)
+
+        stub.label(batch, _inventory())
+        stub.stamps([listed for listed, _ in batch], _inventory())
+
+        assert [request["index"] for _, request in calls][0] is None
+        assert calls[1][1]["index"] is not None
+
+    def test_a_call_the_file_gained_since_its_reading_fails_that_transcript_alone(
+        self, home: Path
+    ) -> None:
+        batch = _read(home)
+        listed, _ = next(each for each in batch if _ids(each[0]) == (RIDES, None))
+        with listed.transcript.path.open("ab") as file:
+            file.write(support.content([assistant(10**6, "msg_later", output=1)]))
+
+        labels = _stub(home).label(batch, _inventory())
+
+        line = labels.lines[RIDES, None]
+        assert line["answer"] == "error"
+        assert line["error"]["code"] == "calls_mismatch"
+        assert {line["answer"] for ids, line in labels.lines.items()} == {
+            "labels",
+            "error",
+        }
+        assert labels.cut is None
+
+    def test_a_batch_cut_at_its_time_keeps_the_lines_before_the_cut(
+        self, home: Path
+    ) -> None:
+        """The stub pauses before each transcript's line."""
+        slow = _stub(home, "--pause", "0.6", COLLECTOR_LABELLER_SECONDS=1.0)
+
+        labels = slow.label(_read(home), _inventory())
+
+        assert len(labels.lines) == 1
+        assert labels.cut == "its `label` gave no answer within 1 s"
+
+    @pytest.mark.parametrize(
+        ("exits", "cut"),
+        [
+            (1, "its `label` call exited 1: The pot boiled over."),
+            (0, "its `label` answer ends before its `done` line"),
+        ],
+        ids=["a crash", "no done line"],
+    )
+    def test_a_batch_cut_short_keeps_the_lines_before_the_cut(
+        self, home: Path, exits: int, cut: str
+    ) -> None:
+        said = "".join(
+            json.dumps(line) + "\n"
+            for line in [
+                {"contract": 1, "version": "1.4.2"},
+                {"session_id": RIDES, "agent_id": None, "answer": "whole", "why": "x"},
+            ]
+        )
+
+        labels = _answering(home, said + '{"session', exits).label(
+            _read(home), _inventory()
+        )
+
+        assert labels.version == "1.4.2"
+        assert list(labels.lines) == [(RIDES, None)]
+        assert labels.cut == cut
+
+    @pytest.mark.parametrize(
+        ("labelling", "fault"),
+        [
+            (_stub, "it refused the `label` call: contract: contract 1"),
+            (
+                lambda home: _answering(home, "", exits=1),
+                "its `label` call exited 1: The pot boiled over.",
+            ),
+            (
+                lambda home: _answering(home, '{"contract": 2, "version": "2.0.0"}\n'),
+                "its `label` answer is of contract 2, and the collector speaks 1",
+            ),
+            (
+                lambda home: _answering(home, "Simmering.\n"),
+                "its `label` answer is not the call's: ",
+            ),
+        ],
+        ids=["a refusal", "a crash before any line", "another contract", "no JSON"],
+    )
+    def test_one_with_no_first_line_is_none(
+        self, home: Path, labelling: Any, fault: str
+    ) -> None:
+        given = (
+            labelling(home, "--speaks", "2") if labelling is _stub else labelling(home)
+        )
+
+        with pytest.raises(Unanswered, match=re.escape(fault)):
+            given.label(_read(home), _inventory())
+
+
+def _line(**labels: list[dict[str, Any]]) -> dict[str, Any]:
+    """A `label` answer's line of the main thread `SESSION`, giving
+    `labels`."""
+    given: dict[str, Any] = {
+        "transcript": [{"adopted_group": None}],
+        "launches": [],
+        "calls": [],
+        "segments": [],
+        "tool_calls": [],
+        "events": [],
+        "context_parts": [],
+        "test_runs": [],
+        "ci_waits": [],
+        "documents": [],
+    }
+    return {
+        "session_id": SESSION,
+        "agent_id": None,
+        "answer": "labels",
+        "stamp": STAMP,
+        "boundary": None,
+        "checkpoint": None,
+        "labels": given | labels,
+        "units": [],
+        "test_suites": [],
+        "ci_builds": [],
+    }
+
+
+def _call(message_id: str, segment: int | None, **labels: Any) -> dict[str, Any]:
+    return {
+        "id": message_id,
+        "segment": segment,
+        "call_class": "stir",
+        "avoidable_kind": None,
+        "batchable_condition": None,
+        "wait_cause": None,
+    } | labels
+
+
+GROUP = PublishedGroupSchema(key="Loom/001", name="The first looms", summary="")
+
+
+class TestWithLabels:
+    def test_the_labels_of_the_calls_the_file_holds_are_published(
+        self, tmp_path: Path
+    ) -> None:
+        """A line Claude Code wrote itself is a Call of the labeller's that
+        the publication holds none of: it takes a Segment, and nothing of it
+        is published."""
+        taken = read(
+            filed(
+                tmp_path,
+                [typed(0), assistant(4, "msg_01"), synthetic(6, "Overloaded.")],
+            ),
+            settings(),
+        )
+        line = _line(
+            calls=[_call("msg_01", 1), _call("msg_synthetic", 1, call_class=None)],
+            segments=[{"position": 1, "kind": "cook"}],
+            transcript=[{"adopted_group": GROUP.key}],
+        )
+
+        published = with_labels(taken.publication, line, "1.4.2", {GROUP.key: GROUP})
+
+        assert taken.calls == ("msg_01", "msg_synthetic")
+        assert published.labelling is not None
+        assert published.labelling.version == "1.4.2"
+        assert published.labelling.stamp == STAMP
+        assert [call.model_dump() for call in published.labelling.labels.calls] == [
+            {
+                "id": "msg_01",
+                "segment": 1,
+                "call_class": "stir",
+                "avoidable_kind": None,
+                "wait_cause": None,
+            }
+        ]
+        assert published.group == GROUP
+
+    def test_a_forks_copies_of_its_parents_calls_are_left_out_and_its_segments_renumbered(
+        self, tmp_path: Path
+    ) -> None:
+        """The copied Calls fill the first Segment alone, with a Tool Call,
+        a run, a wait on a build and an Event of their own; the fork's
+        Segments then start at 1."""
+        line = _line(
+            transcript=[],
+            calls=[_call("msg_copied", 1), _call("msg_01", 2), _call("msg_02", 3)],
+            segments=[
+                {"position": 1, "kind": "prep"},
+                {"position": 2, "kind": "cook"},
+                {"position": 3, "kind": "simmer"},
+            ],
+            tool_calls=[
+                {
+                    "tool_use_id": "toolu_copied",
+                    "command_class": "taste",
+                    "effect_kind": None,
+                    "effect_subject": None,
+                    "rules": [],
+                },
+                {
+                    "tool_use_id": "toolu_01",
+                    "command_class": "taste",
+                    "effect_kind": None,
+                    "effect_subject": None,
+                    "rules": [],
+                },
+            ],
+            events=[
+                {"call": "msg_copied", "kind": "boiled", "at": support.stamp(1)},
+                {"call": "msg_02", "kind": "boiled", "at": support.stamp(9)},
+            ],
+            context_parts=[
+                {"call": "msg_copied", "kind": "recipe_card", "characters": 4}
+            ],
+            test_runs=[
+                {
+                    "tool_use_id": "toolu_copied",
+                    "suite": "pan",
+                    "passed": True,
+                    "tests": 1,
+                },
+                {"tool_use_id": "toolu_01", "suite": "pot", "passed": True, "tests": 2},
+            ],
+            ci_waits=[
+                {"tool_use_id": "toolu_copied", "job": "Oven", "number": 7},
+                {"tool_use_id": "toolu_01", "job": "Oven", "number": 8},
+            ],
+        )
+        line["test_suites"] = [
+            {"code": "pan", "name": "The pan"},
+            {"code": "pot", "name": "The pot"},
+        ]
+        line["ci_builds"] = [{"job": "Oven", "number": 7}, {"job": "Oven", "number": 8}]
+        recorded(tmp_path, AGENT, agentType="Explore")
+        taken = read(
+            filed(
+                tmp_path,
+                [
+                    requesting(2, "toolu_01", message_id="msg_01"),
+                    result(3, "toolu_01"),
+                    assistant(9, "msg_02"),
+                ],
+                AGENT,
+            ),
+            settings(),
+        )
+
+        published = with_labels(taken.publication, line, "1.4.2", {})
+
+        assert published.labelling is not None
+        labels = published.labelling.labels
+        assert [(call.id, call.segment) for call in labels.calls] == [
+            ("msg_01", 1),
+            ("msg_02", 2),
+        ]
+        assert [(each.position, each.kind) for each in labels.segments] == [
+            (1, "cook"),
+            (2, "simmer"),
+        ]
+        assert [each.tool_use_id for each in labels.tool_calls] == ["toolu_01"]
+        assert [each.call for each in labels.events] == ["msg_02"]
+        assert labels.context_parts == []
+        assert [each.suite for each in labels.test_runs] == ["pot"]
+        assert [(each.job, each.number) for each in labels.ci_waits] == [("Oven", 8)]
+        assert [each.code for each in published.labelling.test_suites] == ["pot"]
+        assert [each.number for each in published.labelling.ci_builds] == [8]
+        assert published.group is None
+
+    def test_a_group_it_does_not_declare_gives_no_labels(self, tmp_path: Path) -> None:
+        taken = read(filed(tmp_path, [typed(0), assistant(4)]), settings())
+        line = _line(transcript=[{"adopted_group": "Loom/009"}])
+
+        with pytest.raises(
+            Unanswered,
+            match="its labels name the group `Loom/009`, which it does not declare",
+        ):
+            with_labels(taken.publication, line, "1.4.2", {GROUP.key: GROUP})
+
+    @pytest.mark.parametrize(
+        ("line", "fault"),
+        [
+            (
+                _line() | {"stamp": None},
+                "its labels are not the shape of the call's: (?s:.*)stamp",
+            ),
+            (
+                _line(calls=[_call("msg_01", 1, cooked=True)]),
+                "its labels are not the shape Pilot takes: (?s:.*)cooked",
+            ),
+        ],
+        ids=["no stamp", "a label Pilot keeps no place for"],
+    )
+    def test_labels_not_of_their_shape_are_none(
+        self, tmp_path: Path, line: dict[str, Any], fault: str
+    ) -> None:
+        taken = read(filed(tmp_path, [typed(0), assistant(4)]), settings())
+
+        with pytest.raises(Unanswered, match=fault):
+            with_labels(taken.publication, line, "1.4.2", {})
 
 
 class TestTheCommand:

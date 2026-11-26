@@ -481,6 +481,12 @@ class Read:
     publication: PublicationSchema
     carry: Carry
     """What a reading of the file, grown, continues."""
+    calls: tuple[str, ...]
+    """The Calls the labeller reads in what the reading took (`labeller.md`
+    § Names both sides compute): the `message.id` of every assistant line,
+    in the order of its first, a line Claude Code wrote itself and a fork's
+    copy of its parent's among them, and of the file's last line where it
+    parses with no newline yet."""
 
 
 @dataclass
@@ -1648,6 +1654,16 @@ def _calls(thread: _Thread) -> list[dict[str, Any]]:
     ]
 
 
+def _called(line: Any) -> str | None:
+    """The `message.id` of an assistant line, the Call the labeller reads it
+    as; none for another line."""
+    if not isinstance(line, dict) or line.get("type") != "assistant":
+        return None
+    message = line.get("message")
+    named = message.get("id") if isinstance(message, dict) else None
+    return named if isinstance(named, str) and named else None
+
+
 def _lines(content: bytes) -> list[bytes]:
     """The file's lines, each without its newline; what follows the last
     newline is a line still being written."""
@@ -1751,6 +1767,7 @@ def read(
         transcript.agent_id is None, transcript.projects, settings, before, fork
     )
     byte = before.byte
+    called: dict[str, None] = {}
     for number, raw in enumerate(_lines(content), start=1):
         try:
             line = json.loads(raw)
@@ -1759,7 +1776,16 @@ def read(
             thread.take(line, byte)
         except _MALFORMED as error:
             raise _unreadable(number, error) from error
+        named = _called(line)
+        if named is not None:
+            called.setdefault(named, None)
         byte += len(raw) + 1
+    try:
+        named = _called(json.loads(content[byte - before.byte :]))
+    except ValueError:
+        named = None
+    if named is not None:
+        called.setdefault(named, None)
     if thread.directory is None:
         raise UnreadableError("no line names a working directory")
     facts: dict[str, Any] = {
@@ -1806,4 +1832,5 @@ def read(
             stands=stands,
             end=digest(content[stands.byte - before.byte :]),
         ),
+        tuple(called),
     )

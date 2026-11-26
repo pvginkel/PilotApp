@@ -3,12 +3,14 @@ publication of one transcript, the labeller's vocabularies and the walk's
 end, the four routes behind Pilot's door for a collector.
 
 Every call carries the collector's bearer and names the version of the
-collector's API it speaks. An answer is the call's own, or one of four
+collector's API it speaks. An answer is the call's own, or one of five
 failures a walk tells apart: `NotAppendable`, an appended publication that
 does not continue what Pilot holds, whose transcript is then published
-whole; `Refused`, the same call refused again, which costs the walk that
-transcript, or the vocabularies; `NotAdmitted`, no call of this collector's taken; and
-`Unreachable`, no answer of Pilot's to the call.
+whole; `NotAdoptable`, a publication's `group` for a transcript a Session of
+Pilot's ran, which is then published without it; `Refused`, the same call
+refused again, which costs the walk that transcript, or the vocabularies;
+`NotAdmitted`, no call of this collector's taken; and `Unreachable`, no
+answer of Pilot's to the call.
 """
 
 from typing import Any, Self
@@ -35,15 +37,28 @@ _SAID = 2_000
 _NOT_APPENDABLE = "PUBLICATION_NOT_APPENDABLE"
 """The `code` of the 409 that refuses an appended publication."""
 
+_NOT_ADOPTABLE = "TRANSCRIPT_NOT_ADOPTABLE"
+"""The `code` of the 409 that refuses a publication's `group`."""
+
+_NO_SERVICE_USER = "NO_SERVICE_USER"
+"""The `code` of the 409 that refuses a publication's `group` no project
+holds yet, on a stage with no service user to make one."""
+
 
 class NotAppendable(Exception):
     """Pilot refused an appended publication: it does not continue what
     Pilot holds of the transcript. The message has Pilot's reasons."""
 
 
+class NotAdoptable(Exception):
+    """Pilot refused a publication's `group`: a Session of Pilot's ran the
+    transcript, and the same call without its `group` is taken."""
+
+
 class Refused(Exception):
     """Pilot refused a publication or a declaration, and refuses the same
-    call again: it does not validate, or its body is too large."""
+    call again: it does not validate, its body is too large, or its `group`
+    names no project and the stage has no service user to make one."""
 
 
 class NotAdmitted(Exception):
@@ -89,7 +104,9 @@ class Pilot:
 
         Raises:
             NotAppendable: Pilot answered 409 `PUBLICATION_NOT_APPENDABLE`.
-            Refused: Pilot answered 400 or 413; the message has what it said.
+            NotAdoptable: Pilot answered 409 `TRANSCRIPT_NOT_ADOPTABLE`.
+            Refused: Pilot answered 400, 413 or 409 `NO_SERVICE_USER`; the
+                message has what it said.
         """
         answer = self._call(
             "POST",
@@ -102,8 +119,13 @@ class Pilot:
                 said = answer.json()
             except ValueError:
                 said = None
-            if isinstance(said, dict) and said.get("code") == _NOT_APPENDABLE:
+            code = said.get("code") if isinstance(said, dict) else None
+            if code == _NOT_APPENDABLE:
                 raise NotAppendable(str(said.get("error"))[:_SAID])
+            if code == _NOT_ADOPTABLE:
+                raise NotAdoptable(str(said.get("error"))[:_SAID])
+            if code == _NO_SERVICE_USER:
+                raise Refused(f"409: {_reason(answer)}")
         if answer.status_code in (400, 413):
             raise Refused(f"{answer.status_code}: {answer.text[:_SAID]}")
         if answer.status_code != 204:
