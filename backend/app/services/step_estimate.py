@@ -24,10 +24,12 @@ its kind's price as the timings stood at the run's start, its first work
 item's first turn, so that it grows only as the list gains a step; its slow
 normal times a set factor (F156.13).
 
-A kind's timings are the repo's own once the repo holds `OWN` of the kind,
-all repos' until then, for the price and the running step alike, a running
-step's counted among those that had ended when it began. A timing whose
-listing is unknown counts in none of it.
+A kind's timings are read at two levels. The price, and the repeats' share
+with it, reads the repo's own once the repo's window holds one listed ahead,
+all repos' until then; a running step is read against the repo's own once
+the repo holds `OWN` of the kind, all repos' until then, counted among those
+that had ended when it began. A kind with fewer than `FEW` in all repos
+gives neither. A timing whose listing is unknown counts in none of it.
 
 Nothing here reads a step's code or label, a code only matched to its own
 in the run's other work items' lists, or orders two kinds (F92.13), and no
@@ -70,8 +72,8 @@ and below which the timings that began as the running step did give way to
 the kind's last ones whole."""
 
 OWN = 10
-"""The timings of a kind at which a repo's own are read in all repos'
-place."""
+"""The timings of a kind at which a running step is read against its
+repo's own in all repos' place."""
 
 
 @dataclass(frozen=True)
@@ -246,7 +248,7 @@ def work_estimates(
     runs = {run.id: run for run in _runs(db, work_ids)}
     # At least `OWN` of each listing, so that the ten and the five are counted
     # off rows the settings do not cut.
-    figures = _figures(db, list(runs.values()), max(window, running, OWN))
+    figures = _figures(db, list(runs.values()), max(window, running, OWN), window)
     estimates = {}
     for work_id in work_ids:
         if work_id not in runs:
@@ -564,15 +566,20 @@ class _Timing:
 
 @dataclass(frozen=True)
 class _Kind:
-    """A kind's last timings, the newest first: the repo's own or all
-    repos'."""
+    """A kind's last timings at a read, the newest first, at the level of
+    each use: the repo's own or all repos'."""
 
-    timings: tuple[_Timing, ...]
+    priced: tuple[_Timing, ...]
+    """Those its price reads: the repo's own where its window holds one
+    listed ahead, all repos' where it holds none."""
+    read_against: tuple[_Timing, ...]
+    """Those a running step is read against: the repo's own where the repo
+    holds `OWN` of them, all repos' until then."""
 
     def price(self, window: int) -> tuple[float, float] | None:
         """A listed step's price and its repeats' share; none where the
         window holds no timing that was listed ahead."""
-        last = self.timings[:window]
+        last = self.priced[:window]
         listed = [timing.duration for timing in last if timing.listed]
         if not listed:
             return None
@@ -583,8 +590,9 @@ class _Kind:
         """The timings a running step whose listing is `listed` is read
         against: the last `running` that began as it did, the kind's last
         taken whole where fewer than `FEW` began as it did."""
-        alike = tuple(timing for timing in self.timings if timing.listed is listed)
-        return (alike if len(alike) >= FEW else self.timings)[:running]
+        timings = self.read_against
+        alike = tuple(timing for timing in timings if timing.listed is listed)
+        return (alike if len(alike) >= FEW else timings)[:running]
 
 
 _Figures = dict[_Read, _Kind | None]
@@ -592,15 +600,31 @@ _Figures = dict[_Read, _Kind | None]
 repos."""
 
 
-def _figures(db: Session, runs: Sequence[_Run], last: int) -> _Figures:
+def _lists(timings: tuple[_Timing, ...], window: int) -> bool:
+    """Whether the window of `timings` holds one that was listed ahead."""
+    return any(timing.listed for timing in timings[:window])
+
+
+def _figures(db: Session, runs: Sequence[_Run], last: int, window: int) -> _Figures:
     asked = {read for run in runs for read in run.reads}
     own = _last(db, _in_order(read for read in asked if read.repo is not None), last)
-    apart = {read for read in asked if len(own.get(read, ())) < OWN}
-    every = _last(db, _in_order({read.everywhere for read in apart}), last)
+    priced = {read for read in asked if _lists(own.get(read, ()), window)}
+    alone = {read for read in priced if len(own[read]) >= OWN}
+    every = _last(db, _in_order({read.everywhere for read in asked - alone}), last)
     figures: _Figures = {}
     for read in asked:
-        timings = every[read.everywhere] if read in apart else own[read]
-        figures[read] = _Kind(timings) if len(timings) >= FEW else None
+        mine = own.get(read, ())
+        # All repos' are not read where the repo's own serve both levels:
+        # its `OWN` count for the `FEW` in all repos.
+        everywhere = mine if read in alone else every[read.everywhere]
+        figures[read] = (
+            _Kind(
+                priced=mine if read in priced else everywhere,
+                read_against=mine if len(mine) >= OWN else everywhere,
+            )
+            if len(everywhere) >= FEW
+            else None
+        )
     return figures
 
 
@@ -776,34 +800,67 @@ def _row(
 def _left(
     run: _Run, figures: _Figures, *, now: datetime, window: int, running: int
 ) -> tuple[float | None, bool]:
-    """The seconds a run still takes, none where it has no estimate, and
-    whether a running step has outrun every timing it is read against, in
-    which case no time is left to give either. A running step whose kind had
-    fewer than `FEW` timings in all repos when it began leaves no estimate."""
-    kinds = run.kinds
-    if kinds is None:
-        return None, False
-    priced: dict[str, tuple[float, float]] = {}
-    for kind in kinds:
-        timings = figures[_Read(kind, run.repo, None)]
-        price = None if timings is None else timings.price(window)
-        if price is None:
-            return None, False
-        priced[kind] = price
+    """The seconds a run still takes, none where it has no estimate or a
+    running step has outrun every timing it is read against; and whether a
+    running step shows outrun: any that has where the run has an estimate
+    but for the outrun, a marked one alone where it has none (D250). A
+    running step whose kind had fewer than `FEW` timings in all repos when
+    it began leaves no estimate."""
+    still: dict[ProgressStep, list[float]] = {}
+    outrun: list[ProgressStep] = []
+    unread = False
+    for step in run.active:
+        longer = _longer(run, step, figures, now=now, running=running)
+        if longer is None:
+            unread = True
+        elif longer:
+            still[step] = longer
+        else:
+            outrun.append(step)
+    priced = _prices(run, figures, window)
+    if priced is None or unread:
+        return None, any(step.marked for step in outrun)
+    if outrun:
+        return None, True
     seconds = 0.0
     for step in run.left:
         assert step.kind_code is not None
         if step.state_code == ProgressState.PENDING:
             seconds += priced[step.kind_code][0]
-            continue
-        against = _against(run, step, figures, running)
-        if against is None:
-            return None, False
-        ran = run.ran(step, now)
-        still = [timing.duration - ran for timing in against if timing.duration >= ran]
-        if not still:
-            return None, True
-        seconds += median(still)
+        else:
+            seconds += median(still[step])
     for kind in run.owing:
         seconds += priced[kind][1]
     return seconds, False
+
+
+def _longer(
+    run: _Run, step: ProgressStep, figures: _Figures, *, now: datetime, running: int
+) -> list[float] | None:
+    """What each timing the running `step` is read against that ran at least
+    as long as it has still took; none where it is read against nothing,
+    empty where it has outrun every one."""
+    against = _against(run, step, figures, running)
+    if against is None:
+        return None
+    ran = run.ran(step, now)
+    return [timing.duration - ran for timing in against if timing.duration >= ran]
+
+
+def _prices(
+    run: _Run, figures: _Figures, window: int
+) -> dict[str, tuple[float, float]] | None:
+    """The price and the repeats' share of each kind the run's time left
+    reads, as its timings stand; none where a step left to do has no kind
+    or a kind has no price."""
+    kinds = run.kinds
+    if kinds is None:
+        return None
+    priced: dict[str, tuple[float, float]] = {}
+    for kind in kinds:
+        timings = figures[_Read(kind, run.repo, None)]
+        price = None if timings is None else timings.price(window)
+        if price is None:
+            return None
+        priced[kind] = price
+    return priced

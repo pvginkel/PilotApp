@@ -459,30 +459,72 @@ class TestWorkEstimates:
 
         assert _minutes(_estimates(session, [run], window=1)[run]) == pytest.approx(70)
 
-    def test_a_repos_own_timings_count_once_it_has_ten_of_the_kind(
+    @pytest.mark.parametrize("own", [1, 9])
+    def test_one_to_nine_of_the_repos_own_price_a_step_while_a_running_one_reads_all_repos(
+        self, session: DbSession, run: uuid.UUID, past: uuid.UUID, own: int
+    ) -> None:
+        """The price, its run's normal with it, reads the repo's own from its
+        first listed ahead, 20; the running step is read against all repos'
+        until the tenth, 45 more, its row their normal of 50; and the five
+        are counted in all repos."""
+        _timed(session, past, "write", [20] * own)
+        _timed(session, past, "write", [50] * 10, repo=OTHER_REPO)
+        _list(session, run, [_active("write", 5), _pending("write")])
+
+        estimate = _estimates(session, [run])[run]
+
+        assert _minutes(estimate) == pytest.approx(45 + 20)
+        [row] = estimate.step_figures
+        assert (row.normal_seconds, row.timings) == (50 * MINUTE, own + 10)
+        assert estimate.run_figures is not None
+        assert estimate.run_figures.normal_seconds == pytest.approx(2 * 20 * MINUTE)
+
+    @pytest.mark.parametrize(("unlisted", "price"), [(3, 38), (10, 80)])
+    def test_a_repo_whose_window_lists_none_of_a_kind_is_priced_from_all_repos(
+        self,
+        session: DbSession,
+        run: uuid.UUID,
+        past: uuid.UUID,
+        unlisted: int,
+        price: float,
+    ) -> None:
+        """Whatever its count, ten or more included: all repos' window of
+        the repo's unlisted 30s and another repo's five listed 20s."""
+        _timed(session, past, "write", [30] * unlisted, listed=False)
+        _timed(session, past, "write", [20] * 5, repo=OTHER_REPO)
+        _list(session, run, [_pending("write")])
+
+        assert _minutes(_estimates(session, [run])[run]) == pytest.approx(price)
+
+    def test_a_running_step_reads_its_repos_own_once_it_has_ten_of_the_kind(
         self, session: DbSession, run: uuid.UUID, past: uuid.UUID
     ) -> None:
-        """All repos' until then, a timing of no repo among them; the tenth
-        of its own leaves every other repo's out."""
+        """All repos' until then, a timing of no repo among them, 20 more
+        of 18; the tenth of its own leaves every other repo's out, 5 more of
+        10. Its price is its own's 10 either way."""
         _timed(session, past, "write", [10] * 9)
         _timed(session, past, "write", [40] * 6, repo=OTHER_REPO, age=20)
         _timed(session, past, "write", [70] * 3, repo=None, age=30)
-        _list(session, run, [_pending("write")])
+        _list(session, run, [_active("write", 5)])
 
-        assert _minutes(_estimates(session, [run])[run]) == pytest.approx(
-            (9 * 10 + 6 * 40 + 3 * 70) / 18
-        )
+        estimate = _estimates(session, [run])[run]
+
+        assert _minutes(estimate) == pytest.approx(20)
+        assert [row.timings for row in estimate.step_figures] == [18]
 
         _timed(session, past, "write", [10], age=0.5)
+        estimate = _estimates(session, [run])[run]
 
-        assert _minutes(_estimates(session, [run])[run]) == pytest.approx(10)
+        assert _minutes(estimate) == pytest.approx(5)
+        assert [row.timings for row in estimate.step_figures] == [10]
 
     def test_the_repos_ten_and_the_five_are_counted_whatever_the_settings(
         self, session: DbSession, run: uuid.UUID, past: uuid.UUID
     ) -> None:
         """Settings under ten cut neither count: the repo's ten listed ahead
-        give an estimate under settings of 4, and price the step under
-        settings of 5 though another repo's are newer."""
+        give an estimate under settings of 4, and its running step is read
+        against them alone under settings of 5 though another repo's are
+        newer."""
         _timed(session, past, "write", [10] * 10, age=20)
         _list(session, run, [_pending("write")])
 
@@ -490,22 +532,27 @@ class TestWorkEstimates:
             _estimates(session, [run], window=4, running=4)[run]
         ) == pytest.approx(10)
 
-        _timed(session, past, "write", [10] * 2, age=30)
         _timed(session, past, "write", [40] * 12, repo=OTHER_REPO)
+        _list_again(session, run, [_active("write", 5)])
 
         assert _minutes(
             _estimates(session, [run], window=5, running=5)[run]
-        ) == pytest.approx(10)
+        ) == pytest.approx(5)
 
     def test_the_repos_ten_count_no_timing_of_an_unknown_listing(
         self, session: DbSession, run: uuid.UUID, past: uuid.UUID
     ) -> None:
+        """Nine listed of its own and five of an unknown listing: its
+        running step is read against all repos', 20 more of 18."""
         _timed(session, past, "write", [10] * 9)
         _timed(session, past, "write", [10] * 5, listed=None)
         _timed(session, past, "write", [40] * 9, repo=OTHER_REPO)
-        _list(session, run, [_pending("write")])
+        _list(session, run, [_active("write", 5)])
 
-        assert _minutes(_estimates(session, [run])[run]) == pytest.approx(25)
+        estimate = _estimates(session, [run])[run]
+
+        assert _minutes(estimate) == pytest.approx(20)
+        assert [row.timings for row in estimate.step_figures] == [18]
 
     def test_a_work_item_in_no_repo_reads_all_repos(
         self,
@@ -841,6 +888,14 @@ class TestWorkEstimatesRepeatsOwed:
         assert _minutes(_estimates(session, [run])[run]) == pytest.approx(5)
 
 
+_NO_ESTIMATE = [
+    pytest.param(_pending("sweep"), id="a-kind-with-no-timing"),
+    pytest.param(_pending(None), id="a-step-with-no-kind"),
+    pytest.param(_active("sweep", 2), id="a-running-step-read-against-nothing"),
+]
+"""A step that leaves the work item no estimate, beside a running `write`."""
+
+
 class TestWorkEstimatesLongerThanUsual:
     @pytest.fixture(autouse=True)
     def _history(self, session: DbSession, past: uuid.UUID) -> None:
@@ -952,12 +1007,57 @@ class TestWorkEstimatesLongerThanUsual:
             estimate.kind,
         ) == (None, LongerThanUsual.MARKED, True, "write")
 
+    @pytest.mark.parametrize("none", _NO_ESTIMATE)
     def test_a_step_outrun_on_a_work_item_with_no_estimate_shows_nothing(
-        self, session: DbSession, run: uuid.UUID
+        self, session: DbSession, run: uuid.UUID, none: _Step
     ) -> None:
-        _list(session, run, [_active("write", 46), _pending("sweep")])
+        _list(session, run, [_active("write", 46), none])
 
         assert _estimates(session, [run]) == {}
+
+    @pytest.mark.parametrize("none", _NO_ESTIMATE)
+    def test_a_marked_step_outrun_on_a_work_item_with_no_estimate_shows_its_outrun(
+        self, session: DbSession, run: uuid.UUID, none: _Step
+    ) -> None:
+        """The badge's em dash and the marked sentence, its row standing,
+        whatever leaves the work item no estimate."""
+        _list(session, run, [_active("write", 46, marked=True), none])
+
+        estimate = _estimates(session, [run])[run]
+
+        assert (
+            estimate.seconds,
+            estimate.longer_than_usual,
+            estimate.marked,
+            estimate.kind,
+        ) == (None, LongerThanUsual.OUTRUN, True, "write")
+        assert [
+            (row.kind, row.so_far_minutes, row.longest_minutes)
+            for row in estimate.step_figures
+        ] == [("write", 46, 45)]
+
+    def test_with_no_estimate_a_mark_beside_an_unmarked_step_outrun_stays_marked(
+        self, session: DbSession, run: uuid.UUID
+    ) -> None:
+        """The outrun step's run is marked, by the step within its 60, but
+        it is not, so it shows nothing."""
+        _list(
+            session,
+            run,
+            [
+                _active("review", 2, marked=True),
+                _active("write", 46),
+                _pending("sweep"),
+            ],
+        )
+
+        estimate = _estimates(session, [run])[run]
+
+        assert (estimate.seconds, estimate.longer_than_usual, estimate.marked) == (
+            None,
+            LongerThanUsual.MARKED,
+            True,
+        )
 
     def test_a_mark_on_a_step_that_does_not_run_is_no_alert(
         self, session: DbSession, run: uuid.UUID
@@ -1071,6 +1171,29 @@ class TestWorkEstimatesAsTheStepBegan:
             estimate.longer_than_usual,
             estimate.step_figures,
         ) == (None, LongerThanUsual.MARKED, ())
+
+    @pytest.mark.parametrize(
+        ("marked", "shown"), [(False, []), (True, [LongerThanUsual.OUTRUN])]
+    )
+    def test_a_step_outrun_beside_one_whose_kind_had_fewer_than_five_shows_as_with_none(
+        self,
+        session: DbSession,
+        run: uuid.UUID,
+        past: uuid.UUID,
+        marked: bool,
+        shown: list[LongerThanUsual],
+    ) -> None:
+        """A `review` that began with four, priced now, leaves the work item
+        no estimate: the outrun `write` before it on the list shows on a
+        marked step alone."""
+        _timed(session, past, "write", [20] * 9 + [45])
+        _timed(session, past, "review", [8] * 4)
+        _list(session, run, [_active("write", 46, marked=marked), _active("review", 5)])
+        _timed_at(session, past, "review", [8] * 6, ended=1)
+
+        estimates = _estimates(session, [run]).values()
+
+        assert [estimate.longer_than_usual for estimate in estimates] == shown
 
     def test_a_step_not_begun_and_the_repeats_owed_read_the_window_as_it_stands(
         self, session: DbSession, run: uuid.UUID, past: uuid.UUID
