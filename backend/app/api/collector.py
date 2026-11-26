@@ -141,8 +141,12 @@ def publish(
       collector's version the call builds on, holds no row at a place before
       the boundary's, holds from there on, or before, what the call does
       not carry so, or holds at the boundary's `launch`, `prompt` or
-      `compaction` another one than the call's first, told by its time. The
-      collector publishes the transcript whole.
+      `compaction` another one than the call's first, told by its time; or
+      its `labelling` does not continue the labels Pilot holds: they are
+      under another stamp or none, or another major of the labeller's
+      version, or its first Segment is neither the one the Call before the
+      boundary falls in nor the next. The collector publishes the
+      transcript whole.
     - 409, with the `code` `TRANSCRIPT_NOT_ADOPTABLE`: the call names a
       `group` for a transcript a session of Pilot's ran, which no adopted
       project adopts. The same call is refused again, and the call without

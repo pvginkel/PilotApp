@@ -15,7 +15,8 @@ boundary its Launches, Compactions and Calls start at. A place and a
 
 The workflow's labels ride in a call's `labelling`, the labeller's answer for
 the Transcript, each row named as both sides compute it (F152.6, F152.7), with
-a main thread's `group` (F152.8). A call with no labelling is one no labeller
+a main thread's `group` (F152.8); an appended call's labelling is its answer
+from the call's boundary on. A call with no labelling is one no labeller
 answered for: it carries the file's facts alone, and no `group`.
 """
 
@@ -472,7 +473,9 @@ class LabelledDocumentSchema(_Published):
 
 class PublishedLabelsSchema(_Published):
     """The labels of the Transcript's own rows, each list in the labeller's
-    order; a row the labels do not name takes none."""
+    order; a row the labels do not name takes none. On an appended call, the
+    labels of its rows from its boundary on, of the Work Units' Test Runs and
+    of the Documents."""
 
     launches: list[LabelledLaunchSchema] = Field(
         default_factory=list, description="A main thread's Launches' labels"
@@ -481,7 +484,11 @@ class PublishedLabelsSchema(_Published):
         default_factory=list, description="The Calls' labels"
     )
     segments: list[LabelledSegmentSchema] = Field(
-        default_factory=list, description="Every Segment, by position from 1"
+        default_factory=list,
+        description=(
+            "Every Segment, by position from 1; on an appended call from the"
+            " one its boundary's Call falls in"
+        ),
     )
     tool_calls: list[LabelledToolCallSchema] = Field(
         default_factory=list, description="The labels of the Tool Calls with any"
@@ -564,8 +571,9 @@ class PublishedCIBuildSchema(_Published):
 
 
 class PublishedLabellingSchema(_Published):
-    """The labeller's labels of one Transcript, whole: what Pilot holds of its
-    labels after the call (DB decision 81, assertion 561)."""
+    """The labeller's labels of one Transcript: what Pilot holds of its labels
+    after the call, on an appended call from its boundary on (DB decision 81,
+    assertion 561)."""
 
     version: Name = Field(
         description="The labeller's own version that gave them", examples=["1.0.0"]
@@ -645,8 +653,9 @@ class PublicationSchema(_Published):
         default=None,
         description=(
             "The labeller's labels of the Transcript, which replace all Pilot"
-            " holds; none where no labeller answered for it, and Pilot then"
-            " keeps the labels it holds"
+            " holds, on an appended call all it holds from the boundary on; none"
+            " where no labeller answered for it, and Pilot then keeps the labels"
+            " it holds"
         ),
     )
     appended: PublishedAppendedSchema | None = Field(

@@ -49,11 +49,14 @@ its sub-agents' threads in the Launch that holds it.
 
 A call's labelling replaces every label Pilot holds of the Transcript, in the
 same transaction as its facts (`label_write`; DB decision 81, assertion 561),
-under the labeller's version and stamp it names. The facts are the Events and
-Context Parts the collector read and the labels those the labeller gave, so
-that a publication's facts never remove or overwrite a label, nor its labels
-a fact, but for the carve: a Call's labelled Context Parts are carved out of
-its opening prompt's, stored as what the collector counted less them. A call
+under the labeller's version and stamp it names; an appended call's replaces
+the labels from its boundary on, and is taken only where it continues the
+labels Pilot holds, under their stamp and their version's major. The facts
+are the Events and Context Parts the collector read and the labels those the
+labeller gave, so that a publication's facts never remove or overwrite a
+label, nor its labels a fact, but for the carve: a Call's labelled Context
+Parts are carved out of its opening prompt's, stored as what the collector
+counted less them. A call
 with no labelling, made while no labeller answered for the Transcript, writes
 its facts and leaves every label Pilot holds of it as it stands, its adoption
 included, and its stamp none, so that the labeller's next answer differs from
@@ -491,8 +494,9 @@ class PublicationService:
         Call Pilot held of it that the call no longer names is removed with
         what hangs on it, and their number logged. The rows its replay at
         rest writes are logged with it (`_replayed`). After an appended one
-        Pilot holds what the call carries from its boundary on, what lies
-        before it as it was, and `replayed_size` as it stood. After either,
+        Pilot holds what the call carries from its boundary on, its labels
+        among it, what lies before it as it was, and `replayed_size` as it
+        stood. After either,
         each Launch of a main thread that a Turn of Pilot's started, or a
         driver under a Session whose step names the thread, stands under
         its Session and Turn (DB 538). After one with a labelling the
@@ -523,8 +527,8 @@ class PublicationService:
                 do not fit in their Call's opening prompt; nothing is
                 written.
             PublicationNotAppendableException: an appended call does not
-                continue what Pilot holds of the Transcript; nothing is
-                written.
+                continue what Pilot holds of the Transcript, its facts or its
+                labels; nothing is written.
             TranscriptNotAdoptableException: the call names a group for a
                 Transcript a Session of Pilot's ran; nothing is written.
             NoServiceUserException: the call names a group no Project
@@ -561,7 +565,7 @@ class PublicationService:
         with self._replayed(publication, held):
             self._facts(thread, publication, versions, boundary, ids, (kept, carved))
             if labelling is not None:
-                self._labels.write(thread, labelling, ids)
+                self._labels.write(thread, labelling, ids, boundary)
         self._join(publication.session_id)
         if publication.agent_id is None:
             hold_sub_agents_calls(self.db, publication.session_id)
@@ -742,7 +746,8 @@ class PublicationService:
         Compaction are each the row Pilot holds at the boundary's place, if
         it holds one there, told by its time. The write that follows then
         removes none of those, touches nothing before the boundary, and
-        gives no held row another's facts.
+        gives no held row another's facts. Its labelling, where it carries
+        one, continues the labels Pilot holds (`LabelWrite.gaps`).
 
         Raises:
             PublicationNotAppendableException: it does not; nothing is
@@ -769,6 +774,13 @@ class PublicationService:
         causes = self._launch_gaps(held.id, publication.launches, boundary)
         causes += self._compaction_gaps(held.id, publication.compactions, boundary)
         earlier = self._call_gaps(held.id, publication.calls, boundary, causes)
+        if publication.labelling is not None:
+            causes += self._labels.gaps(
+                held.id,
+                (held.labelled_under, held.records_stamp),
+                publication.labelling,
+                boundary,
+            )
         if causes:
             raise PublicationNotAppendableException(name, causes)
         return earlier

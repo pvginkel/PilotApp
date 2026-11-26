@@ -13784,7 +13784,7 @@
               }
             ],
             "default": null,
-            "description": "The labeller's labels of the Transcript, which replace all Pilot holds; none where no labeller answered for it, and Pilot then keeps the labels it holds"
+            "description": "The labeller's labels of the Transcript, which replace all Pilot holds, on an appended call all it holds from the boundary on; none where no labeller answered for it, and Pilot then keeps the labels it holds"
           },
           "launches": {
             "description": "A main thread's Launches, in the file's order; on an appended call those that wrote a line of what it carries, the first with its Prompts from the boundary's on",
@@ -15038,7 +15038,7 @@
       },
       "PublicationSchema.9ed0c05.PublishedLabellingSchema": {
         "additionalProperties": false,
-        "description": "The labeller's labels of one Transcript, whole: what Pilot holds of its\nlabels after the call (DB decision 81, assertion 561).",
+        "description": "The labeller's labels of one Transcript: what Pilot holds of its labels\nafter the call, on an appended call from its boundary on (DB decision 81,\nassertion 561).",
         "properties": {
           "ci_builds": {
             "description": "Every CI Build a CI Wait names",
@@ -15094,7 +15094,7 @@
       },
       "PublicationSchema.9ed0c05.PublishedLabelsSchema": {
         "additionalProperties": false,
-        "description": "The labels of the Transcript's own rows, each list in the labeller's\norder; a row the labels do not name takes none.",
+        "description": "The labels of the Transcript's own rows, each list in the labeller's\norder; a row the labels do not name takes none. On an appended call, the\nlabels of its rows from its boundary on, of the Work Units' Test Runs and\nof the Documents.",
         "properties": {
           "calls": {
             "description": "The Calls' labels",
@@ -15145,7 +15145,7 @@
             "type": "array"
           },
           "segments": {
-            "description": "Every Segment, by position from 1",
+            "description": "Every Segment, by position from 1; on an appended call from the one its boundary's Call falls in",
             "items": {
               "$ref": "#/components/schemas/PublicationSchema.9ed0c05.LabelledSegmentSchema"
             },
@@ -27444,7 +27444,7 @@
     },
     "/api/collector/publications": {
       "post": {
-        "description": "Headers: `Authorization`, `Bearer` and the setting `COLLECTOR_TOKEN`; `X-Pilot-Collector-Protocol`, the protocol version the collector speaks. The body is the transcript as its file stands, read whole, or, with `appended`, what a file that grew holds from a boundary on.\n\nEach answer is the call's outcome, and all but the first leave the record as it was:\n\n- 204: Pilot holds the transcript as the call says. - 401: the call does not carry the collector's bearer, and every call   while `COLLECTOR_TOKEN` is empty. No call of this collector's is taken   until its bearer is the server's. - 426, with the range `{min, max}`: the call names a protocol version   outside it, or none. No call is taken until the collector speaks a   version in the range. - 400: the call does not validate, every fault named at once: the fields   that are not the call's shape, or, in `error`, what in the call   contradicts itself or the record's rules for a transcript. The same   call is refused again; the collector's other transcripts are not. - 409, with the `code` `PUBLICATION_NOT_APPENDABLE`: an appended call   does not continue what Pilot holds of the transcript, the reasons in   `error`: Pilot does not hold it at the size and time and under the   collector's version the call builds on, holds no row at a place before   the boundary's, holds from there on, or before, what the call does   not carry so, or holds at the boundary's `launch`, `prompt` or   `compaction` another one than the call's first, told by its time. The   collector publishes the transcript whole. - 409, with the `code` `TRANSCRIPT_NOT_ADOPTABLE`: the call names a   `group` for a transcript a session of Pilot's ran, which no adopted   project adopts. The same call is refused again, and the call without   its `group` is taken. - 409, with the `code` `NO_SERVICE_USER`: the call names a `group` no   project holds yet, and the stage has no service user to make its   adopted project. The same call is taken once the stage has one. - 413: the body is over `MAX_UPLOAD_SIZE_MB`. The same call is refused   again.",
+        "description": "Headers: `Authorization`, `Bearer` and the setting `COLLECTOR_TOKEN`; `X-Pilot-Collector-Protocol`, the protocol version the collector speaks. The body is the transcript as its file stands, read whole, or, with `appended`, what a file that grew holds from a boundary on.\n\nEach answer is the call's outcome, and all but the first leave the record as it was:\n\n- 204: Pilot holds the transcript as the call says. - 401: the call does not carry the collector's bearer, and every call   while `COLLECTOR_TOKEN` is empty. No call of this collector's is taken   until its bearer is the server's. - 426, with the range `{min, max}`: the call names a protocol version   outside it, or none. No call is taken until the collector speaks a   version in the range. - 400: the call does not validate, every fault named at once: the fields   that are not the call's shape, or, in `error`, what in the call   contradicts itself or the record's rules for a transcript. The same   call is refused again; the collector's other transcripts are not. - 409, with the `code` `PUBLICATION_NOT_APPENDABLE`: an appended call   does not continue what Pilot holds of the transcript, the reasons in   `error`: Pilot does not hold it at the size and time and under the   collector's version the call builds on, holds no row at a place before   the boundary's, holds from there on, or before, what the call does   not carry so, or holds at the boundary's `launch`, `prompt` or   `compaction` another one than the call's first, told by its time; or   its `labelling` does not continue the labels Pilot holds: they are   under another stamp or none, or another major of the labeller's   version, or its first Segment is neither the one the Call before the   boundary falls in nor the next. The collector publishes the   transcript whole. - 409, with the `code` `TRANSCRIPT_NOT_ADOPTABLE`: the call names a   `group` for a transcript a session of Pilot's ran, which no adopted   project adopts. The same call is refused again, and the call without   its `group` is taken. - 409, with the `code` `NO_SERVICE_USER`: the call names a `group` no   project holds yet, and the stage has no service user to make its   adopted project. The same call is taken once the stage has one. - 413: the body is over `MAX_UPLOAD_SIZE_MB`. The same call is refused   again.",
         "operationId": "post__api_collector_publications",
         "parameters": [],
         "requestBody": {

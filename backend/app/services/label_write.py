@@ -11,6 +11,16 @@ by its place among its Call's labelled ones, a Test Run by its place among its
 Transcript's. Work Units, Test Suites, Tests and CI Builds are written by
 their keys and never removed: no one Transcript's labels own them.
 
+An appended call's labelling is the labeller's answer from the call's boundary
+on, and replaces the labels from there on alone (F152.15; DB decision 81): the
+Launches' from the boundary's Launch, the Segments' from the one its first Call
+falls in, the Calls', their Tool Calls', Events', Context Parts', Test Runs'
+and CI Waits' from its Call, and always the Test Runs of Work Units, which the
+labeller gives on every answer for the Transcript that carries them, and the
+Documents'. It is no relabel: it continues labels held under its stamp and its
+version's major (`LabelWrite.gaps`), and the Transcript is labelled under its
+version, so that all its labels are under one stamp and one major.
+
 A labelled Context Part is a part of its Call's opening prompt, which the
 collector counts whole: the publication stores that prompt's part as what the
 collector counted less the Call's labelled parts (`carve`).
@@ -24,6 +34,7 @@ from typing import Any, cast
 from pilot_collection.publication import (
     LabelledTestRunSchema,
     PublicationSchema,
+    PublishedBoundarySchema,
     PublishedCallSchema,
     PublishedLabellingSchema,
     PublishedLabelsSchema,
@@ -80,6 +91,13 @@ LABEL_COLUMNS: dict[type[Any], frozenset[str]] = {
 """The label columns of the entities whose rows are facts."""
 
 
+def major(version: str) -> str:
+    """The major of the labeller's version, which alone relabels a
+    Transcript whole where it differs (`labeller.md`, "Pilot relabels a
+    conversation whole when the major differs")."""
+    return version.split(".", 1)[0]
+
+
 def labelled(row: Any) -> bool:
     """Whether the row is a label: one of `LABEL_ROWS`, or an Event or a
     Context Part the labeller gave."""
@@ -130,14 +148,13 @@ def _twice(what: str, keys: Iterable[Any]) -> list[str]:
 
 def labelling_faults(publication: PublicationSchema) -> list[str]:
     """What in the call's labelling contradicts the call itself or the
-    record's rules for labels (DB 533, 552, 554), each in a line."""
+    record's rules for labels (DB 533, 552, 554), each in a line. An
+    appended call's labelling labels its rows from its boundary on."""
     labelling = publication.labelling
     if labelling is None:
         if publication.group is not None:
             return ["a call with no labelling names no `group`"]
         return []
-    if publication.appended is not None:
-        return ["an appended call carries no labelling"]
     labels = labelling.labels
     found: list[str] = []
     if publication.agent_id is not None and labels.documents:
@@ -145,10 +162,16 @@ def labelling_faults(publication: PublicationSchema) -> list[str]:
 
     units = _unit_faults(labelling.units, found)
     found += _twice("launch", (launch.n for launch in labels.launches))
-    held = len(publication.launches)
+    appended = publication.appended
+    first = 1 if appended is None else appended.boundary.launch
+    last = first - 1 + len(publication.launches)
     for launch in labels.launches:
-        if launch.n > held:
-            found.append(f"launch {launch.n}: the call has {held} launches")
+        if launch.n < first:
+            found.append(
+                f"launch {launch.n}: before the call's boundary, at launch {first}"
+            )
+        if launch.n > last:
+            found.append(f"launch {launch.n}: the call has {last} launches")
         if launch.work_unit is not None and launch.work_unit not in units:
             found.append(
                 f"launch {launch.n}: the unit `{launch.work_unit}` is none of the"
@@ -163,7 +186,7 @@ def labelling_faults(publication: PublicationSchema) -> list[str]:
         for call in labels.calls
         if call.id not in known
     ]
-    found += _segment_faults(labels, calls)
+    found += _segment_faults(labels, calls, appended is not None)
 
     requested = {
         tool_call.tool_use_id
@@ -233,22 +256,30 @@ def _unit_faults(units: list[PublishedWorkUnitSchema], found: list[str]) -> set[
     return keys
 
 
-def _segment_faults(labels: PublishedLabelsSchema, calls: list[str]) -> list[str]:
-    """Where the Segments do not hold the positions 1 to their number, each
-    a run of the Calls in their order that covers them (DB 554)."""
+def _segment_faults(
+    labels: PublishedLabelsSchema, calls: list[str], appended: bool
+) -> list[str]:
+    """Where the Segments do not hold positions one after another, from 1
+    on a whole call and from their first's on an appended one, each a run of
+    the Calls in their order that covers them, the first Call in the first
+    (DB 554)."""
     positions = [segment.position for segment in labels.segments]
-    if positions != list(range(1, len(positions) + 1)):
+    start = positions[0] if appended and positions else 1
+    if positions != list(range(start, start + len(positions))):
+        if appended:
+            return ["the segments' positions do not follow one another, in order"]
         return ["the segments' positions are not 1 to their number, in order"]
     falls = {call.id: call.segment for call in labels.calls}
     if not positions and not any(falls.values()):
         return []
     found: list[str] = []
-    last = 0
+    end = start - 1 + len(positions)
+    last = start - 1
     for message_id in calls:
         place = falls.get(message_id)
         if place is None:
             found.append(f"call `{message_id}`: names no segment")
-        elif place > len(positions):
+        elif not start <= place <= end:
             found.append(f"call `{message_id}`: names segment {place}, of none")
         elif place not in (last, last + 1):
             found.append(f"call `{message_id}`: segment {place} follows segment {last}")
@@ -256,7 +287,7 @@ def _segment_faults(labels: PublishedLabelsSchema, calls: list[str]) -> list[str
             last = place
             continue
         return found
-    if last < len(positions):
+    if last < end:
         found.append(f"segment {last + 1} holds no call")
     return found
 
@@ -379,26 +410,86 @@ class LabelWrite:
             ]
         return found
 
+    def gaps(
+        self,
+        thread_id: uuid.UUID,
+        held: tuple[str | None, str | None],
+        labelling: PublishedLabellingSchema,
+        boundary: PublishedBoundarySchema,
+    ) -> list[str]:
+        """Why an appended call's labelling does not continue the labels
+        Pilot holds of the Transcript, `held` the labeller's version they are
+        under and their stamp, each in a line: they are under another stamp
+        or another major of the labeller's, or the labelling's first Segment
+        is neither the one the Call before the boundary falls in nor the
+        next, the first where the boundary's Call is the first, and none
+        where the Call before falls in none."""
+        labelled_under, stamp = held
+        found: list[str] = []
+        if stamp != labelling.stamp:
+            found.append(
+                "Pilot holds its labels under no stamp"
+                if stamp is None
+                else "Pilot holds its labels under another stamp than the labelling's"
+            )
+        if labelled_under is not None and major(labelled_under) != major(
+            labelling.version
+        ):
+            found.append(
+                f"Pilot holds its labels under the labeller's {labelled_under}, of"
+                f" another major than the labelling's {labelling.version}"
+            )
+        before = (
+            None
+            if boundary.call == 1
+            else self.db.scalar(
+                select(Call.segment_position).where(
+                    Call.transcript_id == thread_id,
+                    Call.position == boundary.call - 1,
+                )
+            )
+        )
+        segments = labelling.labels.segments
+        if before is not None:
+            follows: tuple[int, ...] = (before, before + 1)
+        else:
+            follows = (1,) if boundary.call == 1 else ()
+        held_in = "in none" if before is None else f"in segment {before}"
+        if not segments and before is not None:
+            found.append(
+                "the labelling names no segment, and Pilot holds the call before"
+                f" its boundary {held_in}"
+            )
+        if segments and segments[0].position not in follows:
+            found.append(
+                f"the labelling's segments start at {segments[0].position}, and"
+                f" Pilot holds the call before its boundary {held_in}"
+            )
+        return found
+
     def write(
         self,
         thread: Transcript,
         labelling: PublishedLabellingSchema,
         ids: dict[str, int],
+        boundary: PublishedBoundarySchema,
     ) -> None:
-        """Hold the labelling as the Transcript's labels, every label it held
-        before replaced; `ids` has the id of each of its Calls by
-        `message_id`."""
+        """Hold the labelling as the Transcript's labels from the call's
+        `boundary` on, every label it held there before replaced, and those
+        before the boundary as they were; `ids` has the id of each of the
+        call's Calls by `message_id`."""
         labels = labelling.labels
         units = self._units(labelling.units)
         suites = self._suites(labelling)
         builds = self._builds(labelling)
-        self._launches(thread, labels, units)
-        self._calls(thread, labels)
-        tool_calls = self._tool_calls(thread, labels)
+        self._launches(thread, labels, units, boundary)
+        self._calls(thread, labels, boundary)
+        tool_calls = self._tool_calls(thread, labels, boundary)
         self._hung(
             Event,
             thread,
             ids,
+            boundary,
             [
                 (
                     event.call,
@@ -411,6 +502,7 @@ class LabelWrite:
             ContextPart,
             thread,
             ids,
+            boundary,
             [
                 (
                     part.call,
@@ -423,8 +515,8 @@ class LabelWrite:
                 for part in labels.context_parts
             ],
         )
-        self._test_runs(thread, labels, tool_calls, units, suites)
-        self._ci_waits(thread, labels, tool_calls, builds)
+        self._test_runs(thread, labels, tool_calls, units, suites, boundary)
+        self._ci_waits(labels, tool_calls, builds)
         self._documents(labels)
 
     def _units(self, units: list[PublishedWorkUnitSchema]) -> dict[str, int]:
@@ -612,30 +704,45 @@ class LabelWrite:
         return {key: row.id for key, row in held.items()}
 
     def _launches(
-        self, thread: Transcript, labels: PublishedLabelsSchema, units: dict[str, int]
+        self,
+        thread: Transcript,
+        labels: PublishedLabelsSchema,
+        units: dict[str, int],
+        boundary: PublishedBoundarySchema,
     ) -> None:
-        """Each of the Transcript's Launches with the Work Unit it carried
-        out, none where the labels name none."""
+        """Each of the Transcript's Launches from the boundary's on with the
+        Work Unit it carried out, none where the labels name none."""
         carried = {launch.n: launch.work_unit for launch in labels.launches}
         for place, row in enumerate(
             self.db.scalars(
                 select(Launch)
                 .where(Launch.transcript_id == thread.id)
                 .order_by(Launch.id)
+                .offset(boundary.launch - 1)
             ),
-            start=1,
+            start=boundary.launch,
         ):
             key = carried.get(place)
             row.work_unit_id = None if key is None else units[key]
 
-    def _calls(self, thread: Transcript, labels: PublishedLabelsSchema) -> None:
-        """The Transcript's Segments as the labels give them, and each of its
-        Calls with its labels. A Segment is held before a Call names it and
-        removed once none does."""
+    def _calls(
+        self,
+        thread: Transcript,
+        labels: PublishedLabelsSchema,
+        boundary: PublishedBoundarySchema,
+    ) -> None:
+        """The Transcript's Segments from the labels' first on as the labels
+        give them, and each of its Calls from the boundary on with its
+        labels. A Segment is held before a Call names it and removed once
+        none does."""
+        segments = labels.segments
+        start = segments[0].position if segments else 1
         held = {
             row.position: row
             for row in self.db.scalars(
-                select(Segment).where(Segment.transcript_id == thread.id)
+                select(Segment).where(
+                    Segment.transcript_id == thread.id, Segment.position >= start
+                )
             )
         }
         for segment in labels.segments:
@@ -652,7 +759,11 @@ class LabelWrite:
                 row.kind_code = segment.kind
         self.db.flush()
         given = {call.id: call for call in labels.calls}
-        for row in self.db.scalars(select(Call).where(Call.transcript_id == thread.id)):
+        for row in self.db.scalars(
+            select(Call).where(
+                Call.transcript_id == thread.id, Call.position >= boundary.call
+            )
+        ):
             call = given.get(row.message_id)
             _set(
                 row,
@@ -667,20 +778,29 @@ class LabelWrite:
             )
         self.db.flush()
         for position, row in held.items():
-            if position > len(labels.segments):
+            if position >= start + len(segments):
                 self.db.delete(row)
         self.db.flush()
 
     def _tool_calls(
-        self, thread: Transcript, labels: PublishedLabelsSchema
+        self,
+        thread: Transcript,
+        labels: PublishedLabelsSchema,
+        boundary: PublishedBoundarySchema,
     ) -> dict[str, int]:
-        """Each of the Transcript's Tool Calls with its labels and the Rules
-        it breached; the id of each by its `tool_use_id`."""
+        """Each of the Transcript's Tool Calls under its Calls from the
+        boundary on with its labels and the Rules it breached; the id of
+        each by its `tool_use_id`."""
         given = {tool_call.tool_use_id: tool_call for tool_call in labels.tool_calls}
         rows = {
             row.tool_use_id: row
             for row in self.db.scalars(
-                select(ToolCall).where(ToolCall.transcript_id == thread.id)
+                select(ToolCall)
+                .join(Call, Call.id == ToolCall.call_id)
+                .where(
+                    ToolCall.transcript_id == thread.id,
+                    Call.position >= boundary.call,
+                )
             )
         }
         for tool_use_id, row in rows.items():
@@ -707,9 +827,9 @@ class LabelWrite:
         held = {
             (row.tool_call_id, row.rule_code): row
             for row in self.db.scalars(
-                select(RuleBreach)
-                .join(ToolCall, ToolCall.id == RuleBreach.tool_call_id)
-                .where(ToolCall.transcript_id == thread.id)
+                select(RuleBreach).where(
+                    RuleBreach.tool_call_id.in_([row.id for row in rows.values()])
+                )
             )
         }
         for key in sorted(breached - held.keys()):
@@ -724,17 +844,23 @@ class LabelWrite:
         entity: type[Any],
         thread: Transcript,
         ids: dict[str, int],
+        boundary: PublishedBoundarySchema,
         given: list[tuple[str, dict[str, Any]]],
     ) -> None:
         """The labelled rows of `entity` under each of the Transcript's
-        Calls, as `given` has them by their Call's `message_id`, in its
-        order; a held one past the last its Call has is removed."""
+        Calls from the boundary on, as `given` has them by their Call's
+        `message_id`, in its order; a held one past the last its Call has is
+        removed."""
         held: dict[int, list[Any]] = {}
         row: Any
         for row in self.db.scalars(
             select(entity)
             .join(Call, Call.id == entity.call_id)
-            .where(Call.transcript_id == thread.id, entity.labelled.is_(True))
+            .where(
+                Call.transcript_id == thread.id,
+                Call.position >= boundary.call,
+                entity.labelled.is_(True),
+            )
             .order_by(entity.id)
         ):
             held.setdefault(row.call_id, []).append(row)
@@ -758,13 +884,22 @@ class LabelWrite:
         tool_calls: dict[str, int],
         units: dict[str, int],
         suites: dict[str, int],
+        boundary: PublishedBoundarySchema,
     ) -> None:
         """The Transcript's Test Runs as the labels give them, each with its
-        Test Failures, a Test its suite has not named written."""
+        Test Failures, a Test its suite has not named written: those of its
+        Tool Calls under its Calls from the boundary on, and those of Work
+        Units."""
         held = list(
             self.db.scalars(
                 select(TestRun)
-                .where(TestRun.transcript_id == thread.id)
+                .outerjoin(ToolCall, ToolCall.id == TestRun.tool_call_id)
+                .outerjoin(Call, Call.id == ToolCall.call_id)
+                .where(
+                    TestRun.transcript_id == thread.id,
+                    TestRun.work_unit_id.is_not(None)
+                    | (Call.position >= boundary.call),
+                )
                 .order_by(TestRun.id)
             )
         )
@@ -864,13 +999,12 @@ class LabelWrite:
 
     def _ci_waits(
         self,
-        thread: Transcript,
         labels: PublishedLabelsSchema,
         tool_calls: dict[str, int],
         builds: dict[tuple[str, int], int],
     ) -> None:
-        """The waits of the Transcript's Tool Calls on CI Builds, as the
-        labels give them."""
+        """The waits on CI Builds of the Tool Calls `tool_calls` has the id
+        of, the Transcript's from the boundary on, as the labels give them."""
         waited = {
             (tool_calls[wait.tool_use_id], builds[wait.job, wait.number])
             for wait in labels.ci_waits
@@ -878,9 +1012,7 @@ class LabelWrite:
         held = {
             (row.tool_call_id, row.ci_build_id): row
             for row in self.db.scalars(
-                select(CIWait)
-                .join(ToolCall, ToolCall.id == CIWait.tool_call_id)
-                .where(ToolCall.transcript_id == thread.id)
+                select(CIWait).where(CIWait.tool_call_id.in_(list(tool_calls.values())))
             )
         }
         for tool_call_id, ci_build_id in sorted(waited - held.keys()):

@@ -3609,20 +3609,16 @@ class TestAdopted:
         assert project.name == "Recipe box: the first menus"
         assert project.created_by_user_id == service_user.id
 
-    def test_an_appended_call_names_no_group(
+    def test_an_appended_call_that_first_names_a_group_makes_its_project(
         self, session: DbSession, publications: PublicationService, service_user: User
     ) -> None:
-        """It carries no labelling yet, and a group is a label of one."""
-        publications.publish(_camp())
+        publications.publish(_camp(labelling=labelling()))
 
-        with (
-            writes(session) as wrote,
-            pytest.raises(PublicationInvalidException) as raised,
-        ):
-            publications.publish(_grown(group=group()))
+        thread = publications.publish(_grown(group=group(), labelling=labelling()))
 
-        assert raised.value.faults == ["a call with no labelling names no `group`"]
-        assert wrote == {}
+        project = session.scalars(select(Project)).one()
+        assert thread.adopted_project_id == project.id
+        assert project.adopted_group == FIRST_MENUS
 
     def test_a_later_publication_naming_the_group_finds_its_project(
         self, session: DbSession, publications: PublicationService, service_user: User
@@ -3632,7 +3628,7 @@ class TestAdopted:
         second = publications.publish(
             _camp(session_id=OTHER, group=group(), labelling=labelling())
         )
-        again = publications.publish(_grown())
+        again = publications.publish(_grown(group=group(), labelling=labelling()))
 
         assert _count(session, Project) == 1
         assert (
@@ -3804,6 +3800,23 @@ class TestAdopted:
             pytest.raises(TranscriptNotAdoptableException),
         ):
             publications.publish(_camp(group=group(), labelling=labelling()))
+
+        assert wrote == {}
+
+    def test_an_appended_call_naming_a_group_for_a_sessions_transcript_is_refused(
+        self,
+        session: DbSession,
+        publications: PublicationService,
+        run: models.Session,
+        service_user: User,
+    ) -> None:
+        publications.publish(_camp(labelling=labelling()))
+
+        with (
+            writes(session) as wrote,
+            pytest.raises(TranscriptNotAdoptableException),
+        ):
+            publications.publish(_grown(group=group(), labelling=labelling()))
 
         assert wrote == {}
 
