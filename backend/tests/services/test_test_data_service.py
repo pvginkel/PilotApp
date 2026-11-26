@@ -13,7 +13,7 @@ import pilot_dsl as dsl
 import pytest
 from dependency_injector import providers
 from flask import Flask
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session as DbSession
 
 from app import models
@@ -79,6 +79,8 @@ from app.schemas.testing_record import (
 from app.services import test_data_service
 from app.services.container import ServiceContainer
 from app.services.controller_client import ControllerClient
+from app.services.project_service import project_name
+from app.services.scenario_service import HISTORY, HISTORY_DAYS
 from app.services.session_record_service import read_records
 from app.services.wait_service import ReportedTransition
 from app.startup import load_test_data_hook
@@ -639,6 +641,71 @@ class TestTestDataService:
             == []
         )
         assert session.scalars(select(Project)).all() == []
+
+
+class TestLoadHistory:
+    @pytest.fixture
+    def calls(self, container: ServiceContainer, counts: dict[str, int]) -> int:
+        """The seed, then its history."""
+        return container.test_data_service().load_history()
+
+    def test_its_places_are_open_projects_of_adas_and_the_seeds_are_left_as_they_were(
+        self, session: DbSession, counts: dict[str, int], calls: int
+    ) -> None:
+        places = []
+        for place in HISTORY.places:
+            project = _project(session, place.slug)
+            members = session.scalars(
+                select(User.handle)
+                .join(ProjectMember, ProjectMember.user_id == User.id)
+                .where(ProjectMember.project_id == project.id)
+                .order_by(ProjectMember.id)
+            ).all()
+            assert (project.state_code, project_name(project)) == (
+                ProjectState.OPEN,
+                place.name,
+            )
+            assert members == ["ada", "ben"]
+            places.append(project.id)
+        seeds = (
+            select(func.count()).select_from(Item).where(Item.project_id.not_in(places))
+        )
+
+        assert session.scalar(seeds) == counts["items"]
+
+    def test_it_holds_each_kind_of_pilots_session_over_its_weeks_up_to_its_load(
+        self, session: DbSession, calls: int
+    ) -> None:
+        now = session.scalar(select(func.now()))
+        assert now is not None
+        places = [_project(session, place.slug).id for place in HISTORY.places]
+        sessions = session.scalars(
+            select(models.Session).where(models.Session.conversation_id.is_not(None))
+        ).all()
+        named = session.scalars(
+            select(Item.title).where(
+                Item.kind_code == "work", Item.project_id.in_(places)
+            )
+        ).all()
+        held = session.scalars(select(models.Call.completed_at)).all()
+
+        assert len(held) == calls
+        assert {run.kind_code for run in sessions} == {
+            "work",
+            "job",
+            "chat",
+            "conversation",
+        }
+        assert {run.project_id for run in sessions} == set(places)
+        assert len(named) == sum(run.kind_code in ("work", "job") for run in sessions)
+        assert max(held) < now
+        for week in range(1, HISTORY_DAYS // 7 + 1):
+            assert any(
+                now - timedelta(days=7 * week)
+                <= at
+                < now - timedelta(days=7 * (week - 1))
+                for at in held
+            ), week
 
 
 DECISION_TEXT = """```decision id=D1

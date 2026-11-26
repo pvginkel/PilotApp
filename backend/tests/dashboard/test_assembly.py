@@ -7,6 +7,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 from flask.testing import FlaskClient
+from pilot_scenario import SCENARIO
 from sqlalchemy import select
 from sqlalchemy.orm import Session as DbSession
 
@@ -435,7 +436,7 @@ class TestAPublication:
         before = service.catalogue(session)
         assert "claude_code_version" not in {d.key for d in before.dimensions}
 
-        container.scenario_service().load({"recipe-box": project.id})
+        container.scenario_service().load(SCENARIO, {"recipe-box": project.id})
 
         # Not before its transaction commits: a reader would assemble it
         # from a record that has not the row yet.
@@ -449,12 +450,12 @@ class TestAPublication:
     def test_one_that_writes_none_leaves_it(
         self, session: DbSession, container: ServiceContainer, project: Project
     ) -> None:
-        container.scenario_service().load({"recipe-box": project.id})
+        container.scenario_service().load(SCENARIO, {"recipe-box": project.id})
         run_after_commit_callbacks()
         service = container.catalogue_service()
         held = service.catalogue(session)
 
-        container.scenario_service().load({"recipe-box": project.id})
+        container.scenario_service().load(SCENARIO, {"recipe-box": project.id})
         run_after_commit_callbacks()
 
         assert service.catalogue(session) is held
@@ -466,7 +467,8 @@ class TestAPublication:
         before = client.get(catalogue, query_string={"part": "dimensions"})
 
         loaded = client.post(
-            "/api/testing/scenarios", json={"projects": {"recipe-box": str(project.id)}}
+            "/api/testing/scenarios",
+            json={"scenario": "supper", "projects": {"recipe-box": str(project.id)}},
         )
 
         assert loaded.status_code == 201

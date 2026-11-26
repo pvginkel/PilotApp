@@ -120,9 +120,9 @@ class TestItsWorld:
 
     def test_a_session_is_pilots_or_a_persons_of_that_world(self) -> None:
         for session in SCENARIO.sessions:
-            assert (session.turn is None) != (session.person is None), session.name
-            if session.turn is not None:
-                assert session.turn.project in SCENARIO.projects
+            assert (session.ran is None) != (session.person is None), session.name
+            if session.ran is not None:
+                assert session.ran.project in SCENARIO.projects
             else:
                 assert session.person in SCENARIO.people
 
@@ -134,7 +134,7 @@ class TestItsWorld:
             for session in SCENARIO.sessions
         ] == [("halving", None), ("gears", "bike-log-first-rides")]
         assert all(
-            session.turn is None
+            session.ran is None
             for session in SCENARIO.sessions
             if session.group is not None
         )
@@ -143,7 +143,7 @@ class TestItsWorld:
         self,
     ) -> None:
         assert [
-            (session.name, session.turn is not None, len(session.sub_agents))
+            (session.name, session.ran is not None, len(session.sub_agents))
             for session in SCENARIO.sessions
         ] == [("halving", True, 1), ("gears", False, 0)]
 
@@ -201,7 +201,8 @@ class TestItsStory:
 
     def test_a_turn_of_pilots_is_in_flight_as_its_launch_starts(self) -> None:
         for session in SCENARIO.sessions:
-            if session.turn is None:
+            if session.ran is None:
                 continue
             (launch,) = session.launches
-            assert session.turn.at <= launch.prompts[0].at <= session.turn.ended
+            (turn,) = session.ran.turns
+            assert turn.at <= launch.prompts[0].at <= turn.ended

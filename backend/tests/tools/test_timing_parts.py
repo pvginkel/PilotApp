@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session as DbSession
 
 from app.models.call import Call
 from app.services.container import ServiceContainer
-from tools.timing.history import _Writer, draw
+from tools.timing.history import HISTORY, _Writer
 from tools.timing.parts import (
     EACH_ITEM,
     LONG_MS,
@@ -29,7 +29,7 @@ YESTERDAY = datetime.now(UTC).date() - timedelta(days=1)
 def written(session: DbSession, container: ServiceContainer) -> str:
     """A day of the history ending yesterday, with the each-item quick
     filter; the transcript with the most Calls."""
-    _Writer(container, session).write(draw(YESTERDAY, 400))
+    _Writer(container, session).write(HISTORY.draw(YESTERDAY, 400))
     container.dashboard_store_service().add_quick_filter(
         "Costly conversations", EACH_ITEM, "cost", None
     )

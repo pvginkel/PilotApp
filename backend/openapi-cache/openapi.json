@@ -5479,14 +5479,14 @@
         "type": "object"
       },
       "InventedScenarioCreateSchema.6d6b324": {
-        "description": "The invented scenario to load (F122.6).",
+        "description": "An invented scenario to load (F122.6).",
         "properties": {
           "projects": {
             "additionalProperties": {
               "format": "uuid",
               "type": "string"
             },
-            "description": "The project that stands for each of the scenario's projects a Turn of Pilot's is on, by the scenario's name of it",
+            "description": "The project that stands for each of the scenario's projects Pilot ran a session on, by the scenario's name of it",
             "examples": [
               {
                 "recipe-box": "5e7f9a10-1c2d-4e3f-8a4b-6c7d8e9f0a1b"
@@ -5494,9 +5494,22 @@
             ],
             "title": "Projects",
             "type": "object"
+          },
+          "scenario": {
+            "description": "The scenario: `supper`, the invented story, or `tally`, all of it Pilot's, whose figures the dashboard's specs know",
+            "enum": [
+              "supper",
+              "tally"
+            ],
+            "examples": [
+              "tally"
+            ],
+            "title": "Scenario",
+            "type": "string"
           }
         },
         "required": [
+          "scenario",
           "projects"
         ],
         "title": "InventedScenarioCreateSchema",
@@ -37264,7 +37277,7 @@
     },
     "/api/testing/scenarios": {
       "post": {
-        "description": "Returns:     201: The scenario's transcripts, each with the project that adopted it     400: The projects given are not the scenario's that a Turn of         Pilot's is on, or the stage is prd     404: No project has an id given     409: The stage has no service user to make the group's adopted project",
+        "description": "Returns:     201: The scenario's transcripts, each with the project that adopted it     400: The projects given are not the scenario's that Pilot ran a         session on, or the stage is prd     404: No project has an id given, or no person the handle a Turn's         author is     409: The stage has no service user to make the group's adopted project",
         "operationId": "post__api_testing_scenarios",
         "parameters": [],
         "requestBody": {
@@ -37324,7 +37337,7 @@
             "BearerAuth": []
           }
         ],
-        "summary": "Load the invented scenario: its conversations, each published whole through the service a collector's publication writes through, its last moment now, and the Session and Turn of Pilot's that ran one of them, on the project given for the scenario's (F122.6). The conversation the scenario names a group for is adopted by the group's adopted project, made where the record has none (F152.8). A second load replaces the first: the record holds the scenario once, as it was loaded last.",
+        "summary": "Load an invented scenario: its conversations, each published whole through the service a collector's publication writes through, its last moment now, and what Pilot holds of those it ran, each on the project given for the scenario's: its Session and Turns, and its work item, job or chat (F122.6). The conversation the scenario names a group for is adopted by the group's adopted project, made where the record has none (F152.8). A second load replaces the first: the record holds the scenario once, as it was loaded last.",
         "tags": [],
         "x-required-role": "editor"
       }

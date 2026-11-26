@@ -30,6 +30,7 @@ import { expect } from '@playwright/test';
 
 import { BrowserPush } from './browser-push';
 import { Chats } from './chats';
+import { Collection } from './collection';
 import { Conversations } from './conversations';
 import { Outage } from './connection';
 import { Conditions, Controller } from './controller';
@@ -59,6 +60,7 @@ import { Waits } from './waits';
 interface DomainFixtures {
   people: People;
   projects: Projects;
+  collection: Collection;
   links: Links;
   controller: Controller;
   haltSettings: HaltSettings;
@@ -99,6 +101,9 @@ export const test = infrastructureFixtures.extend<DomainFixtures, DomainWorkerFi
   },
   projects: async ({ page, backendUrl }, use) => {
     await use(new Projects(page, backendUrl));
+  },
+  collection: async ({ page, backendUrl }, use) => {
+    await use(new Collection(page, backendUrl));
   },
   links: async ({ page, backendUrl }, use) => {
     const links = new Links(page, backendUrl);

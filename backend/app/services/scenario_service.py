@@ -1,41 +1,80 @@
-"""The scenario's load (F122.2, F122.6): the invented scenario put into the
-record as it stands now, its conversations through the service a collector's
-publication writes through.
+"""The scenarios' load (F122.2, F122.6): an invented scenario put into the
+record as it stands now, its conversations through the service a
+collector's publication writes through; and the dev seed's history, days of
+the fleet's work drawn from a seed, written the same way at their own
+times.
 
-The scenario's package knows nothing of the record, so what Pilot holds of a
-conversation before a collector reads its transcript is written here: for
-each session a Turn of Pilot's ran, a Session of the project given for the
-scenario's, over, whose `conversation_id` is the conversation's id and whose
-one Turn is that Turn. It is written before the conversation is published,
-so that the publication places the Launch the Turn started (DB 538). The
-scenario, as the load built it, is handed to the collector's fake, which
-serves its conversations' readings where it is the backend's collector
-(F122.5).
+A scenario's package knows nothing of the record, so what Pilot holds of a
+conversation before a collector reads its transcript is written here (its
+`script.Ran`): for each session Pilot ran, a Session of the project given
+for the scenario's, over, whose `conversation_id` is the conversation's id,
+with its Turns, each sent by Pilot or by the scenario's person of that
+handle; one run under a work item or a job placed as a Work with its Item,
+done at its last Turn's end, one under a chat with its Chat, closed then.
+It is written before the conversation is published, so that the publication
+places each Launch its Turn started (DB 538). A scenario the route loads, as
+the load built it, is handed to the collector's fake, which serves its
+conversations' readings where it is the backend's collector (F122.5).
 
-The conversations' ids are the scenario's own, so a second load is a whole
-publication of the same transcripts and replaces the first: the record holds
-the scenario once, however often it is loaded. The conversation the scenario
-names a group for is adopted by the group's adopted Project, which the first
-load makes and a later one finds by the group's key (F152.8).
+A load's conversations' ids are drawn from the scenario's name and the
+projects it is loaded on, so a second load on the same projects is a whole
+publication of the same transcripts and replaces the first, the record
+holding the scenario once however often it is loaded there, and a load on
+other projects is a scenario of its own beside it: what Pilot holds of a run
+stays on its project. The conversation a scenario names a group for is
+adopted by the group's adopted Project, which the first load makes and a
+later one finds by the group's key (F152.8).
 """
 
 import hashlib
 import uuid
 from collections.abc import Mapping
+from dataclasses import replace
+from datetime import datetime, timedelta
 
 from pilot_collection.publication import PublicationSchema
-from pilot_scenario import SCENARIO, Builder, SentTurn
+from pilot_scenario import SCENARIO, TALLY, Builder, Scenario, SentRun
+from pilot_scenario.history import ZONE, History, Place
 from sqlalchemy import func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
+from app.engine.record import RecordService
 from app.exceptions import RecordNotFoundException, ValidationException
-from app.models import Environment, Project, Transcript, Turn
+from app.models import Chat, Environment, Item, Project, Transcript, Turn, User
 from app.models import Session as AgentSession
-from app.models.reference import SessionState, TurnCause
+from app.models.reference import (
+    ChatKind,
+    CloseCause,
+    SessionState,
+    TurnCause,
+    UserKind,
+    WorkTrigger,
+)
 from app.services.fake_collector import FakeCollector
 from app.services.launch_placement import conversation_turn
 from app.services.publication_service import PublicationService
+
+SCENARIOS = {scenario.name: scenario for scenario in (SCENARIO, TALLY)}
+"""The scenarios a spec loads, by name."""
+
+HISTORY = History(
+    name="seed",
+    seed=54,
+    calls_a_day=15,
+    longest=40,
+    places=(
+        Place("seed-swap", "Seed swap", "SeedSwap", 5, ("packets", "swaps", "beans")),
+        Place("tide-table", "Tide table", "TideTable", 3, ("tides", "moon", "harbour")),
+        Place("kite-shop", "Kite shop", "KiteShop", 2, ("kites", "spars", "lines")),
+    ),
+)
+"""The dev seed's history: some fifteen Calls a weekday on three projects
+of its own, a conversation's main thread forty Calls at most."""
+
+HISTORY_DAYS = 63
+"""The days the dev seed's history holds, the day of its load the last:
+nine weeks, which the last eight quota weeks and the running one fall in."""
 
 
 class ScenarioService:
@@ -44,40 +83,59 @@ class ScenarioService:
         db: Session,
         publication_service: PublicationService,
         fake_collector: FakeCollector,
+        record_service: RecordService,
     ) -> None:
         self.db = db
         self.publication_service = publication_service
         self.fake_collector = fake_collector
+        self.record_service = record_service
 
-    def load(self, projects: Mapping[str, uuid.UUID]) -> list[Transcript]:
-        """Load the scenario in the caller's transaction, its last moment
-        now, and return its Transcripts: each session's main thread, then
-        its sub-agents'. Where the record holds the scenario, it then holds
-        it as this load has it: its times laid back from now, and its
-        Sessions of Pilot's on the projects given.
-
-        `projects` gives, for each of the scenario's projects a Turn of
-        Pilot's is on, by the scenario's name of it, the Project that stands
-        for it.
+    def load(
+        self, scenario: Scenario, projects: Mapping[str, uuid.UUID]
+    ) -> list[Transcript]:
+        """Load `scenario` in the caller's transaction, its last moment now,
+        hand it to the collector's fake, and return its Transcripts (`write`).
 
         Raises:
             ValidationException: `projects` names another set of the
-                scenario's projects than those a Turn of Pilot's is on.
-            RecordNotFoundException: no Project has an id given.
+                scenario's projects than those Pilot ran a session on.
+            RecordNotFoundException: no Project has an id given, or no
+                person the handle a Turn's author is.
             NoServiceUserException: the record holds no adopted Project of
-                the group the scenario names, and the stage has no service
+                a group the scenario names, and the stage has no service
                 user to make it.
         """
         now = self.db.scalar(select(func.now()))
         assert now is not None
-        builder = Builder(SCENARIO, now)
-        turns = builder.turns()
-        on = sorted({turn.project for turn in turns})
+        builder = Builder(_on(scenario, projects), now)
+        transcripts = self.write(builder, projects)
+        self.fake_collector.scenario(builder)
+        return transcripts
+
+    def write(
+        self, builder: Builder, projects: Mapping[str, uuid.UUID]
+    ) -> list[Transcript]:
+        """The scenario as `builder` built it, in the caller's transaction:
+        what Pilot holds of each session it ran, then each thread published,
+        and its Transcripts in the publications' order, each session's main
+        thread, then its sub-agents'. Where the record holds the scenario,
+        it then holds it as this build has it: its times the build's, and
+        its Sessions of Pilot's on the projects given.
+
+        `projects` gives, for each of the scenario's projects Pilot ran a
+        session on, by the scenario's name of it, the Project that stands
+        for it.
+
+        Raises:
+            As `load`.
+        """
+        runs = builder.runs()
+        on = sorted({run.project for run in runs})
         if sorted(projects) != on:
             raise ValidationException(
                 "Cannot load the scenario because `projects` gives a project for "
-                f"{_listed(sorted(projects))}, and the scenario's Turns of Pilot's "
-                f"are on {_listed(on)}"
+                f"{_listed(sorted(projects))}, and the scenario's Sessions of "
+                f"Pilot's are on {_listed(on)}"
             )
         standing: dict[str, Project] = {}
         for name, project_id in projects.items():
@@ -85,16 +143,38 @@ class ScenarioService:
             if project is None:
                 raise RecordNotFoundException("Project", str(project_id))
             standing[name] = project
-        for turn in turns:
-            self._session(standing[turn.project], turn)
-        transcripts = [
+        for run in runs:
+            self._session(standing[run.project], run)
+        return [
             self.publication_service.publish(
                 PublicationSchema.model_validate(publication)
             )
             for publication in builder.publications()
         ]
-        self.fake_collector.scenario(builder)
-        return transcripts
+
+    def history(self, projects: Mapping[str, uuid.UUID]) -> int:
+        """The dev seed's history (`HISTORY`) written in the caller's
+        transaction: its `HISTORY_DAYS` days, the last today's, each at its
+        own times, today's with only the conversations over by now; and the
+        Calls it holds. `projects` gives the Project that stands for each of
+        its places, by the place's slug.
+
+        Raises:
+            As `load`.
+        """
+        now = self.db.scalar(select(func.now()))
+        assert now is not None
+        today = now.astimezone(ZONE).date()
+        calls = 0
+        for back in reversed(range(HISTORY_DAYS)):
+            day = HISTORY.draw(today - timedelta(days=back)).before(now)
+            builder = day.builder()
+            self.write(
+                builder,
+                {run.project: projects[run.project] for run in builder.runs()},
+            )
+            calls += day.calls
+        return calls
 
     def adopting(self, transcripts: list[Transcript]) -> dict[uuid.UUID, Project]:
         """The adopted Projects that adopted `transcripts`, by id."""
@@ -106,48 +186,117 @@ class ScenarioService:
             )
         }
 
-    def _session(self, project: Project, turn: SentTurn) -> None:
-        """The Session that ran the Turn's conversation, of `project`, over
-        since the Turn's end, with that Turn its one: written where Pilot
-        holds none of the conversation, else the one it holds, as the Turn
-        now has it. Its environment is written where Pilot has none, as a
-        publication writes one the fleet stream has not given."""
-        conversation_turn(self.db, turn.conversation)
-        if turn.environment is not None:
+    def _session(self, project: Project, run: SentRun) -> None:
+        """The Session that ran the conversation, of `project`, over since
+        its last Turn's end, with its Turns, its Work and Item or its Chat:
+        written where Pilot holds none of the conversation, else the one it
+        holds, as the run now has it. Its environment is written where
+        Pilot has none, as a publication writes one the fleet stream has not
+        given."""
+        conversation_turn(self.db, run.conversation)
+        if run.environment is not None:
             self.db.execute(
                 pg_insert(Environment)
-                .values(id=turn.environment, name=turn.environment, exempt=False)
+                .values(id=run.environment, name=run.environment, exempt=False)
                 .on_conflict_do_nothing(index_elements=["id"])
             )
         session = self.db.scalars(
-            select(AgentSession).where(
-                AgentSession.conversation_id == turn.conversation
-            )
+            select(AgentSession).where(AgentSession.conversation_id == run.conversation)
         ).one_or_none()
         if session is None:
             session = AgentSession(
-                environment_id=turn.environment,
-                kind_code="work",
-                cwd=turn.directory,
-                conversation_id=turn.conversation,
+                environment_id=run.environment,
+                kind_code=run.kind,
+                cwd=run.directory,
+                conversation_id=run.conversation,
                 token_hash=hashlib.sha256(uuid.uuid4().bytes).hexdigest(),
                 state_code=SessionState.ENDED,
-                turns=1,
             )
-            sent = Turn(seq=1, message=turn.message, cause_code=TurnCause.BRIEF)
             self.db.add(session)
-        else:
-            sent = self.db.scalars(
-                select(Turn).where(Turn.session_id == session.id)
-            ).one()
+        started, ended = run.turns[0].sent_at, run.turns[-1].ended_at
         session.project_id = project.id
-        session.started_at = session.turn_started_at = turn.sent_at
-        session.turn_ended_at = session.ended_at = turn.ended_at
+        session.turns = len(run.turns)
+        session.started_at = started
+        session.turn_started_at = run.turns[-1].sent_at
+        session.turn_ended_at = session.ended_at = ended
         self.db.flush()
-        sent.session_id = session.id
-        sent.started_at, sent.ended_at = turn.sent_at, turn.ended_at
-        self.db.add(sent)
+        held = {
+            turn.seq: turn
+            for turn in self.db.scalars(
+                select(Turn).where(Turn.session_id == session.id)
+            )
+        }
+        for seq, sent in enumerate(run.turns, start=1):
+            turn = held.get(seq) or Turn(session_id=session.id, seq=seq)
+            author = None if sent.author is None else self._person(sent.author)
+            turn.message = sent.message
+            turn.cause_code = TurnCause(sent.cause)
+            turn.author_user_id = None if author is None else author.id
+            turn.words = None if author is None else sent.message
+            turn.started_at, turn.ended_at = sent.sent_at, sent.ended_at
+            self.db.add(turn)
+        if run.title is not None:
+            self._work(project, session, run, started, ended)
+        elif run.chat is not None:
+            self._chat(project, session, run, ended)
         self.db.flush()
+
+    def _work(
+        self,
+        project: Project,
+        session: AgentSession,
+        run: SentRun,
+        started: datetime,
+        ended: datetime,
+    ) -> None:
+        """The run's Work and its Item, created as the Session started and
+        done at its end, placed where the record holds none."""
+        item = self.db.get(Item, session.id)
+        if item is None:
+            assert run.title is not None
+            self.record_service.place_work(
+                project,
+                session,
+                run.title,
+                trigger=None if run.trigger is None else WorkTrigger(run.trigger),
+            )
+            self.record_service.work_done(session.id, ended)
+            item = self.db.get_one(Item, session.id)
+        item.created_at = started
+        item.done_at = ended
+
+    def _chat(
+        self, project: Project, session: AgentSession, run: SentRun, ended: datetime
+    ) -> None:
+        """The run's Chat, closed at its end, written where the record holds
+        none."""
+        chat = self.db.get(Chat, session.id)
+        if chat is None:
+            assert run.chat is not None
+            chat = Chat(
+                id=session.id,
+                project_id=project.id,
+                session_kind_code="chat",
+                kind_code=ChatKind(run.chat),
+                close_cause_code=CloseCause.FINISHED,
+            )
+            self.db.add(chat)
+        chat.closed_at = ended
+
+    def _person(self, handle: str) -> User:
+        person = self.db.scalars(
+            select(User).where(User.handle == handle, User.kind_code == UserKind.PERSON)
+        ).one_or_none()
+        if person is None:
+            raise RecordNotFoundException("Person", handle)
+        return person
+
+
+def _on(scenario: Scenario, projects: Mapping[str, uuid.UUID]) -> Scenario:
+    """The scenario as it is loaded on `projects`, its conversations' ids
+    drawn from its name and theirs."""
+    named = (str(projects[name]) for name in sorted(projects))
+    return replace(scenario, name="/".join((scenario.name, *named)))
 
 
 def _listed(names: list[str]) -> str:

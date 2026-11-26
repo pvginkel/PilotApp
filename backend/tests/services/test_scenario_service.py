@@ -1,13 +1,14 @@
-"""The scenario's load (F122.2, F122.6): the invented scenario in the record,
-published through the service a collector's call writes through, its Turn of
-Pilot's on the project given for the scenario's, and held once however often
-it is loaded."""
+"""The scenarios' load (F122.2, F122.6): an invented scenario in the record,
+published through the service a collector's call writes through, what Pilot
+holds of the sessions it ran on the projects given for the scenario's, and
+held once however often it is loaded; and the dev seed's history, written the
+same way at its own times."""
 
 import uuid
 from datetime import timedelta
 
 import pytest
-from pilot_scenario import SCENARIO
+from pilot_scenario import SCENARIO, TALLY
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session as DbSession
 
@@ -19,10 +20,12 @@ from app.exceptions import (
 )
 from app.models import (
     Call,
+    Chat,
     Compaction,
     Document,
     Environment,
     Event,
+    Item,
     Launch,
     Model,
     Project,
@@ -31,10 +34,19 @@ from app.models import (
     Transcript,
     Turn,
     User,
+    Work,
 )
-from app.models.reference import ProjectState, SessionState, UserKind
+from app.models.reference import (
+    ChatKind,
+    CloseCause,
+    ProjectState,
+    SessionState,
+    TurnCause,
+    UserKind,
+    WorkTrigger,
+)
 from app.services.container import ServiceContainer
-from app.services.scenario_service import ScenarioService
+from app.services.scenario_service import HISTORY, HISTORY_DAYS, ScenarioService
 from tests.support.database import Written, writes
 
 RECIPES = "ben-recipebox-51f0c2"
@@ -55,7 +67,7 @@ Project made by."""
 def loaded(scenario_service: ScenarioService, project: Project) -> list[Transcript]:
     """The scenario loaded, its `recipe-box` the project: the thread Pilot
     ran, its sub-agent's and the thread Ada ran by hand."""
-    return scenario_service.load({"recipe-box": project.id})
+    return scenario_service.load(SCENARIO, {"recipe-box": project.id})
 
 
 def _calls(db: DbSession, thread: Transcript) -> list[Call]:
@@ -122,7 +134,7 @@ class TestLoad:
         assert (run.project_id, run.environment_id) == (project.id, RECIPES)
         assert (run.kind_code, run.cwd) == ("work", "/work/RecipeBox")
         assert (turn.seq, turn.author_user_id) == (1, None)
-        assert turn.message == SCENARIO.sessions[0].turn.message
+        assert turn.message == SCENARIO.sessions[0].ran.turns[0].message
         assert turn.started_at <= launch.started_at <= turn.ended_at
 
     def test_the_session_of_pilots_is_over_since_its_turns_end(
@@ -276,7 +288,7 @@ class TestLoad:
         project: Project,
     ) -> None:
         with writes(session) as wrote:
-            again = scenario_service.load({"recipe-box": project.id})
+            again = scenario_service.load(SCENARIO, {"recipe-box": project.id})
 
         assert [thread.id for thread in again] == [thread.id for thread in loaded]
         assert wrote == {"transcripts": Written(updated=3)}
@@ -290,7 +302,7 @@ class TestLoad:
     ) -> None:
         adopted = loaded[2].adopted_project_id
 
-        again = scenario_service.load({"recipe-box": project.id})
+        again = scenario_service.load(SCENARIO, {"recipe-box": project.id})
 
         assert again[2].adopted_project_id == adopted
         assert session.scalars(
@@ -312,7 +324,7 @@ class TestLoad:
         session.flush()
 
         with pytest.raises(NoServiceUserException):
-            scenario_service.load({"recipe-box": project.id})
+            scenario_service.load(SCENARIO, {"recipe-box": project.id})
 
         assert session.scalars(select(Project.id)).all() == [project.id]
 
@@ -344,7 +356,7 @@ class TestLoad:
         session.delete(_calls(session, halving)[-1])
         session.flush()
 
-        scenario_service.load({"recipe-box": project.id})
+        scenario_service.load(SCENARIO, {"recipe-box": project.id})
 
         session.expire_all()
         assert (
@@ -360,29 +372,33 @@ class TestLoad:
         assert session.scalar(select(func.count()).select_from(Transcript)) == 3
         assert session.scalar(select(func.count()).select_from(Turn)) == 1
 
-    def test_a_second_load_moves_the_turn_of_pilots_to_the_project_given(
+    def test_a_load_on_another_project_is_a_scenario_of_its_own(
         self,
         session: DbSession,
         scenario_service: ScenarioService,
         loaded: list[Transcript],
+        project: Project,
         person: User,
     ) -> None:
         other = Project(created_by_user_id=person.id)
         session.add(other)
         session.flush()
 
-        scenario_service.load({"recipe-box": other.id})
+        again = scenario_service.load(SCENARIO, {"recipe-box": other.id})
 
-        run = session.scalars(
-            select(models.Session).where(
-                models.Session.conversation_id == loaded[0].session_id
-            )
-        ).one()
+        runs = {
+            run.conversation_id: run.project_id
+            for run in session.scalars(select(models.Session))
+        }
         launch = session.scalars(
-            select(Launch).where(Launch.transcript_id == loaded[0].id)
+            select(Launch).where(Launch.transcript_id == again[0].id)
         ).one()
-        assert run.project_id == other.id
-        assert (launch.session_id, launch.turn_seq) == (run.id, 1)
+        assert runs == {
+            loaded[0].session_id: project.id,
+            again[0].session_id: other.id,
+        }
+        assert session.scalar(select(func.count()).select_from(Transcript)) == 6
+        assert launch.session_id is not None and launch.turn_seq == 1
 
     def test_an_environment_pilot_holds_stands_as_it_is(
         self, session: DbSession, scenario_service: ScenarioService, project: Project
@@ -390,7 +406,7 @@ class TestLoad:
         session.add(Environment(id=RECIPES, name="Recipes", exempt=True))
         session.flush()
 
-        scenario_service.load({"recipe-box": project.id})
+        scenario_service.load(SCENARIO, {"recipe-box": project.id})
 
         held = session.get_one(Environment, RECIPES)
         assert (held.name, held.exempt) == ("Recipes", True)
@@ -412,7 +428,7 @@ class TestLoad:
             ),
         ],
     )
-    def test_projects_other_than_those_a_turn_of_pilots_is_on_are_refused(
+    def test_projects_other_than_those_pilot_ran_a_session_on_are_refused(
         self,
         session: DbSession,
         scenario_service: ScenarioService,
@@ -421,11 +437,11 @@ class TestLoad:
         given: str,
     ) -> None:
         with writes(session) as wrote, pytest.raises(ValidationException) as refused:
-            scenario_service.load(dict.fromkeys(named, project.id))
+            scenario_service.load(SCENARIO, dict.fromkeys(named, project.id))
 
         assert refused.value.message == (
             f"Cannot load the scenario because `projects` gives a project for {given},"
-            " and the scenario's Turns of Pilot's are on `recipe-box`"
+            " and the scenario's Sessions of Pilot's are on `recipe-box`"
         )
         assert wrote == {}
 
@@ -435,6 +451,237 @@ class TestLoad:
         missing = uuid.UUID("00000000-0000-4000-8000-000000000000")
 
         with writes(session) as wrote, pytest.raises(RecordNotFoundException):
-            scenario_service.load({"recipe-box": missing})
+            scenario_service.load(SCENARIO, {"recipe-box": missing})
 
         assert wrote == {}
+
+
+@pytest.fixture
+def ben(session: DbSession) -> User:
+    user = User(
+        kind_code=UserKind.PERSON,
+        subject="subject-ben",
+        handle="ben",
+        name="Ben Example",
+        avatar_slot=2,
+    )
+    session.add(user)
+    session.flush()
+    return user
+
+
+@pytest.fixture
+def bikes(session: DbSession, person: User) -> Project:
+    project = Project(
+        slug="bikes", state_code=ProjectState.OPEN, created_by_user_id=person.id
+    )
+    session.add(project)
+    session.flush()
+    return project
+
+
+def _run(db: DbSession, conversation: str) -> models.Session:
+    return db.scalars(
+        select(models.Session).where(models.Session.conversation_id == conversation)
+    ).one()
+
+
+def _turns(db: DbSession, run: models.Session) -> list[Turn]:
+    return list(
+        db.scalars(select(Turn).where(Turn.session_id == run.id).order_by(Turn.seq))
+    )
+
+
+class TestLoadTheTally:
+    @pytest.fixture
+    def tallied(
+        self,
+        scenario_service: ScenarioService,
+        project: Project,
+        bikes: Project,
+        ben: User,
+    ) -> list[Transcript]:
+        return scenario_service.load(
+            TALLY, {"recipe-box": project.id, "bike-log": bikes.id}
+        )
+
+    def test_a_work_items_run_is_a_work_with_its_item_done_at_its_end(
+        self, session: DbSession, tallied: list[Transcript], project: Project
+    ) -> None:
+        run = _run(session, tallied[0].session_id)
+        item = session.get_one(Item, run.id)
+        work = session.get_one(Work, run.id)
+        turns = _turns(session, run)
+
+        assert (run.kind_code, run.project_id, run.turns) == ("work", project.id, 2)
+        assert (item.kind_code, item.seq, item.title) == ("work", 1, "Sort the spices")
+        assert (work.session_kind_code, work.trigger_code) == ("work", None)
+        assert item.created_at == run.started_at == turns[0].started_at
+        assert item.done_at == run.ended_at == turns[-1].ended_at
+        assert item.done_cause_code == "turn_ended"
+
+    def test_each_turn_has_its_cause_and_places_the_launch_it_started(
+        self, session: DbSession, tallied: list[Transcript]
+    ) -> None:
+        spices, _, chat, job = tallied
+
+        for thread, causes in (
+            (spices, [TurnCause.BRIEF, TurnCause.CONTINUATION]),
+            (chat, [TurnCause.PERSON, TurnCause.PERSON]),
+            (job, [TurnCause.BRIEF]),
+        ):
+            turns = _turns(session, _run(session, thread.session_id))
+            launches = session.scalars(
+                select(Launch)
+                .where(Launch.transcript_id == thread.id)
+                .order_by(Launch.started_at)
+            ).all()
+            assert [turn.cause_code for turn in turns] == causes
+            assert [launch.turn_seq for launch in launches] == [
+                turn.seq for turn in turns
+            ]
+            for turn, launch in zip(turns, launches, strict=True):
+                assert turn.started_at <= launch.started_at <= turn.ended_at
+
+    def test_a_chats_turns_are_its_peoples_and_it_closed_at_its_end(
+        self,
+        session: DbSession,
+        tallied: list[Transcript],
+        project: Project,
+        person: User,
+        ben: User,
+    ) -> None:
+        run = _run(session, tallied[2].session_id)
+        chat = session.get_one(Chat, run.id)
+        turns = _turns(session, run)
+
+        assert (run.kind_code, run.project_id) == ("chat", project.id)
+        assert (chat.kind_code, chat.close_cause_code) == (
+            ChatKind.PROJECT,
+            CloseCause.FINISHED,
+        )
+        assert chat.closed_at == run.ended_at
+        assert [(turn.author_user_id, turn.words) for turn in turns] == [
+            (person.id, "Which spices run out first?"),
+            (ben.id, "And which do we buy most?"),
+        ]
+        assert session.get(Item, run.id) is None
+
+    def test_a_job_is_a_work_with_its_trigger_on_the_other_project(
+        self, session: DbSession, tallied: list[Transcript], bikes: Project
+    ) -> None:
+        run = _run(session, tallied[3].session_id)
+        work = session.get_one(Work, run.id)
+
+        assert (run.kind_code, run.project_id) == ("job", bikes.id)
+        assert work.trigger_code is WorkTrigger.ITEM_DONE
+        assert session.get_one(Item, run.id).title == "Tidy the ride notes"
+
+    def test_a_second_load_holds_it_once_at_its_new_times(
+        self,
+        session: DbSession,
+        scenario_service: ScenarioService,
+        tallied: list[Transcript],
+        project: Project,
+        bikes: Project,
+    ) -> None:
+        run = _run(session, tallied[0].session_id)
+        earlier = timedelta(hours=1)
+        item = session.get_one(Item, run.id)
+        item.created_at -= earlier
+        item.done_at -= earlier
+        session.flush()
+
+        scenario_service.load(TALLY, {"recipe-box": project.id, "bike-log": bikes.id})
+
+        assert session.scalar(select(func.count()).select_from(Item)) == 2
+        assert session.scalar(select(func.count()).select_from(Turn)) == 5
+        assert (item.created_at, item.done_at) == (run.started_at, run.ended_at)
+
+    def test_a_load_on_other_projects_leaves_the_first_where_it_is(
+        self,
+        session: DbSession,
+        scenario_service: ScenarioService,
+        tallied: list[Transcript],
+        project: Project,
+        bikes: Project,
+        person: User,
+    ) -> None:
+        others = [Project(created_by_user_id=person.id) for _ in range(2)]
+        session.add_all(others)
+        session.flush()
+
+        scenario_service.load(
+            TALLY, {"recipe-box": others[0].id, "bike-log": others[1].id}
+        )
+
+        assert sorted(
+            (item.project_id, item.title)
+            for item in session.scalars(select(Item).where(Item.kind_code == "work"))
+        ) == sorted(
+            [
+                (project.id, "Sort the spices"),
+                (bikes.id, "Tidy the ride notes"),
+                (others[0].id, "Sort the spices"),
+                (others[1].id, "Tidy the ride notes"),
+            ]
+        )
+
+    def test_a_turn_by_a_person_the_record_has_not_is_not_found(
+        self,
+        session: DbSession,
+        scenario_service: ScenarioService,
+        project: Project,
+        bikes: Project,
+    ) -> None:
+        with pytest.raises(RecordNotFoundException) as missing:
+            scenario_service.load(
+                TALLY, {"recipe-box": project.id, "bike-log": bikes.id}
+            )
+
+        assert missing.value.message == "Person ben was not found"
+
+
+class TestHistory:
+    def test_it_writes_its_days_up_to_now_on_its_places_projects(
+        self,
+        session: DbSession,
+        scenario_service: ScenarioService,
+        person: User,
+        ben: User,
+    ) -> None:
+        places = {}
+        for place in HISTORY.places:
+            project = Project(
+                slug=place.slug,
+                state_code=ProjectState.OPEN,
+                created_by_user_id=person.id,
+            )
+            session.add(project)
+            session.flush()
+            places[place.slug] = project.id
+        now = session.scalar(select(func.now()))
+
+        calls = scenario_service.history(places)
+
+        assert session.scalar(select(func.count()).select_from(Call)) == calls > 0
+        first, last = session.execute(
+            select(func.min(Call.completed_at), func.max(Call.completed_at))
+        ).one()
+        assert last < now
+        assert now - first > timedelta(days=HISTORY_DAYS - 2)
+        assert set(
+            session.scalars(
+                select(models.Session.project_id).where(
+                    models.Session.conversation_id.is_not(None)
+                )
+            )
+        ) == set(places.values())
+        assert (
+            session.scalar(
+                select(func.count())
+                .select_from(Transcript)
+                .where(Transcript.adopted_project_id.is_not(None))
+            )
+            == 0
+        )

@@ -176,13 +176,15 @@ def _load_prices(app: App) -> None:
 
 
 def load_test_data_hook(app: App) -> None:
-    """Load the price file, Pilot's own system views and the invented record
-    (`TestDataService`) after database recreation."""
+    """Load the price file, Pilot's own system views, the invented record and
+    its history (`TestDataService`) after database recreation."""
     print("Loading the invented record...")
     with scoped_session(app.container):
         _load_prices(app)
         _ship_views(app)
         counts = app.container.test_data_service().load_all()
+        calls = app.container.test_data_service().load_history()
     print("Test data loaded:")
     for entity, count in counts.items():
         print(f"   - {count} {entity}")
+    print(f"   - {calls} calls of the history")

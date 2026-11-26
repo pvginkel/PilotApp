@@ -13,7 +13,15 @@ from typing import Any
 
 import pilot_scenario
 import pytest
-from pilot_scenario import COLLECTOR, SCENARIO, Builder, Scenario, SentTurn
+from pilot_scenario import (
+    COLLECTOR,
+    SCENARIO,
+    TALLY,
+    Builder,
+    Scenario,
+    SentRun,
+    SentTurn,
+)
 from pilot_scenario.script import (
     Call,
     Carried,
@@ -895,30 +903,64 @@ class TestASubAgent:
         assert _calls(built["counting"], "sent_at") == [_at(34), _at(49), _at(60)]
 
 
-class TestTheTurnsOfPilots:
-    def test_the_turn_a_session_ran_under(self) -> None:
+class TestTheRunsOfPilots:
+    def test_what_pilot_holds_of_the_session_it_ran(self) -> None:
         builder = Builder(SCENARIO, UNTIL)
 
-        assert builder.turns() == [
-            SentTurn(
+        assert builder.runs() == [
+            SentRun(
                 project="recipe-box",
                 conversation=builder.conversation(SCENARIO.sessions[0]),
                 directory="/work/RecipeBox",
                 environment="ben-recipebox-51f0c2",
-                message="Halve the stew: it serves eight, and the pot holds four.",
-                sent_at=UNTIL - timedelta(seconds=LENGTH),
-                ended_at=UNTIL - timedelta(seconds=LENGTH - 224),
+                kind="work",
+                title=None,
+                trigger=None,
+                chat=None,
+                turns=(
+                    SentTurn(
+                        message=(
+                            "Halve the stew: it serves eight, and the pot holds four."
+                        ),
+                        cause="brief",
+                        author=None,
+                        sent_at=UNTIL - timedelta(seconds=LENGTH),
+                        ended_at=UNTIL - timedelta(seconds=LENGTH - 224),
+                    ),
+                ),
             )
         ]
 
-    def test_it_is_sent_before_its_conversations_launch_starts(self) -> None:
+    def test_its_turn_is_sent_before_its_conversations_launch_starts(self) -> None:
         builder = Builder(SCENARIO, UNTIL)
-        (turn,) = builder.turns()
+        (run,) = builder.runs()
+        (turn,) = run.turns
         halving = builder.publications()[0]
 
-        assert turn.conversation == halving["session_id"]
+        assert run.conversation == halving["session_id"]
         assert turn.sent_at.isoformat() <= halving["launches"][0]["started_at"]
         assert halving["launches"][0]["started_at"] <= turn.ended_at.isoformat()
+
+    def test_each_turn_is_sent_as_the_launch_it_starts_starts(self) -> None:
+        builder = Builder(TALLY, UNTIL)
+        publications = {
+            publication["session_id"]: publication
+            for publication in builder.publications()
+            if "agent_id" not in publication
+        }
+
+        for run in builder.runs():
+            launches = publications[run.conversation]["launches"]
+            assert len(launches) == len(run.turns)
+            for turn, launch in zip(run.turns, launches, strict=True):
+                assert turn.sent_at.isoformat() <= launch["started_at"]
+                assert launch["started_at"] <= turn.ended_at.isoformat()
+
+    def test_a_build_starting_at_a_moment_lays_the_scenario_from_there(self) -> None:
+        builder = Builder.starting(TALLY, UNTIL)
+
+        assert builder.when(0) == UNTIL
+        assert builder.runs()[0].turns[-1].ended_at == UNTIL + timedelta(seconds=4_040)
 
 
 class TestThePackage:

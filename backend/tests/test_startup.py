@@ -13,7 +13,7 @@ from app.app import App
 from app.dashboard.views import VIEWS
 from app.engine.bus import EngineEvent, TreeHashMoved
 from app.extensions import db
-from app.models import Price, Project, QuickFilter, SavedView
+from app.models import Call, Price, Project, QuickFilter, SavedView
 from app.models.reference import Origin
 from app.service_user_cli import create_service_user
 from app.services.container import ServiceContainer
@@ -169,8 +169,11 @@ class TestLoadTestDataHook:
 
         assert session.scalars(select(Project.slug).order_by(Project.slug)).all() == [
             "bike-log",
+            "kite-shop",
             "photo-album",
             "recipe-box",
+            "seed-swap",
+            "tide-table",
             None,
         ]
         recipes = session.scalars(
@@ -182,6 +185,8 @@ class TestLoadTestDataHook:
         out = capsys.readouterr().out
         assert "   - 4 projects\n" in out
         assert "   - 15 items\n" in out
+        calls = session.scalar(select(func.count()).select_from(Call))
+        assert calls and f"   - {calls} calls of the history\n" in out
 
 
 class TestRegisterCliCommands:

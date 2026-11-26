@@ -22,7 +22,7 @@ its effect; the store's update, made or its lift asked, as `update-store`
 does (F144.5); and the brain's waits, a card's transition delivered as the
 tracker-events endpoint takes it, past its token, which the dev stage has
 none of (R8), the waits' timer's tick, a wait's run placed as the batcher
-places it, and its close by Pilot's `mark`; and the invented scenario, its
+places it, and its close by Pilot's `mark`; and an invented scenario, its
 conversations as a collector publishes them (F122.6), and a walk's end as a
 collector tells it (F152.14).
 Nothing in the UI places a work item, which the brain adds (F66).
@@ -104,7 +104,7 @@ from app.schemas.tracker_events import TrackerEventReplySchema
 from app.services.container import ServiceContainer
 from app.services.people_service import PeopleService
 from app.services.project_service import project_name
-from app.services.scenario_service import ScenarioService
+from app.services.scenario_service import SCENARIOS, ScenarioService
 from app.services.store_update_service import StoreUpdateService
 from app.services.test_data_service import TestDataService
 from app.services.tracker_event_service import TrackerEventService
@@ -1372,23 +1372,26 @@ def create_wait_close(
 def create_scenario(
     scenario_service: ScenarioService = Provide[ServiceContainer.scenario_service],
 ) -> Any:
-    """Load the invented scenario: its conversations, each published whole
+    """Load an invented scenario: its conversations, each published whole
     through the service a collector's publication writes through, its last
-    moment now, and the Session and Turn of Pilot's that ran one of them, on
-    the project given for the scenario's (F122.6). The conversation the
-    scenario names a group for is adopted by the group's adopted project,
-    made where the record has none (F152.8). A second load replaces the
-    first: the record holds the scenario once, as it was loaded last.
+    moment now, and what Pilot holds of those it ran, each on the project
+    given for the scenario's: its Session and Turns, and its work item, job
+    or chat (F122.6). The conversation the scenario names a group for is
+    adopted by the group's adopted project, made where the record has none
+    (F152.8). A second load on the same projects replaces the first, the
+    record holding the scenario there once, as it was loaded last; a load on
+    other projects is a scenario of its own beside it.
 
     Returns:
         201: The scenario's transcripts, each with the project that adopted it
-        400: The projects given are not the scenario's that a Turn of
-            Pilot's is on, or the stage is prd
-        404: No project has an id given
+        400: The projects given are not the scenario's that Pilot ran a
+            session on, or the stage is prd
+        404: No project has an id given, or no person the handle a Turn's
+            author is
         409: The stage has no service user to make the group's adopted project
     """
     data = InventedScenarioCreateSchema.model_validate(request.get_json())
-    transcripts = scenario_service.load(data.projects)
+    transcripts = scenario_service.load(SCENARIOS[data.scenario], data.projects)
     adopting = scenario_service.adopting(transcripts)
     return InventedScenarioSchema(
         transcripts=[

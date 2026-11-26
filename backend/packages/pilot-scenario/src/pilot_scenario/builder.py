@@ -4,8 +4,8 @@ For a collector that is each thread of the scenario's conversations as a
 file in Claude Code's line shapes, in a home laid out as the fleet's is; for
 the backend's ingest, those conversations as a collector publishes them, one
 whole publication a thread, in the shape of the collector's call (protocol
-version 1), and the Turns of Pilot's its sessions ran under, which Pilot's
-side holds before a collector reads the transcript.
+version 1), and what Pilot holds of the sessions it ran, their Turns among
+it, before a collector reads the transcript.
 
 A publication is what its thread's file says: the file's size and time, and
 each fact as the lines carry it. The files hold the lines these facts are
@@ -75,16 +75,32 @@ type Step = Call | Compaction
 @dataclass(frozen=True)
 class SentTurn:
     """A Turn of Pilot's a session of the scenario ran under: the message
-    sent to the conversation of that id of Claude Code's, on one of the
-    scenario's projects, in the session's directory and environment."""
+    sent, why, by whom where a person sent it, from `sent_at` to
+    `ended_at`."""
+
+    message: str
+    cause: str
+    author: str | None
+    sent_at: datetime
+    ended_at: datetime
+
+
+@dataclass(frozen=True)
+class SentRun:
+    """What Pilot holds of a session of the scenario it ran: on one of the
+    scenario's projects, the conversation of that id of Claude Code's, in
+    the session's directory and environment, its Session Kind, the Work or
+    the chat it ran under (`script.Ran`) and its Turns, in order."""
 
     project: str
     conversation: str
     directory: str
     environment: str | None
-    message: str
-    sent_at: datetime
-    ended_at: datetime
+    kind: str
+    title: str | None
+    trigger: str | None
+    chat: str | None
+    turns: tuple[SentTurn, ...]
 
 
 @dataclass(frozen=True)
@@ -206,12 +222,21 @@ def _main_moments(session: Session) -> Iterator[int]:
 
 
 def _session_moments(session: Session) -> Iterator[int]:
-    if session.turn is not None:
-        yield session.turn.at
-        yield session.turn.ended
+    if session.ran is not None:
+        for turn in session.ran.turns:
+            yield from (turn.at, turn.ended)
     yield from _main_moments(session)
     for agent in session.sub_agents:
         yield from _moments(agent.steps)
+
+
+def last_moment(session: Session) -> int:
+    """The session's last moment, its Turns of Pilot's ends among them."""
+    return max(_session_moments(session))
+
+
+def _last(scenario: Scenario) -> int:
+    return max(last_moment(session) for session in scenario.sessions)
 
 
 @dataclass
@@ -457,13 +482,14 @@ class Builder:
 
     def __init__(self, scenario: Scenario, until: datetime) -> None:
         self.scenario = scenario
-        last = max(
-            moment
-            for session in scenario.sessions
-            for moment in _session_moments(session)
-        )
         until = until.replace(microsecond=until.microsecond // 1000 * 1000)
-        self._start = until - timedelta(seconds=last)
+        self._start = until - timedelta(seconds=_last(scenario))
+
+    @classmethod
+    def starting(cls, scenario: Scenario, start: datetime) -> "Builder":
+        """A build of the scenario whose moment 0 falls at `start`, cut to
+        the millisecond."""
+        return cls(scenario, start + timedelta(seconds=_last(scenario)))
 
     def when(self, moment: int) -> datetime:
         """The time of a moment of the scenario in this build."""
@@ -482,21 +508,32 @@ class Builder:
         named = f"{self.scenario.name}/{session.name}/{agent.name}"
         return uuid.uuid5(_IDS, named).hex[:17]
 
-    def turns(self) -> list[SentTurn]:
-        """The Turns of Pilot's the scenario's sessions ran under, in the
+    def runs(self) -> list[SentRun]:
+        """What Pilot holds of each session of the scenario it ran, in the
         sessions' order."""
         return [
-            SentTurn(
-                project=session.turn.project,
+            SentRun(
+                project=session.ran.project,
                 conversation=self.conversation(session),
                 directory=session.directory,
                 environment=session.environment,
-                message=session.turn.message,
-                sent_at=self.when(session.turn.at),
-                ended_at=self.when(session.turn.ended),
+                kind=session.ran.kind,
+                title=session.ran.title,
+                trigger=session.ran.trigger,
+                chat=session.ran.chat,
+                turns=tuple(
+                    SentTurn(
+                        message=turn.message,
+                        cause=turn.cause,
+                        author=turn.author,
+                        sent_at=self.when(turn.at),
+                        ended_at=self.when(turn.ended),
+                    )
+                    for turn in session.ran.turns
+                ),
             )
             for session in self.scenario.sessions
-            if session.turn is not None
+            if session.ran is not None
         ]
 
     def publications(self) -> list[dict[str, Any]]:
