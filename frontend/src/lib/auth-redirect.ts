@@ -4,12 +4,12 @@
  */
 
 /**
- * Build the login redirect URL with the current path preserved.
- * Encodes the current pathname and search params so the user can be
+ * Build the login redirect URL with the current address preserved.
+ * Encodes the current pathname, search params and hash so the user can be
  * redirected back after authentication.
  */
 export function buildLoginUrl(): string {
-  const currentPath = window.location.pathname + window.location.search;
+  const currentPath = window.location.pathname + window.location.search + window.location.hash;
   const encodedRedirect = encodeURIComponent(currentPath);
   return `/api/auth/login?redirect=${encodedRedirect}`;
 }
