@@ -1000,6 +1000,139 @@ class TestAppended:
             ("msg_0004", 2),
         ]
 
+    def test_its_boundarys_call_may_open_the_segment_after_the_one_before(
+        self, session: DbSession, publications: PublicationService
+    ) -> None:
+        """As a Call of another kind than the one before it does; the
+        Segments before stand."""
+        publications.publish(_published(labelling=_labelling()))
+
+        publications.publish(
+            _regrown(
+                labelling=_appended_labelling(
+                    labels=_appended_labels(
+                        calls=[
+                            {"id": "msg_0003", "segment": 3},
+                            {"id": "msg_0004", "segment": 3},
+                        ],
+                        segments=[{"position": 3, "kind": "plate"}],
+                    )
+                )
+            )
+        )
+
+        assert session.execute(
+            select(Segment.position, Segment.kind_code).order_by(Segment.position)
+        ).all() == [(1, "prep"), (2, "cook"), (3, "plate")]
+        assert [row[:2] for row in _calls(session)] == [
+            ("msg_0001", 1),
+            ("msg_0002", 2),
+            ("msg_0003", 3),
+            ("msg_0004", 3),
+        ]
+
+    def test_one_from_the_first_call_starts_at_the_first_segment(
+        self, session: DbSession, publications: PublicationService
+    ) -> None:
+        """No Call stands before its boundary, so it replaces every Segment."""
+        publications.publish(
+            sub_agent(
+                calls=[call(1)],
+                labelling=labelling(
+                    labels={
+                        "calls": [{"id": "msg_0001", "segment": 1}],
+                        "segments": [{"position": 1, "kind": "prep"}],
+                    }
+                ),
+            )
+        )
+
+        thread = publications.publish(
+            sub_agent(
+                file_size=61_000,
+                appended={
+                    "builds_on": builds_on(),
+                    "boundary": {"call": 1, "launch": 1, "prompt": 1, "compaction": 1},
+                },
+                calls=[call(1), call(2, predecessor="msg_0001")],
+                labelling=labelling(
+                    labels={
+                        "calls": [
+                            {"id": "msg_0001", "segment": 1},
+                            {"id": "msg_0002", "segment": 1},
+                        ],
+                        "segments": [{"position": 1, "kind": "cook"}],
+                    }
+                ),
+            )
+        )
+
+        assert session.execute(
+            select(Call.message_id, Call.segment_position)
+            .where(Call.transcript_id == thread.id)
+            .order_by(Call.position)
+        ).all() == [("msg_0001", 1), ("msg_0002", 1)]
+        assert session.execute(
+            select(Segment.position, Segment.kind_code).where(
+                Segment.transcript_id == thread.id
+            )
+        ).all() == [(1, "cook")]
+
+    @staticmethod
+    def _after_no_segment(
+        publications: PublicationService, segments: list[dict[str, Any]]
+    ) -> Transcript:
+        """`_regrown` labelled with `segments`, after a labelling that put
+        no Call in a Segment."""
+        publications.publish(
+            _published(
+                labelling=_labelling(
+                    labels=_labels(
+                        calls=[{"id": f"msg_000{place}"} for place in (1, 2, 3)],
+                        segments=[],
+                    )
+                )
+            )
+        )
+        falls = {"segment": segments[0]["position"]} if segments else {}
+        return publications.publish(
+            _regrown(
+                labelling=_appended_labelling(
+                    labels=_appended_labels(
+                        calls=[
+                            {"id": "msg_0003", "call_class": "stir", **falls},
+                            {"id": "msg_0004", "call_class": "other", **falls},
+                        ],
+                        segments=segments,
+                    )
+                )
+            )
+        )
+
+    def test_one_after_a_call_held_in_no_segment_may_name_none(
+        self, session: DbSession, publications: PublicationService
+    ) -> None:
+        self._after_no_segment(publications, [])
+
+        assert [row[:3] for row in _calls(session)] == [
+            ("msg_0001", None, None),
+            ("msg_0002", None, None),
+            ("msg_0003", None, "stir"),
+            ("msg_0004", None, "other"),
+        ]
+        assert _count(session, Segment) == 0
+
+    def test_one_after_a_call_held_in_no_segment_naming_one_is_not_appended(
+        self, session: DbSession, publications: PublicationService
+    ) -> None:
+        with pytest.raises(PublicationNotAppendableException) as refused:
+            self._after_no_segment(publications, [{"position": 1, "kind": "cook"}])
+
+        assert refused.value.causes == [
+            "the labelling's segments start at 1, and Pilot holds the call before"
+            " its boundary in none"
+        ]
+
     def test_the_rows_under_its_calls_take_its_labels_and_those_before_stand(
         self, session: DbSession, publications: PublicationService
     ) -> None:
