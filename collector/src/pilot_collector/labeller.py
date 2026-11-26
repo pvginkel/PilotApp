@@ -21,9 +21,12 @@ Every request names the contract and the home as the collector sees it, its
   (§ The vocabularies).
 - `label`, over a batch of transcripts: each handed as `stamps` hands it,
   with its file's path, its Launches and the Calls the labeller reads in it,
-  labelled whole; its answer one line per transcript, its labels or an
-  error, of which a publication carries the labels of the rows it holds
-  (§ The label request and answer).
+  labelled whole, or, read from a carry that holds the labeller's
+  checkpoint, from that checkpoint's boundary on, with the checkpoint (F152.15);
+  its answer one line per transcript, its labels, the answer `whole` or an
+  error, of which a publication carries the labels of the rows it holds and
+  the carry the checkpoint it hands back (§ The label request and answer;
+  § Settled, the boundary and the checkpoint).
 
 A call that gives no answer the collector takes raises `Unanswered`: no copy
 installed, a refusal (exit 2), a crash (exit 1), no answer within the time
@@ -49,6 +52,7 @@ from pilot_collection.publication import (
 from pilot_collection.vocabularies import DeclaredListsSchema, VocabulariesSchema
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
+from pilot_collector.carry import Checkpoint
 from pilot_collector.home import PROJECTS, Listed, record_of
 from pilot_collector.reader import Read
 from pilot_collector.settings import INSTALL_PATH, Settings
@@ -181,6 +185,18 @@ class Declared:
 
 
 @dataclass(frozen=True)
+class Labelled:
+    """A transcript's publication with the labeller's labels, and what its
+    carry keeps of them."""
+
+    publication: PublicationSchema
+    checkpoint: Checkpoint | None
+    """The checkpoint the labeller handed back with them; none where it
+    handed back none, or its boundary's Call is none the publication
+    holds."""
+
+
+@dataclass(frozen=True)
 class Labels:
     """The labeller's `label` answer of one batch."""
 
@@ -294,8 +310,9 @@ class Labeller:
         self, batch: Sequence[tuple[Listed, Read]], inventory: InventorySchema
     ) -> Labels:
         """The labeller's labels of each transcript of `batch`, in one call,
-        each labelled whole as its reading took it and handed in its
-        conversation as `stamps` hands it.
+        each handed in its conversation as `stamps` hands it and labelled as
+        its reading took it: whole, or from the boundary on of the
+        checkpoint the carry it continues holds.
 
         Raises:
             Unanswered: The labeller gave no answer the collector takes, not
@@ -305,8 +322,7 @@ class Labeller:
             (listed.transcript.session_id, listed.transcript.agent_id): {
                 "path": str(
                     listed.transcript.path.relative_to(listed.transcript.projects)
-                ),
-                "mode": "whole",
+                )
             }
             | _handed(taken)
             for listed, taken in batch
@@ -538,38 +554,123 @@ def _pilot(inventory: InventorySchema) -> dict[str, Any]:
 
 
 def _handed(taken: Read) -> dict[str, Any]:
-    """What a whole `label` request hands of a transcript as `taken` read
-    it: a main thread's Launches, and the Calls the labeller reads in its
-    file, each with its place and, on a main thread, its Launch: the one
-    holding its Prompt, as Pilot places it (DB 543), else, as for a Call
-    Pilot holds none of, the Launch of the Call before it, the first for the
-    first."""
+    """What a `label` request hands of a transcript as `taken` read it:
+    whole, or, read from a carry that holds the labeller's checkpoint, from
+    that checkpoint's boundary on, with the checkpoint and its boundary as
+    the labeller handed them back. With them a main thread's Launches, the
+    first the one open at the reading's boundary, and the Calls the labeller
+    reads in what the reading took, each with its place among the file's
+    and, on a main thread, its Launch: the one holding its Prompt, as Pilot
+    places it (DB 543), else, as for a Call Pilot holds none of, the Launch
+    of the Call before it, the first Launch for the first."""
     publication = taken.publication
+    carried = taken.checkpoint
+    mode: dict[str, Any] = (
+        {"mode": "whole"}
+        if carried is None
+        else {
+            "mode": "appended",
+            "from": {"call": carried.call, "byte": carried.byte},
+            "checkpoint": carried.text,
+        }
+    )
+    first = 1 if carried is None else carried.position
     if publication.agent_id is not None or not publication.launches:
-        return {
+        return mode | {
             "calls": [
                 {"id": named, "position": position}
-                for position, named in enumerate(taken.calls, start=1)
+                for position, named in enumerate(taken.calls, start=first)
             ]
         }
+    boundary = None if publication.appended is None else publication.appended.boundary
+    launch = 1 if boundary is None else boundary.launch
+    prompt = 1 if boundary is None else boundary.prompt
     prompted: dict[int, int] = {}
-    for n, launched in enumerate(publication.launches, start=1):
-        first = len(prompted) + 1
-        prompted |= dict.fromkeys(range(first, first + len(launched.prompts)), n)
+    for n, launched in enumerate(publication.launches, start=launch):
+        place = prompt + len(prompted)
+        prompted |= dict.fromkeys(range(place, place + len(launched.prompts)), n)
     prompts = {call.message_id: call.prompt for call in publication.calls}
     calls = []
-    within = 1
-    for position, named in enumerate(taken.calls, start=1):
-        prompt = prompts.get(named)
-        within = within if prompt is None else prompted.get(prompt, within)
+    within = launch
+    for position, named in enumerate(taken.calls, start=first):
+        received = prompts.get(named)
+        within = within if received is None else prompted.get(received, within)
         calls.append({"id": named, "position": position, "launch": within})
-    return {
+    return mode | {
         "launches": [
             {"n": n, "started_at": launched.started_at.isoformat()}
-            for n, launched in enumerate(publication.launches, start=1)
+            for n, launched in enumerate(publication.launches, start=launch)
         ],
         "calls": calls,
     }
+
+
+def labelled(
+    taken: Read,
+    line: Mapping[str, Any],
+    version: str,
+    groups: Mapping[str, PublishedGroupSchema],
+) -> Labelled:
+    """The publication of what `taken` read with the labels a `label`
+    answer's `line` gives of it, under the labeller's `version`, as
+    `with_labels` makes it: of an appended reading the labels from its
+    boundary on, its Segments placed by the carry's checkpoint; and the
+    checkpoint the line hands back, as the carry keeps it.
+
+    Raises:
+        Unanswered: As `with_labels`.
+    """
+    carried = taken.checkpoint
+    publication = with_labels(
+        taken.publication,
+        line,
+        version,
+        groups,
+        None if carried is None else carried.shift,
+    )
+    return Labelled(publication, _checkpoint(taken, line, publication))
+
+
+def _checkpoint(
+    taken: Read, line: Mapping[str, Any], publication: PublicationSchema
+) -> Checkpoint | None:
+    """The checkpoint `line` hands back for what `taken` read, which
+    `publication` labels: with the place of its boundary's Call among the
+    Calls the labeller reads, and how far the labeller's place of that
+    Call's Segment runs ahead of the publication's; none where it hands back
+    no checkpoint, or that Call is none the publication labels."""
+    boundary, text = line.get("boundary"), line.get("checkpoint")
+    labelling = publication.labelling
+    if not isinstance(boundary, dict) or not isinstance(text, str) or labelling is None:
+        return None
+    call, byte = boundary.get("call"), boundary.get("byte")
+    if (
+        not isinstance(call, str)
+        or not isinstance(byte, int)
+        or call not in taken.calls
+    ):
+        return None
+    given = next(
+        (
+            row.get("segment")
+            for row in line["labels"]["calls"]
+            if row.get("id") == call
+        ),
+        None,
+    )
+    held = next((row.segment for row in labelling.labels.calls if row.id == call), None)
+    if not isinstance(given, int) or held is None:
+        return None
+    first = 1 if taken.checkpoint is None else taken.checkpoint.position
+    return Checkpoint(
+        version=labelling.version,
+        stamp=labelling.stamp,
+        call=call,
+        byte=byte,
+        text=text,
+        position=first + taken.calls.index(call),
+        shift=given - held,
+    )
 
 
 def with_labels(
@@ -577,14 +678,17 @@ def with_labels(
     line: Mapping[str, Any],
     version: str,
     groups: Mapping[str, PublishedGroupSchema],
+    shift: int | None = None,
 ) -> PublicationSchema:
     """`publication` with the labels a `label` answer's `line` gives of its
     transcript, under the labeller's `version`: those of the rows it holds,
     the Calls of its own and their Tool Calls, and the Segments they fall
-    in, renumbered from 1 where a Segment of none of them falls out, since
-    Pilot holds a whole call's Segments at 1 to their number; a main
-    thread's adopted group as its `group`, from `groups`; and of a Call's
-    labels what Pilot's record keeps.
+    in, renumbered where a Segment of none of them falls out: from 1, since
+    Pilot holds a whole call's Segments at 1 to their number, or, where the
+    line labels an appended reading from its boundary on, from the place
+    Pilot holds the first at, `shift` behind the labeller's; a main thread's
+    adopted group as its `group`, from `groups`; and of a Call's labels what
+    Pilot's record keeps.
 
     Raises:
         Unanswered: The line is no labels of the call's shape, or names a
@@ -606,7 +710,12 @@ def with_labels(
     calls = [row for row in labels.get("calls", []) if row.get("id") in held]
     named = {row.get("segment") for row in calls}
     kept = [row for row in labels.get("segments", []) if row.get("position") in named]
-    renumbered = {row.get("position"): place for place, row in enumerate(kept, 1)}
+    first = (
+        1
+        if shift is None or not kept or not isinstance(kept[0].get("position"), int)
+        else kept[0]["position"] - shift
+    )
+    renumbered = {row.get("position"): place for place, row in enumerate(kept, first)}
     waits = [
         row for row in labels.get("ci_waits", []) if row.get("tool_use_id") in requested
     ]

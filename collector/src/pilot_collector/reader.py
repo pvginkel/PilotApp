@@ -193,7 +193,10 @@ its newline is written. The facts are read off the lines in the file's order:
     `compact_summary` of its text's characters.
 
 **From the boundary on.** A reading leaves a carry (`carry.py`): where it
-stood before the file's last Call. Given that carry, a file that grew is read
+stood before the file's last Call, or, where the labeller labelled what it
+took, before the first line of the labeller's boundary's Call, which is no
+later (F152.15). It keeps where it stood before each Call's first line for
+that. Given that carry, a file that grew is read
 from the boundary's byte on, and its publication is an appended one: the
 Calls from the boundary's on, the Launches that wrote a line from there on,
 the first with its Prompts from there on and with the components it named
@@ -252,6 +255,7 @@ from pilot_collector import VERSION
 from pilot_collector.carry import (
     ROOT,
     Carry,
+    Checkpoint,
     Fork,
     Lead,
     Left,
@@ -480,13 +484,41 @@ class Read:
 
     publication: PublicationSchema
     carry: Carry
-    """What a reading of the file, grown, continues."""
+    """What a reading of the file, grown, continues: where the reading
+    stood before its last Call's first line."""
     calls: tuple[str, ...]
     """The Calls the labeller reads in what the reading took (`labeller.md`
     § Names both sides compute): the `message.id` of every assistant line,
     in the order of its first, a line Claude Code wrote itself and a fork's
     copy of its parent's among them, and of the file's last line where it
     parses with no newline yet."""
+    stood: dict[str, Standing] = field(default_factory=dict)
+    """Where the reading stood before the first line of each Call it took,
+    by its `message.id`."""
+    content: bytes = field(default=b"", repr=False)
+    """The file's bytes the reading took, from the first on."""
+    start: int = 0
+    """Where in the file the first of them stands."""
+    checkpoint: Checkpoint | None = None
+    """The labeller's checkpoint the carry the reading continues holds, from
+    whose boundary on the labeller labels what it took; none for a whole
+    reading, and for one continuing a carry that holds none."""
+
+    def carried(self, checkpoint: Checkpoint | None) -> Carry:
+        """What a reading of the file, grown, continues, where the labeller
+        labelled what this one took and handed back `checkpoint`: the carry
+        stands before the first line of the checkpoint's boundary's Call,
+        and holds it. The reading's own carry, with no checkpoint, where
+        `checkpoint` is none or names a Call the reading took none of."""
+        stands = None if checkpoint is None else self.stood.get(checkpoint.call)
+        if stands is None:
+            return self.carry
+        return replace(
+            self.carry,
+            stands=stands,
+            end=digest(self.content[stands.byte - self.start :]),
+            checkpoint=checkpoint,
+        )
 
 
 @dataclass
@@ -870,6 +902,9 @@ class _Thread:
         """The Compactions whose boundary was taken."""
         self.stands = replace(before, fork=fork)
         """Where the reading stood before the last Call's first line."""
+        self.stood: dict[str, Standing] = {}
+        """Where it stood before each Call's first line, by its
+        `message.id`."""
         self._fork = fork
         """On a fork's thread, the call that started it: which lines are
         its parent's copies."""
@@ -981,7 +1016,7 @@ class _Thread:
             and line["message"]["model"] != SYNTHETIC
         )
         if answers and line["message"]["id"] not in self.calls:
-            self.stands = self._standing(byte)
+            self.stands = self.stood[line["message"]["id"]] = self._standing(byte)
         stop = chain
         if answers:
             answered = line["message"]["id"]
@@ -1833,4 +1868,8 @@ def read(
             end=digest(content[stands.byte - before.byte :]),
         ),
         tuple(called),
+        thread.stood,
+        content,
+        before.byte,
+        None if carry is None else carry.checkpoint,
     )

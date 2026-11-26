@@ -15,6 +15,7 @@ from pilot_collector import VERSION
 from pilot_collector.carry import (
     ROOT,
     Carry,
+    Checkpoint,
     Fork,
     Lead,
     Left,
@@ -1767,6 +1768,163 @@ class TestAFileThatGrew:
             "msg_01",
             "msg_02",
         ]
+
+
+def _at(call: str) -> Checkpoint:
+    """A labeller's checkpoint whose boundary is the Call of that id."""
+    return Checkpoint(
+        version="1.0.0",
+        stamp="1:stamp",
+        call=call,
+        byte=0,
+        text="1:1.0.0:checkpoint",
+        position=1,
+        shift=0,
+    )
+
+
+class TestFromTheLabellersBoundary:
+    """A carry that stands before the first line of an earlier Call than the
+    file's last, the labeller's boundary (F152.15)."""
+
+    def test_it_stands_before_that_calls_first_line_and_holds_the_checkpoint(
+        self, tmp_path: Path
+    ) -> None:
+        taken = read(
+            filed(
+                tmp_path,
+                linked(
+                    [
+                        typed(0),
+                        assistant(4, "msg_01"),
+                        assistant(9, "msg_02"),
+                        assistant(14, "msg_03"),
+                    ]
+                ),
+            ),
+            SETTINGS,
+        )
+        checkpoint = _at("msg_02")
+
+        carry = taken.carried(checkpoint)
+
+        assert list(taken.stood) == ["msg_01", "msg_02", "msg_03"]
+        assert taken.stood["msg_03"] == taken.carry.stands
+        assert carry.stands == taken.stood["msg_02"]
+        assert carry.stands.calls == 1
+        assert carry.checkpoint == checkpoint
+        assert carry.end == digest(taken.content[carry.stands.byte :])
+        assert (carry.file_size, carry.file_modified_at, carry.collector) == (
+            taken.carry.file_size,
+            taken.carry.file_modified_at,
+            taken.carry.collector,
+        )
+
+    def test_with_no_checkpoint_or_one_of_a_call_it_took_none_of_it_is_its_own(
+        self, tmp_path: Path
+    ) -> None:
+        taken = read(
+            filed(tmp_path, linked([typed(0), assistant(4, "msg_01")])), SETTINGS
+        )
+
+        assert taken.carried(None) == taken.carry
+        assert taken.carried(_at("msg_synthetic")) == taken.carry
+        assert taken.carry.checkpoint is None
+
+    def test_a_reading_from_it_hands_the_labeller_its_checkpoint(
+        self, tmp_path: Path
+    ) -> None:
+        named = filed(
+            tmp_path, linked([typed(0), assistant(4, "msg_01"), assistant(9, "msg_02")])
+        )
+        checkpoint = _at("msg_01")
+        carry = read(named, SETTINGS).carried(checkpoint)
+        _added(named, _continuing("line-2", [assistant(14, "msg_03")]))
+
+        grown = read(named, SETTINGS, carry)
+
+        assert grown.checkpoint == checkpoint
+        assert grown.calls == ("msg_01", "msg_02", "msg_03")
+        assert _places(grown.publication) == (1, 1, 2, 1)
+        assert read(named, SETTINGS).checkpoint is None
+
+    def test_other_bytes_between_it_and_the_last_call_no_longer_continue_it(
+        self, tmp_path: Path
+    ) -> None:
+        """Bytes before the file's last Call that a carry at that Call
+        never reads again."""
+        named = filed(
+            tmp_path,
+            linked(
+                [
+                    typed(0),
+                    assistant(4, "msg_01", output=6),
+                    assistant(9, "msg_02"),
+                ]
+            ),
+        )
+        taken = read(named, SETTINGS)
+        held = named.path.read_bytes()
+        named.path.write_bytes(
+            held.replace(b'"output_tokens": 6', b'"output_tokens": 7')
+        )
+        assert named.path.read_bytes() != held
+        _added(named, _continuing("line-2", [assistant(14, "msg_03")]))
+
+        with pytest.raises(
+            NotContinuedError, match="its file has other bytes before its old end"
+        ):
+            read(named, SETTINGS, taken.carried(_at("msg_01")))
+        assert read(named, SETTINGS, taken.carry).publication.appended is not None
+
+    @pytest.mark.parametrize(
+        ("scenario", "read_whole", "read_on"),
+        [(SCENARIO, 10, 180), (_resumed(), 0, 22)],
+        ids=["the scenario", "a resumed thread"],
+    )
+    def test_read_on_from_any_call_a_reading_took_a_file_reads_as_its_whole(
+        self, scenario: Scenario, read_whole: int, read_on: int, tmp_path: Path
+    ) -> None:
+        """At every step, from the carry at each Call the reading before
+        took, the appended publication on what Pilot held is the whole one
+        of the file as it then stands, and the carry it leaves, and where it
+        stood at each Call it took, the whole reading's; or, where a line it
+        reads goes back behind that Call, it is read whole instead."""
+        builder = Builder(scenario, UNTIL)
+        builder.write(tmp_path)
+        appended = whole_instead = 0
+        for file in builder.files():
+            if not file.path.endswith(".jsonl"):
+                continue
+            named = transcript(tmp_path / "projects", tmp_path / file.path)
+            assert named is not None
+            named.path.write_bytes(b"")
+            held: Read | None = None
+            for line in file.content.splitlines(keepends=True):
+                with named.path.open("ab") as grown:
+                    grown.write(line)
+                try:
+                    whole = read(named, SETTINGS)
+                except UnreadableError:
+                    assert held is None
+                    continue
+                for call in () if held is None else held.stood:
+                    assert held is not None
+                    try:
+                        taken = read(named, SETTINGS, held.carried(_at(call)))
+                    except NotContinuedError:
+                        whole_instead += 1
+                    else:
+                        assert _held(held.publication, taken.publication) == (
+                            whole.publication
+                        )
+                        assert taken.carry == whole.carry
+                        assert taken.stood == {
+                            each: whole.stood[each] for each in taken.stood
+                        }
+                        appended += 1
+                held = whole
+        assert (whole_instead, appended) == (read_whole, read_on)
 
 
 def filed_again(projects: Path, agent: str | None = None) -> Transcript:

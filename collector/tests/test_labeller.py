@@ -22,8 +22,15 @@ from pilot_collection.vocabularies import VocabulariesSchema
 from pilot_scenario import SCENARIO, Builder, labeller
 
 from pilot_collector import labeller as running
+from pilot_collector.carry import Checkpoint
 from pilot_collector.home import Listed, transcripts
-from pilot_collector.labeller import Labeller, Unanswered, with_labels
+from pilot_collector.labeller import (
+    Labelled,
+    Labeller,
+    Unanswered,
+    labelled,
+    with_labels,
+)
 from pilot_collector.reader import Read, read
 from tests import support
 from tests.support import (
@@ -597,6 +604,128 @@ class TestTheLabels:
             given.label(_read(home), _inventory())
 
 
+def _handed(request: dict[str, Any]) -> dict[tuple[str, str | None], dict[str, Any]]:
+    """Each transcript a request hands, by its ids."""
+    return {
+        (conversation["session_id"], transcript["agent_id"]): transcript
+        for conversation in request["conversations"]
+        for transcript in conversation["transcripts"]
+    }
+
+
+def _custom_title(listed: Listed) -> None:
+    """Append a line Claude Code writes beside a conversation's chain."""
+    with listed.transcript.path.open("ab") as file:
+        file.write(b'{"type": "custom-title", "customTitle": "Menus"}\n')
+
+
+class TestAppendedLabels:
+    """A file that grew, labelled from the boundary of the checkpoint the
+    labeller handed back with its last labels (F152.15)."""
+
+    def _labelled(
+        self, home: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> tuple[Labeller, dict[tuple[str, str | None], tuple[Listed, Read, Labelled]]]:
+        """The stub, and every transcript of the home read and labelled
+        whole by it, with the request that labelled them."""
+        stub, batch = _stub(home), _read(home)
+        groups = stub.vocabularies().groups
+        labels = stub.label(batch, _inventory())
+        return stub, {
+            _ids(listed): (
+                listed,
+                taken,
+                labelled(taken, labels.lines[_ids(listed)], labels.version, groups),
+            )
+            for listed, taken in batch
+        }
+
+    def test_a_reading_from_its_carry_is_handed_from_the_checkpoints_boundary(
+        self, home: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """With the checkpoint and its boundary as the labeller handed them
+        back, a main thread's Launches from the one open at the boundary,
+        and the Calls from the boundary's, each at its place among the
+        file's and in its Launch, as the whole request hands them."""
+        calls = _calls(monkeypatch)
+        stub, held = self._labelled(home, monkeypatch)
+        whole = _handed(next(asked for verb, asked in calls if verb == "label"))
+        grown = []
+        for listed, taken, given in held.values():
+            assert given.checkpoint is not None
+            _custom_title(listed)
+            carry = taken.carried(given.checkpoint)
+            grown.append((listed, read(listed.transcript, settings(), carry)))
+
+        stub.label(grown, _inventory())
+
+        handed = _handed(calls[-1][1])
+        for listed, taken in grown:
+            ids = _ids(listed)
+            transcript = handed[ids]
+            checkpoint = taken.checkpoint
+            assert checkpoint is not None
+            assert checkpoint == held[ids][2].checkpoint
+            assert transcript["mode"] == "appended"
+            assert transcript["from"] == {
+                "call": checkpoint.call,
+                "byte": checkpoint.byte,
+            }
+            assert transcript["checkpoint"] == checkpoint.text
+            at = [call["id"] for call in whole[ids]["calls"]].index(checkpoint.call)
+            assert transcript["calls"] == whole[ids]["calls"][at:]
+            assert checkpoint.position == at + 1
+            if listed.transcript.agent_id is None:
+                appended = taken.publication.appended
+                assert appended is not None
+                assert (
+                    transcript["launches"]
+                    == (whole[ids]["launches"][appended.boundary.launch - 1 :])
+                )
+            else:
+                assert "launches" not in transcript
+
+    def test_its_labels_are_the_whole_ones_from_the_boundary_on(
+        self, home: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """And the checkpoint it hands back is the whole labelling's."""
+        stub, held = self._labelled(home, monkeypatch)
+        groups = stub.vocabularies().groups
+        grown = []
+        for listed, taken, given in held.values():
+            _custom_title(listed)
+            grown.append(
+                (
+                    listed,
+                    read(
+                        listed.transcript, settings(), taken.carried(given.checkpoint)
+                    ),
+                )
+            )
+
+        labels = stub.label(grown, _inventory())
+
+        for listed, taken in grown:
+            ids = _ids(listed)
+            given = labelled(taken, labels.lines[ids], labels.version, groups)
+            whole = held[ids][2].publication.labelling
+            appended = given.publication.labelling
+            assert whole is not None and appended is not None
+            assert appended.stamp == whole.stamp
+            ids_from = [call.message_id for call in taken.publication.calls]
+            assert [call.id for call in appended.labels.calls] == ids_from
+            assert appended.labels.calls == [
+                call for call in whole.labels.calls if call.id in ids_from
+            ]
+            first = appended.labels.segments[0].position
+            assert appended.labels.segments == [
+                segment
+                for segment in whole.labels.segments
+                if segment.position >= first
+            ]
+            assert given.checkpoint == held[ids][2].checkpoint
+
+
 def _line(**labels: list[dict[str, Any]]) -> dict[str, Any]:
     """A `label` answer's line of the main thread `SESSION`, giving
     `labels`."""
@@ -767,6 +896,106 @@ class TestWithLabels:
         assert [each.code for each in published.labelling.test_suites] == ["pot"]
         assert [each.number for each in published.labelling.ci_builds] == [8]
         assert published.group is None
+
+    def _fork(self, tmp_path: Path) -> Read:
+        """A fork's thread whose file holds two Calls of its own, and none
+        of the copies the labeller labels before them."""
+        recorded(tmp_path, AGENT, agentType="Explore")
+        return read(
+            filed(
+                tmp_path,
+                [
+                    requesting(2, "toolu_01", message_id="msg_01"),
+                    result(3, "toolu_01"),
+                    assistant(9, "msg_02"),
+                ],
+                AGENT,
+            ),
+            settings(),
+        )
+
+    def test_the_checkpoint_it_hands_back_keeps_its_boundarys_places(
+        self, tmp_path: Path
+    ) -> None:
+        """The boundary's Call's place among the Calls the labeller reads,
+        and how far its Segment runs ahead of the one Pilot holds it at."""
+        taken = self._fork(tmp_path)
+        line = _line(
+            transcript=[],
+            calls=[_call("msg_copied", 1), _call("msg_01", 2), _call("msg_02", 3)],
+            segments=[
+                {"position": 1, "kind": "prep"},
+                {"position": 2, "kind": "cook"},
+                {"position": 3, "kind": "simmer"},
+            ],
+        ) | {"boundary": {"call": "msg_02", "byte": 812}, "checkpoint": "1:1.4.2:x"}
+
+        given = labelled(taken, line, "1.4.2", {})
+
+        assert given.checkpoint == Checkpoint(
+            version="1.4.2",
+            stamp=STAMP,
+            call="msg_02",
+            byte=812,
+            text="1:1.4.2:x",
+            position=2,
+            shift=1,
+        )
+        assert given.publication == with_labels(taken.publication, line, "1.4.2", {})
+
+    @pytest.mark.parametrize(
+        "handed",
+        [
+            {"boundary": None, "checkpoint": None},
+            {"boundary": {"call": "msg_02", "byte": 812}, "checkpoint": None},
+            {"boundary": {"call": "msg_copied", "byte": 0}, "checkpoint": "1:1.4.2:x"},
+        ],
+        ids=["no boundary", "no checkpoint", "a call the publication holds none of"],
+    )
+    def test_one_it_cannot_go_on_from_is_kept_as_none(
+        self, tmp_path: Path, handed: dict[str, Any]
+    ) -> None:
+        line = (
+            _line(
+                transcript=[],
+                calls=[_call("msg_copied", 1), _call("msg_01", 2), _call("msg_02", 2)],
+                segments=[
+                    {"position": 1, "kind": "prep"},
+                    {"position": 2, "kind": "cook"},
+                ],
+            )
+            | handed
+        )
+
+        assert labelled(self._fork(tmp_path), line, "1.4.2", {}).checkpoint is None
+
+    def test_an_appended_answers_segments_are_placed_by_the_checkpoints_shift(
+        self, tmp_path: Path
+    ) -> None:
+        """The labeller numbers them ahead of Pilot by the Segment a fork's
+        copies fill."""
+        taken = self._fork(tmp_path)
+        line = _line(
+            transcript=[],
+            calls=[_call("msg_01", 3), _call("msg_02", 4)],
+            segments=[
+                {"position": 3, "kind": "cook"},
+                {"position": 4, "kind": "simmer"},
+            ],
+        )
+
+        published = with_labels(taken.publication, line, "1.4.2", {}, shift=1)
+
+        assert published.labelling is not None
+        labels = published.labelling.labels
+        assert [(call.id, call.segment) for call in labels.calls] == [
+            ("msg_01", 2),
+            ("msg_02", 3),
+        ]
+        assert [(each.position, each.kind) for each in labels.segments] == [
+            (2, "cook"),
+            (3, "simmer"),
+        ]
 
     def test_a_group_it_does_not_declare_gives_no_labels(self, tmp_path: Path) -> None:
         taken = read(filed(tmp_path, [typed(0), assistant(4)]), settings())

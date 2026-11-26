@@ -8,6 +8,7 @@ from pathlib import Path
 from pilot_collector.carry import (
     Carries,
     Carry,
+    Checkpoint,
     Fork,
     Lead,
     Left,
@@ -38,8 +39,10 @@ def _carry(
     injected: int = 0,
     plugged: int = 0,
     prompted: int = 1,
+    checkpointed: int | None = None,
 ) -> Carry:
-    """A carry no other shares a word or a time with."""
+    """A carry no other shares a word or a time with, with a labeller's
+    checkpoint of `checkpointed` characters where that is not none."""
     return Carry(
         file_size=61_000 + place,
         file_modified_at=STOOD + timedelta(seconds=place),
@@ -152,6 +155,17 @@ def _carry(
             ),
         ),
         end=digest(str(place).encode()),
+        checkpoint=None
+        if checkpointed is None
+        else Checkpoint(
+            version=f"1.{place}.0",
+            stamp=f"1:{place:064}",
+            call=f"msg_01{place:022}",
+            byte=48_000 + place,
+            text=f"1:1.{place}.0:" + f"{place:04}" * (checkpointed // 4),
+            position=300 + place,
+            shift=place % 3,
+        ),
     )
 
 
@@ -171,17 +185,20 @@ class TestACarrysSize:
             injected,
             plugged,
             prompted,
+            checkpointed,
         ) in (
-            (0, 0, 0, 0, 0, 0, 0, 0, 1),
-            (40, 0, 0, 0, 0, 0, 0, 0, 1),
-            (0, 3, 0, 0, 0, 0, 0, 0, 1),
-            (0, 0, 7, 0, 0, 0, 0, 0, 1),
-            (0, 0, 0, 9, 0, 0, 0, 0, 1),
-            (0, 0, 0, 0, 6, 0, 0, 0, 1),
-            (0, 0, 0, 0, 0, 8, 0, 0, 1),
-            (0, 0, 0, 0, 0, 0, 12, 0, 1),
-            (0, 0, 0, 0, 0, 0, 0, 5, 1),
-            (0, 0, 0, 0, 0, 0, 0, 0, 40),
+            (0, 0, 0, 0, 0, 0, 0, 0, 1, None),
+            (40, 0, 0, 0, 0, 0, 0, 0, 1, None),
+            (0, 3, 0, 0, 0, 0, 0, 0, 1, None),
+            (0, 0, 7, 0, 0, 0, 0, 0, 1, None),
+            (0, 0, 0, 9, 0, 0, 0, 0, 1, None),
+            (0, 0, 0, 0, 6, 0, 0, 0, 1, None),
+            (0, 0, 0, 0, 0, 8, 0, 0, 1, None),
+            (0, 0, 0, 0, 0, 0, 12, 0, 1, None),
+            (0, 0, 0, 0, 0, 0, 0, 5, 1, None),
+            (0, 0, 0, 0, 0, 0, 0, 0, 40, None),
+            (0, 0, 0, 0, 0, 0, 0, 0, 1, 0),
+            (0, 0, 0, 0, 0, 0, 0, 0, 1, 4_000),
         ):
             tracemalloc.start()
             before, _ = tracemalloc.get_traced_memory()
@@ -197,6 +214,7 @@ class TestACarrysSize:
                     injected=injected,
                     plugged=plugged,
                     prompted=prompted,
+                    checkpointed=checkpointed,
                 )
                 for place in range(1_000, 1_400)
             ]
@@ -251,6 +269,14 @@ class TestACarrysSize:
         self,
     ) -> None:
         assert _carry(removed=2).size == _carry(queued=2).size > _carry().size
+
+    def test_the_labellers_checkpoint_counts_with_its_text(self) -> None:
+        assert (
+            _carry(checkpointed=8_000).size
+            > _carry(checkpointed=4_000).size
+            > _carry(checkpointed=0).size
+            > _carry().size
+        )
 
 
 class TestTheBound:

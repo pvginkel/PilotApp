@@ -29,6 +29,13 @@ of its parent's that holds that call and its time. No id of any other line
 before the boundary is held, and of no Call but the one the chain leads to;
 no request shape but those the boundary's Call's requests name.
 
+**The labeller's boundary** (F152.15). A call's labels are settled from where
+the labeller says, which can be an earlier Call than the file's last. Where
+the labeller labelled what the reading took and handed back a checkpoint, the
+carry holds it, with the boundary it names, and stands before that boundary's
+Call's first line: the earlier of the two boundaries, so that a file that
+grew is read, published and labelled from there on.
+
 **The bound.** The carries are kept up to a number of transcripts and a size,
 both settings. Past either, the transcript whose file changed longest ago is
 forgotten first, and its next growth is one whole publication.
@@ -93,6 +100,9 @@ and its version."""
 
 _FORK = 160
 """The bytes a fork's spawning call is counted at beside its ids."""
+
+_CHECKPOINT = 240
+"""The bytes a labeller's checkpoint is counted at beside its words."""
 
 
 def digest(content: bytes) -> bytes:
@@ -338,6 +348,32 @@ class Standing:
 
 
 @dataclass(frozen=True)
+class Checkpoint:
+    """What the labeller handed back with its labels of a reading, to label
+    the file from its boundary on when it grew (`labeller.md` § Settled, the
+    boundary and the checkpoint)."""
+
+    version: str
+    """The labeller's own version that labelled it."""
+    stamp: str
+    """The stamp its labels were given under."""
+    call: str
+    """The `message.id` of the boundary's Call."""
+    byte: int
+    """Where the labeller says that Call's first line starts."""
+    text: str
+    """The checkpoint itself, which the collector never reads."""
+    position: int
+    """The boundary's Call's place among the Calls the labeller reads in the
+    file, from 1."""
+    shift: int
+    """How far the labeller's place of the Segment the boundary's Call falls
+    in runs ahead of the one Pilot holds it at: the Segments a fork's copies
+    of its parent's Calls fill come before it in the labeller's numbering
+    alone."""
+
+
+@dataclass(frozen=True)
 class Carry:
     """One transcript's carry: the file a reading was built on, and where
     that reading stands at its boundary."""
@@ -350,6 +386,10 @@ class Carry:
     end: bytes
     """A digest of the file's bytes from the boundary's on, as they were
     read."""
+    checkpoint: Checkpoint | None = None
+    """What the labeller handed back of that reading, its boundary the one
+    the carry stands at; none where it labelled none, or handed back
+    none."""
 
     @property
     def size(self) -> int:
@@ -363,6 +403,7 @@ class Carry:
         files = () if opening is None else opening.files
         received = () if opening is None else opening.prompts
         fork = stands.fork
+        checkpoint = self.checkpoint
         shapes = [asked.sends for asked in stands.requests if asked.sends is not None]
         if opening is not None and opening.snapshot is not None:
             shapes.append(opening.snapshot)
@@ -386,6 +427,16 @@ class Carry:
             *(path for path, _ in files),
             *(part.name for part in stands.injected),
             *(() if fork is None else (fork.spawned_by, fork.message)),
+            *(
+                ()
+                if checkpoint is None
+                else (
+                    checkpoint.version,
+                    checkpoint.stamp,
+                    checkpoint.call,
+                    checkpoint.text,
+                )
+            ),
         )
         return (
             _HELD
@@ -399,6 +450,7 @@ class Carry:
             + _PART * len(stands.injected)
             + _PLUGIN * len(plugins)
             + (0 if fork is None else _FORK)
+            + (0 if checkpoint is None else _CHECKPOINT)
             + _SHAPE * len(shapes)
             + _AWAITED * len(stands.awaited)
             + _REQUESTED * len(stands.requests)

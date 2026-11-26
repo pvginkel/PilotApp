@@ -23,13 +23,20 @@ A transcript Pilot holds and the home lacks is left alone, as is a symlink
 (F119.2).
 
 **Whole or appended** (F152.15). The walk keeps a carry of each transcript
-it published (`carry.py`). Where no labeller answers for it, a transcript the
-inventory holds at exactly what its carry was built on, the file's size and
-time and the collector's version, is read from the carry's boundary on and
-published appended. Every other is published whole, and so is one, in the
-same walk and logged with the reason, whose carry the file does not continue
-(F152.17), whose lines reach behind the boundary, or whose appended
-publication Pilot refuses.
+it published (`carry.py`). A transcript whose file is new or changed, and
+that the inventory holds at exactly what its carry was built on, the file's
+size and time and the collector's version, is read from the carry's boundary
+on and published appended. Where the labeller answers for it, the carry must
+also hold the checkpoint the labeller handed back with its last labels,
+built on the stamp and under the major of the labeller's version that Pilot
+holds its labels under and that the labeller would give now: the labeller is
+then handed the Calls from that boundary on with the checkpoint, and the
+appended publication carries their labels. Every other is published whole,
+and so is one, in the same walk and logged with the reason, whose carry the
+file does not continue (F152.17), whose lines reach behind the boundary,
+that the labeller answers `whole` for, or whose appended publication Pilot
+refuses; those the labeller answers for are read and labelled whole once the
+rest of their batch is published.
 
 **The labeller** (F152.6, F152.7). After the listing a walk asks the
 workflow's labeller, in one call, the stamp it would give now for every
@@ -42,11 +49,11 @@ would with none, and the reason is logged where it differs from the last
 walk's. The walk's line says what the stamps took.
 
 Where the labeller answers, each turn is published in batches, a batch
-labelled in one call: each transcript it gives a stamp is read whole and
-handed with what the inventory gives for its conversation, and published
-whole with the labels the labeller gives of it, under the version its answer
-names, which is declared to Pilot first where it is another than the last
-declared. A transcript it labels nothing of, an error in its answer or one
+labelled in one call: each transcript it gives a stamp is read, whole or
+appended, and handed with what the inventory gives for its conversation, and
+published with the labels the labeller gives of it, under the version its
+answer names, which is declared to Pilot first where it is another than the
+last declared. A transcript it labels nothing of, an error in its answer or one
 its answer was cut short of, is published as with no labeller where its file
 is new or changed or the collector's version or the replay at rest makes it
 differ, and is left for the next walk where only the labeller does. A call
@@ -88,12 +95,13 @@ from pilot_collector import VERSION
 from pilot_collector.carry import Carries, Carry
 from pilot_collector.home import PROJECTS, Listed, transcripts
 from pilot_collector.labeller import (
+    Labelled,
     Labeller,
     Labels,
     Stamps,
     Unanswered,
+    labelled,
     major,
-    with_labels,
 )
 from pilot_collector.pilot import (
     NotAdmitted,
@@ -438,14 +446,18 @@ class Walker:
         walked: Walked,
     ) -> bool:
         """Publish a batch of one turn, those the labeller answers for with
-        its labels. False where the walk was told to stop."""
+        its labels, and then, read and labelled whole, those of them to be
+        published whole instead. False where the walk was told to stop."""
         asked: dict[Path, Read | None] = {}
         if labelling is not None and labelling.answers:
             for each in batch:
                 if labelled_under(each, labelling.stamps, self._refused) is not None:
                     if self._stop.is_set():
                         return False
-                    asked[each.transcript.path] = self._read(each, walked)
+                    ids = (each.transcript.session_id, each.transcript.agent_id)
+                    asked[each.transcript.path] = self._taken(
+                        each, turn, held.get(ids), labelling, walked
+                    )
         taken = [
             (each, reading)
             for each in batch
@@ -454,21 +466,22 @@ class Walker:
         labels = (
             None if not taken or labelling is None else self._labels(taken, labelling)
         )
+        again: list[Listed] = []
         for each in batch:
             if self._stop.is_set():
                 return False
             path = each.transcript.path
             if path in asked:
                 reading = asked[path]
-                if reading is not None:
-                    self._publish_labelled(
-                        each,
-                        reading,
-                        labels,
-                        labelling,
-                        path in work.labels_alone,
-                        walked,
-                    )
+                if reading is not None and not self._publish_labelled(
+                    each,
+                    reading,
+                    labels,
+                    labelling,
+                    path in work.labels_alone,
+                    walked,
+                ):
+                    again.append(each)
             elif path in work.labels_alone:
                 walked.waiting += 1
             elif turn == "changed":
@@ -476,7 +489,112 @@ class Walker:
                 self._publish_changed(each, held.get(ids), walked)
             else:
                 self._publish(each, walked)
+        return not again or self._whole_instead(again, labelling, walked)
+
+    def _whole_instead(
+        self, again: list[Listed], labelling: _Labelling | None, walked: Walked
+    ) -> bool:
+        """Read the transcripts of `again` whole, label them in one call and
+        publish them, their labels with each where the labeller gives them.
+        False where the walk was told to stop."""
+        readings: list[tuple[Listed, Read]] = []
+        for each in again:
+            if self._stop.is_set():
+                return False
+            reading = self._read(each, walked)
+            if reading is not None:
+                readings.append((each, reading))
+        labels = (
+            self._labels(readings, labelling)
+            if readings and labelling is not None and labelling.answers
+            else None
+        )
+        for each, reading in readings:
+            if self._stop.is_set():
+                return False
+            self._publish_labelled(each, reading, labels, labelling, False, walked)
         return True
+
+    def _taken(
+        self,
+        listed: Listed,
+        turn: Turn,
+        holds: HeldTranscriptSchema | None,
+        labelling: _Labelling,
+        walked: Walked,
+    ) -> Read | None:
+        """The transcript read for the labeller: from the boundary of its
+        carry on where its file is new or changed and the carry allows,
+        else whole. None where it cannot be read, which sets it aside, or
+        its file is gone."""
+        carry = self._carries.get(listed.transcript.path) if turn == "changed" else None
+        taken = (
+            None if carry is None else self._continued(listed, holds, carry, labelling)
+        )
+        return self._read(listed, walked) if taken is None else taken
+
+    def _continued(
+        self,
+        listed: Listed,
+        holds: HeldTranscriptSchema | None,
+        carry: Carry,
+        labelling: _Labelling | None = None,
+    ) -> Read | None:
+        """The transcript, which the inventory holds as `holds`, read from
+        the boundary of `carry` on, to be labelled from there on where
+        `labelling` is given; none, with the reason logged, where it is to be
+        read whole instead."""
+        why = self._unappendable(listed, holds, carry, labelling)
+        if why is None:
+            try:
+                return read(listed.transcript, self._settings, carry)
+            except NotContinuedError as error:
+                why = str(error)
+            except Exception as error:
+                # A file's lines can make the reader raise anything, as in
+                # `_read`, where the whole reading meets the same lines.
+                why = (
+                    f"reading it from its boundary on raised {type(error).__name__}:"
+                    f" {error}"
+                )
+        self._whole(listed, why)
+        return None
+
+    def _unappendable(
+        self,
+        listed: Listed,
+        holds: HeldTranscriptSchema | None,
+        carry: Carry,
+        labelling: _Labelling | None,
+    ) -> str | None:
+        """Why the transcript is not read from the boundary of `carry` on,
+        and labelled from there on where `labelling` is given; none where it
+        is."""
+        if holds is None or (
+            holds.file_size,
+            holds.file_modified_at,
+            holds.collector,
+        ) != (carry.file_size, carry.file_modified_at, carry.collector):
+            return "Pilot does not hold it as it was last read"
+        if labelling is None:
+            return None
+        checkpoint = carry.checkpoint
+        if checkpoint is None:
+            return "the labeller handed back no checkpoint of its last reading"
+        if (
+            holds.labeller is None
+            or major(holds.labeller) != major(checkpoint.version)
+            or holds.stamp != checkpoint.stamp
+        ):
+            return "Pilot does not hold its labels as the labeller last gave them"
+        if major(labelling.stamps.version) != major(checkpoint.version) or (
+            labelled_under(listed, labelling.stamps, self._refused) != checkpoint.stamp
+        ):
+            return (
+                "the labeller would label it under another stamp or major now,"
+                " which relabels it whole"
+            )
+        return None
 
     def _labels(
         self, taken: list[tuple[Listed, Read]], labelling: _Labelling
@@ -534,16 +652,23 @@ class Walker:
         labelling: _Labelling | None,
         alone: bool,
         walked: Walked,
-    ) -> None:
-        """Publish a transcript read whole for the labeller, with the labels
+    ) -> bool:
+        """Publish a transcript read for the labeller, with the labels
         `labels` give of it; with its facts alone where they give none or
-        Pilot refuses them, unless only the labeller made it differ."""
+        Pilot refuses them, unless only the labeller made it differ. False,
+        with the reason logged, where it was read appended and is to be read
+        and labelled whole instead."""
         ids = (listed.transcript.session_id, listed.transcript.agent_id)
         line = None if labels is None else labels.lines.get(ids)
-        publication: PublicationSchema | None = None
+        appended = taken.publication.appended is not None
+        given: Labelled | None = None
         if line is not None and labels is not None:
+            if appended and line.get("answer") == "whole":
+                return self._whole(
+                    listed, f"the labeller answered whole: {line.get('why')}"
+                )
             try:
-                publication = self._labelled(taken, line, labels)
+                given = self._labelled(taken, line, labels)
             except Unanswered as error:
                 logger.log(
                     logging.INFO if _grew(line) else logging.WARNING,
@@ -552,19 +677,25 @@ class Walker:
                     listed.transcript.path,
                     error,
                 )
-        if publication is not None and labelling is not None:
-            refused = self._refusal(publication)
-            declared = True
-            if refused is not None and not labelling.redeclared:
-                labelling.redeclared = True
-                declared = self._declared_again(labelling)
-                if declared:
-                    refused = self._refusal(publication)
+        if given is not None and labelling is not None:
+            try:
+                refused = self._refusal(given.publication)
+                declared = True
+                if refused is not None and not labelling.redeclared:
+                    labelling.redeclared = True
+                    declared = self._declared_again(labelling)
+                    if declared:
+                        refused = self._refusal(given.publication)
+            except NotAppendable as error:
+                return self._whole(listed, f"Pilot refused it appended: {error}")
             if refused is None:
-                self._carries.keep(listed.transcript.path, taken.carry)
+                self._carries.keep(
+                    listed.transcript.path, taken.carried(given.checkpoint)
+                )
                 walked.published += 1
+                walked.appended += appended
                 walked.labelled += 1
-                return
+                return True
             stamp = labelling.stamps.stamps.get(ids)
             if declared and stamp is not None:
                 self._refused[listed.transcript.path] = (
@@ -585,13 +716,15 @@ class Walker:
             )
         if alone:
             walked.waiting += 1
+        elif appended:
+            return self._sent_appended(listed, taken, walked)
         else:
             self._send(listed, taken, walked)
+        return True
 
-    def _labelled(
-        self, taken: Read, line: dict[str, Any], labels: Labels
-    ) -> PublicationSchema:
-        """The transcript's publication with the labels its `line` gives.
+    def _labelled(self, taken: Read, line: dict[str, Any], labels: Labels) -> Labelled:
+        """The transcript's publication with the labels its `line` gives,
+        and the checkpoint it hands back.
 
         Raises:
             Unanswered: The line gives it no labels the collector takes.
@@ -604,7 +737,7 @@ class Walker:
                 else repr(error)
             )
             raise Unanswered(f"it answered an error, {said}")
-        return with_labels(taken.publication, line, labels.version, self._groups)
+        return labelled(taken, line, labels.version, self._groups)
 
     def _refusal(self, publication: PublicationSchema) -> Refused | None:
         """Pilot's refusal of the publication, published without its
@@ -630,10 +763,7 @@ class Walker:
         inventory holds as `holds`: appended where its carry allows, else
         whole."""
         carry = self._carries.get(listed.transcript.path)
-        if carry is not None and self._appended(listed, holds, carry):
-            walked.published += 1
-            walked.appended += 1
-        else:
+        if carry is None or not self._appended(listed, holds, carry, walked):
             self._publish(listed, walked)
 
     def _publish(self, listed: Listed, walked: Walked) -> None:
@@ -660,6 +790,20 @@ class Walker:
             )
         return None
 
+    def _sent_appended(self, listed: Listed, taken: Read, walked: Walked) -> bool:
+        """Publish what an appended reading took of the transcript, its facts
+        alone. False, with the reason logged, where Pilot refuses it."""
+        try:
+            self._pilot.publish(taken.publication)
+        except NotAppendable as error:
+            return self._whole(listed, f"Pilot refused it appended: {error}")
+        except Refused as error:
+            return self._whole(listed, f"Pilot refused it appended with {error}")
+        self._carries.keep(listed.transcript.path, taken.carry)
+        walked.published += 1
+        walked.appended += 1
+        return True
+
     def _send(self, listed: Listed, taken: Read, walked: Walked) -> None:
         """Publish what a whole reading took of the transcript, its facts
         alone."""
@@ -672,37 +816,17 @@ class Walker:
         walked.published += 1
 
     def _appended(
-        self, listed: Listed, holds: HeldTranscriptSchema | None, carry: Carry
+        self,
+        listed: Listed,
+        holds: HeldTranscriptSchema | None,
+        carry: Carry,
+        walked: Walked,
     ) -> bool:
         """Publish the transcript appended, read from the boundary of
-        `carry` on. False, with the reason logged, where it is to be
-        published whole instead."""
-        if holds is None or (
-            holds.file_size,
-            holds.file_modified_at,
-            holds.collector,
-        ) != (carry.file_size, carry.file_modified_at, carry.collector):
-            return self._whole(listed, "Pilot does not hold it as it was last read")
-        try:
-            taken = read(listed.transcript, self._settings, carry)
-        except NotContinuedError as error:
-            return self._whole(listed, str(error))
-        except Exception as error:
-            # A file's lines can make the reader raise anything, as in
-            # `_publish`, where the whole reading meets the same lines.
-            return self._whole(
-                listed,
-                f"reading it from its boundary on raised {type(error).__name__}:"
-                f" {error}",
-            )
-        try:
-            self._pilot.publish(taken.publication)
-        except NotAppendable as error:
-            return self._whole(listed, f"Pilot refused it appended: {error}")
-        except Refused as error:
-            return self._whole(listed, f"Pilot refused it appended with {error}")
-        self._carries.keep(listed.transcript.path, taken.carry)
-        return True
+        `carry` on, its facts alone. False, with the reason logged, where it
+        is to be published whole instead."""
+        taken = self._continued(listed, holds, carry)
+        return taken is not None and self._sent_appended(listed, taken, walked)
 
     def _whole(self, listed: Listed, reason: str) -> bool:
         logger.info(

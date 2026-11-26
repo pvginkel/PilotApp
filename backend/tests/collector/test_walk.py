@@ -14,6 +14,7 @@ import sys
 import threading
 import time
 from collections.abc import Generator
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -87,8 +88,7 @@ PUBLICATIONS = "app.services.publication_service"
 
 UNLABELLED = {"COLLECTOR_LABELLER": labeller.command("--speaks", "2")}
 """The settings of a collector whose labeller speaks a contract it does
-not, so that its walk labels nothing: a file that grew is then published
-appended, where a walk a labeller answers publishes it whole."""
+not, so that its walk labels nothing."""
 
 
 @pytest.fixture
@@ -134,17 +134,6 @@ def walker(pilot_url: str, home: Path, stop: threading.Event) -> Generator[Walke
     """The collector's walk of that home for that Pilot."""
     with Pilot(pilot_url, COLLECTOR_TOKEN) as pilot:
         yield Walker(pilot, _settings(pilot_url, home), stop)
-
-
-class _Unlabelled:
-    """What a walk that labels nothing publishes of a file that grew."""
-
-    @pytest.fixture
-    def walker(
-        self, pilot_url: str, home: Path, stop: threading.Event
-    ) -> Generator[Walker]:
-        with Pilot(pilot_url, COLLECTOR_TOKEN) as pilot:
-            yield Walker(pilot, _settings(pilot_url, home, **UNLABELLED), stop)
 
 
 def _settings(pilot_url: str, home: Path, **given: Any) -> Settings:
@@ -399,18 +388,25 @@ class TestAWalk:
         assert max(before) <= first < min(collected())
         assert max(collected()) <= second
 
+    @pytest.mark.parametrize(
+        ("given", "labelled"),
+        [({}, 3), (UNLABELLED, 0)],
+        ids=["labelled", "where no labeller answers"],
+    )
     def test_a_new_file_and_a_changed_one_are_published_and_the_rest_left(
         self,
         committed_app: Flask,
         pilot_url: str,
         home: Path,
         stop: threading.Event,
+        given: dict[str, Any],
+        labelled: int,
     ) -> None:
         """A file that grew, one at the same size at another time, and one
-        the home did not have: where no labeller answers, the first is
-        published appended, the others whole (F152.17)."""
+        the home did not have: the first is published appended, the others
+        whole (F152.17), each with its labels where the labeller answers."""
         with Pilot(pilot_url, COLLECTOR_TOKEN) as pilot:
-            walker = Walker(pilot, _settings(pilot_url, home, **UNLABELLED), stop)
+            walker = Walker(pilot, _settings(pilot_url, home, **given), stop)
             walker.walk()
             before = _held(committed_app)
             _grown(_file(home, RECIPES))
@@ -419,7 +415,11 @@ class TestAWalk:
 
             walked = walker.walk()
 
-        assert (walked.published, walked.appended) == (3, 1)
+        assert (walked.published, walked.appended, walked.labelled) == (
+            3,
+            1,
+            labelled,
+        )
         held = _held(committed_app)
         assert held[RIDES] == before[RIDES]
         for name in (RECIPES, SCALER):
@@ -588,49 +588,23 @@ class TestAWalksOrder:
         }
 
 
-class TestTheReplayAtRest(_Unlabelled):
+class TestTheReplayAtRest:
     @pytest.fixture
-    def appended(
-        self, committed_app: Flask, pilot_url: str, home: Path, walker: Walker
-    ) -> Path:
+    def appended(self, committed_app: Flask, home: Path, walker: Walker) -> Path:
         """A transcript Pilot holds with an appended publication since its
-        last whole one, its file unchanged for eleven minutes: the file grew
-        by a line that is no fact's, and the call carries nothing."""
+        last whole one, its labels with it, its file unchanged for eleven
+        minutes: the file grew by a line that is no fact's."""
         walker.walk()
         path = _file(home, RIDES)
-        whole = reader.read(
-            transcript(home / "projects", path), walker._settings
-        ).publication
+        whole = path.stat().st_size
         _grown(path)
         _aged(path, minutes=11)
-        size, at = _stands(path)
-        call = whole.model_dump(mode="json", exclude_none=True) | {
-            "file_size": size,
-            "file_modified_at": at.isoformat(),
-            "launches": [],
-            "calls": [],
-            "appended": {
-                "builds_on": {
-                    "file_size": whole.file_size,
-                    "file_modified_at": whole.file_modified_at.isoformat(),
-                    "collector": pilot_collector.VERSION,
-                },
-                "boundary": {
-                    "call": len(whole.calls) + 1,
-                    "launch": len(whole.launches) + 1,
-                    "prompt": sum(len(each.prompts) for each in whole.launches) + 1,
-                    "compaction": 1,
-                },
-            },
-        }
-        answer = httpx.post(
-            f"{pilot_url}/api/collector/publications",
-            json=call,
-            headers=collector_headers(),
-        )
-        assert answer.status_code == 204, answer.text
+
+        walked = walker.walk()
+
+        assert (walked.published, walked.appended, walked.labelled) == (1, 1, 1)
         held = _held(committed_app)[RIDES]
-        assert held["replayed_size"] == whole.file_size < held["stands"][0] == size
+        assert held["replayed_size"] == whole < held["stands"][0] == _stands(path)[0]
         return path
 
     def test_it_waits_while_the_file_has_not_stood_the_settling_time(
@@ -645,17 +619,25 @@ class TestTheReplayAtRest(_Unlabelled):
         assert _held(committed_app) == held
 
     def test_a_settled_file_is_published_whole_once(
-        self, committed_app: Flask, appended: Path, walker: Walker
+        self,
+        committed_app: Flask,
+        appended: Path,
+        walker: Walker,
+        caplog: pytest.LogCaptureFixture,
     ) -> None:
+        """Its labels with it: what the appended labelling left is what the
+        whole one gives, so Pilot logs no row it changes (F152.16)."""
         _configure(committed_app, settling=600.0)
-        calls = _calls(committed_app, RIDES)
+        held = _facts(committed_app, RIDES)
 
-        walked = walker.walk()
+        with caplog.at_level(logging.WARNING, PUBLICATIONS):
+            walked = walker.walk()
 
-        assert walked.published == 1
-        held = _held(committed_app)[RIDES]
-        assert held["replayed_size"] == held["stands"][0] == appended.stat().st_size
-        assert _calls(committed_app, RIDES) == calls
+        assert (walked.published, walked.appended, walked.labelled) == (1, 0, 1)
+        now = _held(committed_app)[RIDES]
+        assert now["replayed_size"] == now["stands"][0] == appended.stat().st_size
+        assert _replays(caplog) == []
+        assert _facts(committed_app, RIDES) == held
         assert walker.walk().published == 0
 
 
@@ -1754,6 +1736,10 @@ class TestTheWalksRhythm:
         assert _walks(committed_app) == 1
 
 
+NO_CHECKPOINT = "the labeller handed back no checkpoint of its last reading"
+"""Why a transcript is labelled whole whose last reading held no Call."""
+
+
 def _whole_instead(caplog: pytest.LogCaptureFixture) -> list[str]:
     """Why the walk published a transcript whole that it held a carry of:
     each of its lines' reasons."""
@@ -1941,6 +1927,18 @@ def _facts(app: Flask, name: str) -> dict[str, Any]:
                 key=lambda event: (event["call_id"], event["at"]),
             ),
         }
+
+
+def _of_the_lines(facts: dict[str, Any]) -> dict[str, Any]:
+    """`facts` but for what the run records give and the file's lines do
+    not: the Work Unit a Launch ran, which the records name by the
+    conversation."""
+    return facts | {
+        "launches": [
+            {name: value for name, value in row.items() if name != "work_unit_id"}
+            for row in facts["launches"]
+        ]
+    }
 
 
 def _nested() -> Scenario:
@@ -2139,7 +2137,7 @@ def _calls_of(app: Flask, name: str) -> int:
         )
 
 
-class TestAFileThatGrows(_Unlabelled):
+class TestAFileThatGrows:
     """F152.15, F152.16."""
 
     @pytest.mark.parametrize(
@@ -2158,13 +2156,16 @@ class TestAFileThatGrows(_Unlabelled):
         read_whole: int,
     ) -> None:
         """The file is published at every line it grows by, a main thread's
-        through a second process's lines. Once Pilot holds it every step is
-        appended, the size at its last whole publication staying put; the
-        steps published whole instead are those from a line that goes back
-        in the chain, behind the boundary, until the boundary has passed
-        it. What Pilot then holds is what the whole file's publication
+        through a second process's lines, labelled by the stub. Once Pilot
+        holds a Call of it every step is appended, its labels from the
+        labeller's boundary on with it, the size at its last whole
+        publication staying put; until then the labeller hands back no
+        checkpoint, and each step is labelled whole. The steps published
+        whole instead are those from a line that goes back in the chain,
+        behind the boundary, until the boundary has passed it. What Pilot
+        then holds, labels and all, is what the whole file's publication
         gives: its replay at rest writes no row, and the same lines under
-        another id, published whole, are held alike."""
+        another id, published whole, are held alike (F152.16)."""
         path = _file(home, name)
         lines = path.read_bytes().splitlines(keepends=True)
         main = "/" not in name
@@ -2175,7 +2176,8 @@ class TestAFileThatGrows(_Unlabelled):
         replayed: int | None = None
         last: str | None = None
         behind = False
-        steps = {"appended": 0, "whole instead": 0}
+        called = False
+        steps = {"appended": 0, "whole instead": 0, "before a call": 0}
 
         with caplog.at_level(logging.INFO, LOGGER):
             walker.walk()
@@ -2192,28 +2194,39 @@ class TestAFileThatGrows(_Unlabelled):
                     if held is not None:
                         assert (walked.published, walked.appended) == (1, 0)
                         replayed = held["replayed_size"]
+                    called = _a_call(added)
                     continue
                 assert held is not None and held["stands"] == _stands(path)
-                assert walked.published == 1
+                assert (walked.published, walked.labelled) == (1, 1)
+                assert all(each.labelling is not None for each in sent)
                 if walked.appended:
                     behind = False
                     steps["appended"] += 1
                     assert [each.appended is not None for each in sent] == [True]
                 else:
-                    assert behind or added["parentUuid"] not in (None, follows)
-                    behind = True
-                    steps["whole instead"] += 1
+                    if called:
+                        assert behind or added["parentUuid"] not in (None, follows)
+                        behind = True
+                        steps["whole instead"] += 1
+                    else:
+                        steps["before a call"] += 1
                     assert [each.appended is not None for each in sent] == [False]
                     replayed = held["stands"][0]
                 assert held["replayed_size"] == replayed
+                called = called or _a_call(added)
+        first = steps_before_the_first(lines)
+        before = steps_to_the_first_call(lines) - first
         assert steps == {
-            "appended": len(lines) - read_whole - steps_before_the_first(lines),
+            "appended": len(lines) - read_whole - first - before,
             "whole instead": read_whole,
+            "before a call": before,
         }
-        assert set(_whole_instead(caplog)) <= {
-            "a line follows one before its boundary that is not the last there"
-        }
-        assert len(_whole_instead(caplog)) == read_whole
+        assert _whole_instead(caplog).count(NO_CHECKPOINT) == before
+        assert [
+            reason for reason in _whole_instead(caplog) if reason != NO_CHECKPOINT
+        ] == ["a line follows one before its boundary that is not the last there"] * (
+            read_whole
+        )
 
         grown = _facts(committed_app, name)
         assert len(grown["launches"]) == (2 if main else 0)
@@ -2225,7 +2238,7 @@ class TestAFileThatGrows(_Unlabelled):
         assert all(
             row["predecessor_id"] for row in grown["calls"] if row["compaction_id"]
         )
-        assert [row["kind_code"] for row in grown["events"]] == (
+        assert [row["kind_code"] for row in grown["events"] if not row["labelled"]] == (
             ["api_retry"] * 2 if name == RECIPES else []
         )
         assert [
@@ -2262,7 +2275,7 @@ class TestAFileThatGrows(_Unlabelled):
         _path(home, other, "-work-BikeLog").parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(path, _path(home, other, "-work-BikeLog"))
         assert walker.walk().published == 1
-        assert _facts(committed_app, other) == grown
+        assert _of_the_lines(_facts(committed_app, other)) == _of_the_lines(grown)
 
     def test_the_walks_line_counts_the_appended_among_the_published(
         self,
@@ -2279,7 +2292,7 @@ class TestAFileThatGrows(_Unlabelled):
             walker.walk()
 
         assert (
-            "A walk over 4 transcripts: 2 published, 1 of them appended and 0"
+            "A walk over 4 transcripts: 2 published, 1 of them appended and 2"
             " labelled, 0 set aside,"
             " 0 left for the next walk, in "
         ) in caplog.text
@@ -2328,7 +2341,21 @@ def steps_before_the_first(lines: list[bytes]) -> int:
     )
 
 
-class TestAFilePublishedWholeInstead(_Unlabelled):
+def _a_call(line: dict[str, Any]) -> bool:
+    """Whether the line is a Call's: a response's, not one Claude Code wrote
+    itself."""
+    return line["type"] == "assistant" and line["message"]["model"] != "<synthetic>"
+
+
+def steps_to_the_first_call(lines: list[bytes]) -> int:
+    """How many of a file's first lines it takes to its first Call's, that
+    one among them: the labeller hands back a checkpoint from there on."""
+    return next(
+        place for place, line in enumerate(lines, start=1) if _a_call(json.loads(line))
+    )
+
+
+class TestAFilePublishedWholeInstead:
     """Where a transcript the collector holds a carry of is published whole
     in the same walk (F152.15, F152.17)."""
 
@@ -2343,9 +2370,7 @@ class TestAFilePublishedWholeInstead(_Unlabelled):
         walker.walk()
         _grown(_file(home, RIDES))
 
-        walked = Walker(
-            walker._pilot, _settings(pilot_url, home, **UNLABELLED), stop
-        ).walk()
+        walked = Walker(walker._pilot, _settings(pilot_url, home), stop).walk()
 
         assert (walked.published, walked.appended) == (1, 0)
         held = _held(committed_app)[RIDES]
@@ -2366,7 +2391,7 @@ class TestAFilePublishedWholeInstead(_Unlabelled):
         path = _file(home, RIDES)
         walker.walk()
         _grown(path)
-        Walker(walker._pilot, _settings(pilot_url, home, **UNLABELLED), stop).walk()
+        Walker(walker._pilot, _settings(pilot_url, home), stop).walk()
         _grown(path)
 
         with caplog.at_level(logging.INFO, LOGGER):
@@ -2595,7 +2620,7 @@ class TestAFilePublishedWholeInstead(_Unlabelled):
         assert (walked.published, walked.appended) == (1, 0)
 
 
-class TestTheBoundarysPlaces(_Unlabelled):
+class TestTheBoundarysPlaces:
     """The four places an appended call names, against Pilot's check of
     them: Pilot refuses a call whose first Launch or Prompt is another than
     the row it holds at the boundary's place, and the transcript is then
@@ -2744,7 +2769,7 @@ class TestTheBoundarysPlaces(_Unlabelled):
         assert _held(committed_app)[RIDES]["stands"][0] == whole.publication.file_size
 
 
-class TestTheCarrysBound(_Unlabelled):
+class TestTheCarrysBound:
     def test_past_it_the_transcript_that_grew_longest_ago_is_published_whole_once(
         self,
         committed_app: Flask,
@@ -2758,7 +2783,7 @@ class TestTheCarrysBound(_Unlabelled):
         carry takes the place of the older of the two."""
         bound = Walker(
             walker._pilot,
-            _settings(pilot_url, home, COLLECTOR_CARRY_TRANSCRIPTS=2, **UNLABELLED),
+            _settings(pilot_url, home, COLLECTOR_CARRY_TRANSCRIPTS=2),
             stop,
         )
         bound.walk()
@@ -2779,6 +2804,388 @@ class TestTheCarrysBound(_Unlabelled):
         assert grown(oldest, newest) == (2, 2)
         assert grown(older) == (1, 0)
         assert grown(older) == (1, 1)
+
+
+def _requests(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
+    """The request of each `label` call of the labeller's from here on, in
+    their order."""
+    requests: list[dict[str, Any]] = []
+    run = running.subprocess.run
+
+    def called(command: list[str], **given: Any) -> Any:
+        if command[-1] == "label":
+            requests.append(json.loads(given["input"]))
+        return run(command, **given)
+
+    monkeypatch.setattr(running.subprocess, "run", called)
+    return requests
+
+
+def _modes(requests: list[dict[str, Any]]) -> list[list[str]]:
+    """How each `label` call hands its transcripts: whole or appended."""
+    return [
+        [
+            transcript["mode"]
+            for conversation in request["conversations"]
+            for transcript in conversation["transcripts"]
+        ]
+        for request in requests
+    ]
+
+
+def _responded(path: Path, message_id: str, *tools: dict[str, Any]) -> bytes:
+    """A response of the thread's, after its last line, as Claude Code
+    writes one: asking for `tools`, else saying a word."""
+    lines = _lines(path)
+    template = [line for line in lines if line["type"] == "assistant"][-1]
+    last = [line for line in lines if "uuid" in line][-1]
+    message = template["message"] | {
+        "id": message_id,
+        "content": [
+            {"type": "tool_use", "id": tool["id"], "name": tool["name"]}
+            | {"input": tool["input"]}
+            for tool in tools
+        ]
+        or [{"type": "text", "text": "Simmer."}],
+        "stop_reason": "tool_use" if tools else "end_turn",
+    }
+    line = {name: value for name, value in template.items() if name != "requestRef"} | {
+        "parentUuid": last["uuid"],
+        "uuid": f"{message_id}-line",
+        "message": message,
+        "requestId": f"req-{message_id}",
+        "timestamp": _later(last["timestamp"]),
+    }
+    return _line(**line)
+
+
+def _returned_to(path: Path, tool_use_id: str, said: str) -> bytes:
+    """The result of the tool call of that id, after the thread's last
+    line."""
+    lines = _lines(path)
+    last = [line for line in lines if "uuid" in line][-1]
+    return _line(
+        **{
+            name: last[name]
+            for name in ("isSidechain", "agentId", "cwd", "sessionId", "version")
+            if name in last
+        },
+        type="user",
+        parentUuid=last["uuid"],
+        uuid=f"{tool_use_id}-result",
+        timestamp=_later(last["timestamp"]),
+        message={
+            "role": "user",
+            "content": [
+                {"type": "tool_result", "tool_use_id": tool_use_id, "content": said}
+            ],
+        },
+    )
+
+
+def _later(written: str) -> str:
+    at = datetime.fromisoformat(written) + timedelta(seconds=5)
+    return at.isoformat(timespec="milliseconds").replace("+00:00", "Z")
+
+
+BACKGROUND = {
+    "id": "toolu_simmer",
+    "name": "Bash",
+    "input": {"command": "sleep 600", "run_in_background": True},
+}
+"""A command run in the background: under the stub it holds its Call open
+until a notification names it or three counted Calls have begun after it."""
+
+
+class TestTheLabellersBoundary:
+    """Labelling what was appended (F152.15, F152.16): a file that grew is
+    labelled from the labeller's boundary on, with the checkpoint it handed
+    back, and its publication is read from the earlier of that boundary and
+    the facts'."""
+
+    def test_a_file_that_grew_is_labelled_from_its_boundary_on(
+        self,
+        committed_app: Flask,
+        home: Path,
+        walker: Walker,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        walker.walk()
+        held = _facts(committed_app, SCALER)
+        path = _file(home, SCALER)
+        requests = _requests(monkeypatch)
+        sent = _sent(walker, monkeypatch)
+        _added(path, _responded(path, "msg_simmer"))
+
+        walked = walker.walk()
+
+        assert (walked.published, walked.appended, walked.labelled) == (1, 1, 1)
+        ((transcript,),) = (
+            [
+                each
+                for conversation in request["conversations"]
+                for each in conversation["transcripts"]
+            ]
+            for request in requests
+        )
+        carry = walker._carries.get(path)
+        assert carry is not None and carry.checkpoint is not None
+        assert transcript["mode"] == "appended"
+        assert set(transcript) >= {"from", "checkpoint", "calls"}
+        assert [call["id"] for call in transcript["calls"]] == [
+            held["calls"][-1]["message_id"],
+            "msg_simmer",
+        ]
+        assert [call["position"] for call in transcript["calls"]] == [
+            len(held["calls"]),
+            len(held["calls"]) + 1,
+        ]
+        (publication,) = sent
+        assert publication.appended is not None and publication.labelling is not None
+        assert [call.id for call in publication.labelling.labels.calls] == [
+            call.message_id for call in publication.calls
+        ]
+        assert carry.checkpoint.call == "msg_simmer"
+        assert (carry.checkpoint.version, carry.checkpoint.stamp) == _labelled_under(
+            committed_app
+        )[SCALER]
+
+    def test_a_command_in_the_background_holds_its_boundary_and_the_calls_after_it_are_labelled_again(
+        self,
+        committed_app: Flask,
+        home: Path,
+        walker: Walker,
+        monkeypatch: pytest.MonkeyPatch,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """Its Call is the labeller's boundary while the file's last Call is
+        a later one: the next appended publication is read and labelled from
+        it, and what Pilot holds is what labelling the file whole gives
+        (slice 050's I5)."""
+        walker.walk()
+        path = _file(home, SCALER)
+        before = _calls_of(committed_app, SCALER)
+        _added(
+            path,
+            _responded(path, "msg_simmer", BACKGROUND),
+        )
+        _added(path, _returned_to(path, BACKGROUND["id"], "Running in the background."))
+        _added(path, _responded(path, "msg_stir"))
+        assert walker.walk().appended == 1
+        carry = walker._carries.get(path)
+        assert carry is not None and carry.checkpoint is not None
+        assert carry.checkpoint.call == "msg_simmer"
+        assert carry.stands.calls == before
+        sent = _sent(walker, monkeypatch)
+        _added(path, _responded(path, "msg_taste"))
+
+        walked = walker.walk()
+
+        assert (walked.published, walked.appended, walked.labelled) == (1, 1, 1)
+        (publication,) = sent
+        assert publication.appended is not None and publication.labelling is not None
+        assert publication.appended.boundary.call == before + 1
+        assert [call.message_id for call in publication.calls] == [
+            "msg_simmer",
+            "msg_stir",
+            "msg_taste",
+        ]
+        assert [call.id for call in publication.labelling.labels.calls] == [
+            "msg_simmer",
+            "msg_stir",
+            "msg_taste",
+        ]
+        _added(path, _responded(path, "msg_plate"))
+        assert walker.walk().appended == 1
+        carry = walker._carries.get(path)
+        assert carry is not None and carry.checkpoint is not None
+        assert carry.checkpoint.call == "msg_plate"
+        grown = _facts(committed_app, SCALER)
+        _configure(committed_app, settling=0.0)
+        with caplog.at_level(logging.WARNING, PUBLICATIONS):
+            walked = walker.walk()
+        assert (walked.published, walked.appended) == (1, 0)
+        assert _replays(caplog) == []
+        assert _facts(committed_app, SCALER) == grown
+
+    def test_one_the_labeller_answers_whole_for_is_labelled_whole_in_the_same_walk(
+        self,
+        committed_app: Flask,
+        home: Path,
+        walker: Walker,
+        monkeypatch: pytest.MonkeyPatch,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """Its checkpoint no longer reads."""
+        walker.walk()
+        path = _file(home, SCALER)
+        carry = walker._carries.get(path)
+        assert carry is not None and carry.checkpoint is not None
+        walker._carries.keep(
+            path, replace(carry, checkpoint=replace(carry.checkpoint, text="not one"))
+        )
+        requests = _requests(monkeypatch)
+        sent = _sent(walker, monkeypatch)
+        _added(path, _responded(path, "msg_simmer"))
+
+        with caplog.at_level(logging.INFO, LOGGER):
+            walked = walker.walk()
+
+        assert (walked.published, walked.appended, walked.labelled) == (1, 0, 1)
+        assert _modes(requests) == [["appended"], ["whole"]]
+        assert _whole_instead(caplog) == ["the labeller answered whole: checkpoint"]
+        (publication,) = sent
+        assert publication.appended is None and publication.labelling is not None
+        held = _held(committed_app)[SCALER]
+        assert held["replayed_size"] == held["stands"][0] == _stands(path)[0]
+        _added(path, _responded(path, "msg_stir"))
+        assert walker.walk().appended == 1
+
+    def test_one_whose_appended_labelling_pilot_refuses_is_labelled_whole_in_the_same_walk(
+        self,
+        committed_app: Flask,
+        home: Path,
+        walker: Walker,
+        monkeypatch: pytest.MonkeyPatch,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """Pilot holds the Call before the boundary in another Segment than
+        the labelling continues (P4)."""
+        walker.walk()
+        path = _file(home, RIDES)
+        with _record(committed_app) as record:
+            thread = _thread(record, RIDES)
+            positions = list(
+                record.scalars(
+                    select(Call.segment_position)
+                    .where(Call.transcript_id == thread.id)
+                    .order_by(Call.position)
+                )
+            )
+            assert positions[-2] is not None and positions[-2] > 2
+            record.execute(
+                update(Call)
+                .where(
+                    Call.transcript_id == thread.id,
+                    Call.position == len(positions) - 1,
+                )
+                .values(segment_position=1)
+            )
+            record.commit()
+        requests = _requests(monkeypatch)
+        _grown(path)
+
+        with caplog.at_level(logging.INFO, LOGGER):
+            walked = walker.walk()
+
+        assert (walked.published, walked.appended, walked.labelled) == (1, 0, 1)
+        assert _modes(requests) == [["appended"], ["whole"]]
+        (reason,) = _whole_instead(caplog)
+        assert reason.startswith(
+            f"Pilot refused it appended: Cannot append to transcript {RIDES}"
+        )
+        assert "Pilot holds the call before its boundary in segment 1" in reason
+        with _record(committed_app) as record:
+            thread = _thread(record, RIDES)
+            assert (
+                list(
+                    record.scalars(
+                        select(Call.segment_position)
+                        .where(Call.transcript_id == thread.id)
+                        .order_by(Call.position)
+                    )
+                )
+                == positions
+            )
+
+    def test_a_labeller_that_stops_answering_leaves_what_was_appended_unlabelled_until_it_answers(
+        self,
+        committed_app: Flask,
+        home: Path,
+        walker: Walker,
+        monkeypatch: pytest.MonkeyPatch,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """Its facts are published appended, the labels Pilot holds before
+        them stand; labelled again, it is labelled whole."""
+        walker.walk()
+        path = _file(home, SCALER)
+        labels = _labels(committed_app)[SCALER]
+        _stub(walker, monkeypatch, "--speaks", "2")
+        _added(path, _responded(path, "msg_simmer"))
+
+        walked = walker.walk()
+
+        assert (walked.published, walked.appended, walked.labelled) == (1, 1, 0)
+        assert _labelled_under(committed_app)[SCALER][1] is None
+        held = _labels(committed_app)[SCALER]
+        assert held[1:] == (labels[1], [*labels[2], None])
+        _stub(walker, monkeypatch)
+        requests = _requests(monkeypatch)
+        _added(path, _responded(path, "msg_stir"))
+        with caplog.at_level(logging.INFO, LOGGER):
+            walked = walker.walk()
+        assert (walked.published, walked.appended, walked.labelled) == (1, 0, 1)
+        assert _modes(requests) == [["whole"]]
+        assert _whole_instead(caplog) == [NO_CHECKPOINT]
+        assert _labelled_under(committed_app)[SCALER][1] is not None
+
+    @pytest.mark.parametrize(
+        ("version", "modes"),
+        [
+            ("1.3.0", [["appended"]]),
+            ("1.0.1", [["appended"]]),
+            ("2.0.0", [["whole"], ["whole", "whole"]]),
+        ],
+        ids=["a minor", "a patch", "a major"],
+    )
+    def test_under_another_minor_or_patch_it_goes_on_and_under_another_major_it_is_whole(
+        self,
+        committed_app: Flask,
+        home: Path,
+        walker: Walker,
+        monkeypatch: pytest.MonkeyPatch,
+        version: str,
+        modes: list[list[str]],
+    ) -> None:
+        """Any version of the checkpoint's major reads it (R15); under
+        another major the file that grew is labelled whole, and the other
+        two after it, as the relabel has them."""
+        walker.walk()
+        _stub(walker, monkeypatch, "--version", version)
+        requests = _requests(monkeypatch)
+        _added(_file(home, SCALER), _responded(_file(home, SCALER), "msg_simmer"))
+
+        walked = walker.walk()
+
+        assert _modes(requests) == modes
+        assert walked.appended == (modes == [["appended"]])
+        assert _labelled_under(committed_app)[SCALER][0] == version
+
+    def test_a_stamp_that_differs_has_a_file_that_grew_labelled_whole(
+        self,
+        committed_app: Flask,
+        home: Path,
+        walker: Walker,
+        monkeypatch: pytest.MonkeyPatch,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        walker.walk()
+        records = json.loads(_records(home).read_text())
+        records["units"][0]["measures"][0]["amount"] = 3
+        _records(home).write_text(json.dumps(records))
+        requests = _requests(monkeypatch)
+        _grown(_file(home, RECIPES))
+
+        with caplog.at_level(logging.INFO, LOGGER):
+            walked = walker.walk()
+
+        assert (walked.published, walked.appended, walked.labelled) == (1, 0, 1)
+        assert _modes(requests) == [["whole"]]
+        assert _whole_instead(caplog) == [
+            "the labeller would label it under another stamp or major now, which"
+            " relabels it whole"
+        ]
 
 
 def _await(holds: Any, seconds: float = 10.0) -> None:
