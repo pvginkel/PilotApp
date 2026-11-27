@@ -430,6 +430,9 @@ function readLevel(written: string, part: string): Level {
   };
 }
 
+/** The chip `written` names, as a state writes it after `c=`: a quick filter's condition among them. */
+export const chipOf = (written: string): Chip => readChip(written, `c=${written}`);
+
 function readChip(written: string, part: string): Chip {
   let rest = written;
   let marked = false;
@@ -508,7 +511,8 @@ function measureKey(measure: Measure): string {
   return simpleKey(measure);
 }
 
-function chipKey(chip: Chip): string {
+/** A chip as a state writes it after `c=`. */
+export function chipKey(chip: Chip): string {
   const marked = chip.marked ? '~' : '';
   if (chip.kind === 'outliers') return `${marked}@outliers`;
   if (chip.kind === 'rows') {

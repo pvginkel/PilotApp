@@ -14,7 +14,9 @@
  * The picker lists the parts and the attributes, no time: the time is the global toolbar's. A
  * dimension's pane lists its values in the view's scope without its own chips, each with its cost
  * and its rows, searched by the server; the values picked, Is or Is not, a filter or a mark. Each
- * change is a new entry (F160.4).
+ * change is a new entry (F160.4). Under the line the quick filters' (`quick-filters.tsx`, F162.6); a
+ * pane's foot keeps the chip as the pane has it as a quick filter under a name, for everyone, no chip
+ * joining the scope.
  */
 
 import { Fragment, useEffect, useRef, useState, type ReactNode } from 'react';
@@ -23,16 +25,21 @@ import { Diamond, Filter, Plus, X } from 'lucide-react';
 import { Popover } from '@/components/shared/popover';
 import { useFailureShown } from '@/hooks/use-dashboard-view';
 import { useViewWords } from '@/hooks/use-view-words';
+import { useQuickFilterWrites } from '@/hooks/use-view-writes';
 import { dimensionLabel } from '@/lib/dashboard/describe';
 import { figure, whole } from '@/lib/dashboard/figures';
 import { catalogueQuery, knowLabel, valuesQuery, valueText } from '@/lib/dashboard/queries';
 import { chipDoes, chipText, chipWords, pathWords, upTo, type LabelOf } from '@/lib/dashboard/scope';
-import type { Chip, ViewState } from '@/lib/dashboard/state';
+import { chipKey, type Chip, type ViewState } from '@/lib/dashboard/state';
 import { cn } from '@/lib/utils';
 import { useDebouncedValue } from '@/lib/utils/debounce';
+import { QuickFilters } from './quick-filters';
 import { Segmented } from './segmented';
 
 type Pin = Extract<Chip, { kind: 'pin' }>;
+
+/** The longest name a quick filter takes (`backend/app/schemas/dashboard_store.py`, `NAME`). */
+const NAME_LENGTH = 60;
 
 /** What the filter picker lists, in its groups. */
 const GROUPS = [
@@ -79,8 +86,9 @@ export function Scope({ state, scope, label, onState }: ScopeProps) {
             onRemove={() => onState({ ...state, chips: chips.filter((_, at) => at !== index), selected: null, item: null, itemGrain: null })}
           />
         ))}
-        <AddFilter scope={scope} onAdd={(chip) => onState({ ...state, chips: [...chips, chip], selected: null })} />
+        <AddFilter scope={scope} label={label} onAdd={(chip) => onState({ ...state, chips: [...chips, chip], selected: null })} />
       </div>
+      <QuickFilters state={state} scope={scope} label={label} onState={onState} />
     </section>
   );
 }
@@ -181,10 +189,12 @@ function ChipView({ chip, scope, label, onFlip, onApply, onRemove }: ChipProps) 
           dimension={chip.dimension}
           chip={chip}
           scope={scope}
+          label={label}
           onDone={(next) => {
             close();
             onApply(next);
           }}
+          onClose={close}
           onRemove={() => {
             close();
             onRemove();
@@ -195,7 +205,7 @@ function ChipView({ chip, scope, label, onFlip, onApply, onRemove }: ChipProps) 
   );
 }
 
-function AddFilter({ scope, onAdd }: { scope: string; onAdd: (chip: Pin) => void }) {
+function AddFilter({ scope, label, onAdd }: { scope: string; label: LabelOf; onAdd: (chip: Pin) => void }) {
   return (
     <Popover
       label="Filter"
@@ -213,10 +223,12 @@ function AddFilter({ scope, onAdd }: { scope: string; onAdd: (chip: Pin) => void
       {(close) => (
         <FilterPicker
           scope={scope}
+          label={label}
           onAdd={(chip) => {
             close();
             onAdd(chip);
           }}
+          onClose={close}
         />
       )}
     </Popover>
@@ -224,10 +236,10 @@ function AddFilter({ scope, onAdd }: { scope: string; onAdd: (chip: Pin) => void
 }
 
 /** The parts and the attributes, a press on one opening its pane in the picker's place. */
-function FilterPicker({ scope, onAdd }: { scope: string; onAdd: (chip: Pin) => void }) {
+function FilterPicker({ scope, label, onAdd, onClose }: { scope: string; label: LabelOf; onAdd: (chip: Pin) => void; onClose: () => void }) {
   const dimensions = useQuery(catalogueQuery('dimensions')).data?.dimensions;
   const [picked, setPicked] = useState<string | null>(null);
-  if (picked !== null) return <ValuePane dimension={picked} chip={null} scope={scope} onDone={onAdd} />;
+  if (picked !== null) return <ValuePane dimension={picked} chip={null} scope={scope} label={label} onDone={onAdd} onClose={onClose} />;
   if (dimensions == null) return <p className="empty dash-pane-wait">Loading the dimensions…</p>;
   return (
     <div className="dash-picker" data-testid="dashboard.filter.picker">
@@ -252,14 +264,18 @@ interface PaneProps {
   /** The chip the pane edits; none for a new one. */
   chip: Pin | null;
   scope: string;
+  label: LabelOf;
   onDone: (chip: Pin) => void;
+  /** The pane closed, its chip kept as a quick filter. */
+  onClose: () => void;
   /** A chip that is edited is removed. */
   onRemove?: () => void;
 }
 
 /** A dimension's values in the view's scope, those picked checked; Is or Is not; a filter or a mark. */
-function ValuePane({ dimension, chip, scope, onDone, onRemove }: PaneProps) {
+function ValuePane({ dimension, chip, scope, label, onDone, onClose, onRemove }: PaneProps) {
   const queryClient = useQueryClient();
+  const words = useViewWords();
   const about = useQuery(catalogueQuery('dimensions')).data?.dimensions?.find((each) => each.key === dimension);
   const name = about?.label ?? dimension;
   const [typed, setTyped] = useState('');
@@ -274,14 +290,24 @@ function ValuePane({ dimension, chip, scope, onDone, onRemove }: PaneProps) {
   const [marked, setMarked] = useState(chip?.marked ?? false);
   const listed = values.data?.values ?? [];
   const pick = (value: string | null) => setPicked((was) => (was.includes(value) ? was.filter((each) => each !== value) : [...was, value]));
-  const done = () => {
-    if (picked.length === 0) return;
+  // The quick filter's name while it is asked, the foot's place; none, the foot.
+  const [naming, setNaming] = useState<string | null>(null);
+  /** The chip as the pane has it, those of its values listed first in the list's order. */
+  const built = (): Pin => {
     const shown = listed.map((each) => valueText(each.key)).filter((value) => picked.includes(value));
     for (const each of listed) {
       const value = valueText(each.key);
       if (value !== null && picked.includes(value)) knowLabel(queryClient, dimension, value, each.label);
     }
-    onDone({ kind: 'pin', dimension, values: [...shown, ...picked.filter((value) => !shown.includes(value))], negated, marked });
+    return { kind: 'pin', dimension, values: [...shown, ...picked.filter((value) => !shown.includes(value))], negated, marked };
+  };
+  const done = () => {
+    if (picked.length > 0) onDone(built());
+  };
+  /** A value's words: as the pane lists it, else as the view names it. */
+  const named: LabelOf = (of, value) => {
+    const each = listed.find((one) => valueText(one.key) === value);
+    return each === undefined ? label(of, value) : (each.label ?? label(of, value));
   };
   const total = values.data?.total ?? 0;
   return (
@@ -366,19 +392,77 @@ function ValuePane({ dimension, chip, scope, onDone, onRemove }: PaneProps) {
           ]}
         />
       </div>
-      <div className="row foot">
-        <button type="button" className="btn btn-primary btn-sm" disabled={picked.length === 0} onClick={done} data-testid="dashboard.pane.apply">
-          {chip === null ? 'Add' : 'Apply'}
-        </button>
-        {onRemove !== undefined && (
-          <>
-            <span className="grow" />
-            <button type="button" className="btn btn-sm" onClick={onRemove} data-testid="dashboard.pane.remove">
-              Remove
-            </button>
-          </>
-        )}
-      </div>
+      {naming === null ? (
+        <div className="row foot">
+          <button type="button" className="btn btn-primary btn-sm" disabled={picked.length === 0} onClick={done} data-testid="dashboard.pane.apply">
+            {chip === null ? 'Add' : 'Apply'}
+          </button>
+          <button
+            type="button"
+            className="btn btn-sm"
+            disabled={picked.length === 0}
+            onClick={() => setNaming(chipText(chipWords(built(), named, words)))}
+            title="Keep it as a quick filter, for everyone: a press on it turns it on, with no chip added"
+            data-testid="dashboard.pane.quick-filter"
+          >
+            Add as quick filter
+          </button>
+          {onRemove !== undefined && (
+            <>
+              <span className="grow" />
+              <button type="button" className="btn btn-sm" onClick={onRemove} data-testid="dashboard.pane.remove">
+                Remove
+              </button>
+            </>
+          )}
+        </div>
+      ) : (
+        <QuickFilterName name={naming} ready={picked.length > 0} chip={built} onName={setNaming} onBack={() => setNaming(null)} onSaved={onClose} />
+      )}
+    </div>
+  );
+}
+
+interface QuickFilterNameProps {
+  name: string;
+  /** Whether the pane has a chip to keep. */
+  ready: boolean;
+  chip: () => Pin;
+  onName: (name: string) => void;
+  /** Esc: the foot again, the pane staying open. */
+  onBack: () => void;
+  onSaved: () => void;
+}
+
+/** A pane's foot asking the quick filter's name, filled with its chip's words: Enter or Save makes it, of the chip as the pane has it then. */
+function QuickFilterName({ name, ready, chip, onName, onBack, onSaved }: QuickFilterNameProps) {
+  const { add } = useQuickFilterWrites();
+  const typed = name.trim();
+  const save = () => {
+    if (typed === '' || !ready || add.isPending) return;
+    add.mutate({ label: typed, chip: chipKey(chip()) }, { onSuccess: onSaved });
+  };
+  return (
+    <div className="row foot">
+      <input
+        type="text"
+        className="field grow"
+        value={name}
+        maxLength={NAME_LENGTH}
+        placeholder="The quick filter’s name"
+        aria-label="The quick filter’s name"
+        autoFocus
+        onFocus={(event) => event.currentTarget.select()}
+        onChange={(event) => onName(event.target.value)}
+        onKeyDown={(event) => {
+          if (event.key === 'Enter') save();
+          else if (event.key === 'Escape') onBack();
+        }}
+        data-testid="dashboard.pane.quick-filter.name"
+      />
+      <button type="button" className="btn btn-primary btn-sm" disabled={typed === '' || !ready || add.isPending} onClick={save} data-testid="dashboard.pane.quick-filter.save">
+        Save
+      </button>
     </div>
   );
 }

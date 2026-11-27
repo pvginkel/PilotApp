@@ -5,6 +5,9 @@
  * (`use-walk-reads.ts`); each read takes the query's signal, so that one superseded is cancelled.
  * They are kept until the walk's event, never stale by age.
  *
+ * The quick filters' counts and amounts are a task's answer over the stream (`task.ts`), read as a
+ * figure is: a walk asks them again with the view's rows.
+ *
  * A state from outside the page, a link opened cold, is read through the server's normal form
  * first (`GET /api/dashboard/address`), since the page reads the server's forms alone: the
  * address of a text is the server's at the page's first read of it, and a normal form is its own.
@@ -24,18 +27,30 @@ import { api } from '@/lib/api/client';
 import type { components } from '@/lib/api/generated/types';
 import type { Rows } from './rows-layout';
 import { lookOf, readState } from './state';
+import { taskAnswer, type Listen } from './task';
 
 type Address = components['schemas']['AddressResponseSchema.b67cf98'];
 type Values = components['schemas']['ValuesResponseSchema.b67cf98'];
 export type Catalogue = components['schemas']['CatalogueResponseSchema.b67cf98'];
 export type Favourites = components['schemas']['FavouritesSchema.ddf95d6'];
 export type SavedView = components['schemas']['CatalogueResponseSchema.b67cf98.SavedViewSchema'];
+export type QuickFilter = components['schemas']['CatalogueResponseSchema.b67cf98.QuickFilterSchema'];
 type CataloguePart = Catalogue['part'];
 
 /** The first part of the key of every query of the record's figures. */
 export const FIGURES = 'dashboard';
 
+/** The `meta` flag of a query whose answer comes over the stream: one the stream dropped never lands. */
+export const OVER_STREAM = 'overStream';
+
+/** The quick filters' counts and amounts of a view (`backend/app/schemas/dashboard.py`, `QuickFilterCountsSchema`), the task's result. */
+interface QuickFilterCounts {
+  quick_filters: { key: string; count: number; amount: number | null }[];
+}
+
 const ADDRESS = 'dashboard.address';
+
+const COUNTS = 'quick-filters';
 
 const CATALOGUE = 'dashboard.catalogue';
 
@@ -69,6 +84,11 @@ export function knowNormal(queryClient: QueryClient, address: string): void {
   queryClient.setQueryData<Address>([ADDRESS, normal], { address, look: lookOf(readState(normal)), notes: [] });
 }
 
+/** Every normal form the page holds asked again where it is read, the server's forms having changed under them. */
+export function normalFormsChanged(queryClient: QueryClient): Promise<void> {
+  return queryClient.invalidateQueries({ queryKey: [ADDRESS] });
+}
+
 /** A view's rows, `key` its state in its normal form without its look-only parts. */
 export function rowsQuery(key: string) {
   return queryOptions({
@@ -96,6 +116,31 @@ export function valuesQuery(scope: string, dimension: string, search: string) {
     staleTime: Infinity,
     refetchOnWindowFocus: false,
   });
+}
+
+/**
+ * The quick filters' counts and amounts in a view's scope, `key` its state in its normal form without
+ * its look-only parts, under the quick filters that are on: each one's count of what it keeps and its
+ * figure's sum over it.
+ */
+export function quickFilterCountsQuery(key: string, listen: Listen) {
+  return queryOptions({
+    queryKey: [FIGURES, COUNTS, key],
+    queryFn: ({ signal }) =>
+      taskAnswer<QuickFilterCounts>(listen, signal, async () => {
+        const { data, error, response } = await api.POST('/api/dashboard/counts/quick-filters', { params: { query: { state: key } }, signal });
+        if (error !== undefined) throw toApiError(error, response.status);
+        return data.task_id;
+      }),
+    staleTime: Infinity,
+    refetchOnWindowFocus: false,
+    meta: { [OVER_STREAM]: true },
+  });
+}
+
+/** The quick filters' counts asked again in every scope, a quick filter made or removed. */
+export function quickFiltersChanged(queryClient: QueryClient): Promise<void> {
+  return queryClient.invalidateQueries({ queryKey: [FIGURES, COUNTS] });
 }
 
 /** A value's text as a state writes it, decoded; none for the value with none. */

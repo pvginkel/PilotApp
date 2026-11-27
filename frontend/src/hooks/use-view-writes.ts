@@ -1,7 +1,8 @@
 /**
- * The dashboard's writes on its views (F161.7): a view's star, the person's own (F155.2), and a
- * saved view's rename and remove, for everyone; Save view, a tab's state saved under a name, for
- * everyone, the tab taking it (F161.5). What went well is a toast, and what failed the
+ * The dashboard's writes on what it stores (F161.7, F162.6): a view's star, the person's own
+ * (F155.2), and a saved view's rename and remove, for everyone; Save view, a tab's state saved under
+ * a name, for everyone, the tab taking it (F161.5); a quick filter made and removed, for everyone,
+ * the counts read again. What went well is a toast, and what failed the
  * banner under the global toolbar alone (F160.8): each write's own failure replaces the query
  * client's toast every failed write has by default. A write reads again what it changed and no
  * more, never the figures, which the generated hooks' success would read again with every other
@@ -15,7 +16,7 @@ import { useViewTabMoves, viewRenamed } from '@/hooks/use-view-tabs';
 import { toApiError } from '@/lib/api/api-error';
 import { api } from '@/lib/api/client';
 import { SENDER } from '@/lib/api/generated/hooks';
-import { catalogueQuery, favouritesQuery, knowNormal, stateOf, type Catalogue, type Favourites, type SavedView } from '@/lib/dashboard/queries';
+import { catalogueQuery, favouritesQuery, knowNormal, normalFormsChanged, quickFiltersChanged, stateOf, type Catalogue, type Favourites, type QuickFilter, type SavedView } from '@/lib/dashboard/queries';
 
 /** Shows what failed in the dashboard's banner. */
 export const WriteFailures = createContext<((error: Error) => void) | null>(null);
@@ -128,4 +129,52 @@ export function useSaveView() {
     },
     onError: fail,
   });
+}
+
+/**
+ * The quick filters' writes (F162.6), for everyone: one made under a name, of a chip as a state
+ * writes it, its amount the cost; one removed. Neither is renamed nor edited. Each reads the counts
+ * again, which list every quick filter. A view that had a removed one on shows without it, so the
+ * normal forms the page holds are asked again, the server's now dropping it.
+ */
+export function useQuickFilterWrites() {
+  const queryClient = useQueryClient();
+  const fail = useContext(WriteFailures)!;
+  const { showSuccess } = useToast();
+  const stored = catalogueQuery('stored').queryKey;
+  const quickFilters = (change: (held: QuickFilter[]) => QuickFilter[]) =>
+    queryClient.setQueryData<Catalogue>(stored, (was) => (was?.quick_filters == null ? was : { ...was, quick_filters: change(was.quick_filters) }));
+
+  const add = useMutation({
+    mutationFn: async ({ label, chip }: { label: string; chip: string }) => {
+      const { data, error, response } = await api.POST('/api/dashboard/quick-filters', { body: { label, chip, amount: 'cost' }, headers });
+      if (error !== undefined) throw toApiError(error, response.status);
+      return data;
+    },
+    onSuccess: (made) => {
+      quickFilters((held) => [...held, made]);
+      void quickFiltersChanged(queryClient);
+      showSuccess(`Added the quick filter "${made.label}" for everyone`);
+    },
+    onError: fail,
+  });
+
+  const remove = useMutation({
+    mutationFn: async (quickFilter: QuickFilter) => {
+      const { error, response } = await api.DELETE('/api/dashboard/quick-filters/{quick_filter_id}', { params: { path: { quick_filter_id: quickFilter.id } }, headers });
+      if (error !== undefined) throw toApiError(error, response.status);
+    },
+    onSuccess: (_, quickFilter) => {
+      quickFilters((held) => held.filter((each) => each.id !== quickFilter.id));
+      void quickFiltersChanged(queryClient);
+      void normalFormsChanged(queryClient);
+      showSuccess(`Removed the quick filter "${quickFilter.label}" for everyone`);
+    },
+    onError: (error) => {
+      fail(error);
+      void queryClient.invalidateQueries({ queryKey: stored });
+    },
+  });
+
+  return { add, remove };
 }

@@ -295,6 +295,41 @@
   .dash .dash-chip .icon { width: 14px; height: 14px; }
   .dash .dash-chip .x .icon { opacity: 0.65; }
   .dash .dash-chip .x:hover .icon { opacity: 1; }
+  /* A quick filter (quick-filters.tsx; the mockup's `.dash-badge`), on a line of its own under the
+     scope's: a toggle in a chip's form, its name, its count, its amount muted, a diamond first where
+     it marks. Off, the muted fill; on, the primary's muted tint; muted where it counts nothing and is
+     off. Its border is its hover's fill. Under the pointer its × lies over its right end on the
+     quick filter's own fill, so that the line does not move. While another scope's counts are on
+     their way the line fades a little. */
+  .dash .dash-quick-line.changing { opacity: 0.65; transition: opacity 0.2s 0.15s; }
+  .dash .dash-quick { --hover: color-mix(in srgb, hsl(var(--muted)) 92%, hsl(var(--foreground))); --fill: hsl(var(--muted)); position: relative; border-color: var(--hover); background: var(--fill); }
+  .dash .dash-quick:not(.idle):hover { --fill: var(--hover); }
+  .dash .dash-quick.on { --hover: hsl(var(--primary-muted-strong)); --fill: hsl(var(--primary-muted)); color: hsl(var(--primary-muted-foreground)); }
+  .dash .dash-quick > .main { display: inline-flex; align-items: center; gap: 7px; padding: 0 10px; }
+  .dash .dash-quick > .main:hover { background: none; }
+  .dash .dash-quick > .main .icon { margin-right: -2px; }
+  .dash .dash-quick .n { font-weight: 600; font-variant-numeric: tabular-nums; }
+  .dash .dash-quick .amt { color: hsl(var(--muted-foreground)); font-variant-numeric: tabular-nums; }
+  .dash .dash-quick.on .amt { color: inherit; opacity: 0.8; }
+  .dash .dash-quick.idle > .main { cursor: default; }
+  .dash .dash-quick.idle > .main > * { opacity: 0.5; }
+  .dash .dash-quick > .x {
+    position: absolute;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    width: 22px;
+    border-left: 0;
+    border-radius: 0 calc(var(--radius) - 1px) calc(var(--radius) - 1px) 0;
+    background: var(--fill);
+    box-shadow: -4px 0 4px var(--fill);
+    opacity: 0;
+  }
+  .dash .dash-quick:hover > .x, .dash .dash-quick > .x:focus-visible { opacity: 1; }
+  .dash .dash-quick > .x:hover { background: var(--fill); color: hsl(var(--destructive-text)); }
+  /* A pane's foot asking a quick filter's name: the field takes the room Save leaves it. */
+  .dash .dash-valuepane .foot .field { min-width: 0; }
+
   /* "+ Filter" after the chips, in the link's colour. */
   .dash .dash-add { gap: 4px; padding: 0 8px 0 6px; color: hsl(var(--link)); }
   .dash .dash-add:hover:not(:disabled) { color: hsl(var(--link)); }

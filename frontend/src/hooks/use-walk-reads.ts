@@ -9,13 +9,15 @@
  * been answered, its read refused, waits for its Retry.
  *
  * An event reaches only the browsers whose stream the sending process holds, so each time the
- * stream comes back up the figures are read again as on the event; its first coming up is none.
+ * stream comes back up the figures are read again as on the event; its first coming up is none. A
+ * read whose answer comes over the stream (`OVER_STREAM`), a task's, and is under way as it comes
+ * back up is asked again at once, since an answer sent while it was down never lands.
  */
 
 import { useEffect, useRef } from 'react';
 import { useQueryClient, type Query } from '@tanstack/react-query';
 import { useSseContext } from '@/contexts/sse-context';
-import { FIGURES } from '@/lib/dashboard/queries';
+import { FIGURES, OVER_STREAM } from '@/lib/dashboard/queries';
 
 /** The server's event, `{"as_of": <the walk's end>}`. */
 const EVENT = 'collection_changed';
@@ -25,20 +27,26 @@ const hidden = () => document.visibilityState === 'hidden';
 export function useWalkReads(): void {
   const queryClient = useQueryClient();
   const { isConnected, addEventListener } = useSseContext();
-  const readAll = useRef<() => void>(() => undefined);
+  const readAll = useRef<(lost?: boolean) => void>(() => undefined);
 
   useEffect(() => {
     const cache = queryClient.getQueryCache();
     const owed = new Set<Query>();
-    const readOne = (query: Query) => {
+    const stale = (query: Query) => queryClient.invalidateQueries({ queryKey: query.queryKey, exact: true, refetchType: hidden() ? 'none' : 'active' });
+    const readOne = (query: Query, lost = false) => {
       if (query.state.fetchStatus !== 'idle') {
+        if (lost && query.meta?.[OVER_STREAM] === true) {
+          owed.delete(query);
+          void queryClient.cancelQueries({ queryKey: query.queryKey, exact: true }).then(() => stale(query));
+          return;
+        }
         owed.add(query);
         return;
       }
       if (query.state.data === undefined) return;
-      void queryClient.invalidateQueries({ queryKey: query.queryKey, exact: true, refetchType: hidden() ? 'none' : 'active' });
+      void stale(query);
     };
-    readAll.current = () => cache.findAll({ queryKey: [FIGURES] }).forEach(readOne);
+    readAll.current = (lost = false) => cache.findAll({ queryKey: [FIGURES] }).forEach((query) => readOne(query, lost));
     const unwatch = cache.subscribe((event) => {
       if (event.type === 'removed') owed.delete(event.query);
       if (event.type !== 'updated' || event.query.state.fetchStatus !== 'idle' || !owed.delete(event.query)) return;
@@ -66,7 +74,7 @@ export function useWalkReads(): void {
       down.current = up.current;
       return;
     }
-    if (down.current) readAll.current();
+    if (down.current) readAll.current(true);
     up.current = true;
     down.current = false;
   }, [isConnected]);

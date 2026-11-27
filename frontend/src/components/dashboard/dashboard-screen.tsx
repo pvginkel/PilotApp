@@ -22,13 +22,14 @@
 
 import { useCallback, useLayoutEffect, useRef, useState, type RefObject } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useSseContext } from '@/contexts/sse-context';
 import { ReadFailures, useDashboardView, type Failure } from '@/hooks/use-dashboard-view';
 import { ScreenInView } from '@/hooks/use-screens';
 import { keepScroll, scrollOf, useViewTabMoves, useViewTabs, useViewTabsAt, type ViewTab } from '@/hooks/use-view-tabs';
 import { useValueLabels } from '@/hooks/use-value-labels';
 import { WriteFailures } from '@/hooks/use-view-writes';
 import { useWalkReads } from '@/hooks/use-walk-reads';
-import { addressQuery, catalogueQuery, knowLabel, rowsQuery, stateOf } from '@/lib/dashboard/queries';
+import { addressQuery, catalogueQuery, knowLabel, quickFilterCountsQuery, rowsQuery, stateOf } from '@/lib/dashboard/queries';
 import { drilled, drills, valuesNamed } from '@/lib/dashboard/scope';
 import { readState, withoutLook, writeState, type ViewState } from '@/lib/dashboard/state';
 import { Banner, type Wrote } from './banner';
@@ -181,12 +182,15 @@ function useKeptScroll(id: string): RefObject<HTMLDivElement | null> {
   return main;
 }
 
-/** A tab out of sight: its view's answers held, never read, so that they stay for as long as the tab, its values' labels with them. */
+/** A tab out of sight: its view's answers held, never read, so that they stay for as long as the tab, its values' labels and its quick filters' counts with them. */
 function KeptView({ now }: { now: string }) {
   const queryClient = useQueryClient();
+  const { addEventListener } = useSseContext();
   const address = useQuery({ ...addressQuery(queryClient, now), enabled: false });
   const state = address.data === undefined ? null : readState(stateOf(address.data.address));
-  useQuery({ ...rowsQuery(state === null ? '' : withoutLook(state)), enabled: false });
+  const key = state === null ? '' : withoutLook(state);
+  useQuery({ ...rowsQuery(key), enabled: false });
+  useQuery({ ...quickFilterCountsQuery(key, addEventListener), enabled: false });
   useValueLabels(state === null ? [] : valuesNamed(state), false);
   return null;
 }

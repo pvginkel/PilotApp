@@ -11,8 +11,9 @@ export const dashboardAddress = (state: string, tab = 't1') => `#dash/${tab}/${s
  * (F162.2), Reset and Save view, its pane asking a name (F161.5), the banner under it, the main
  * area, which scrolls; the scope above the card, the drill path and its segments, each a level's
  * kind and value (F162.3), the chips, each its sign, its words and its ×, the filter picker and a
- * dimension's pane, its search, its values, Is or Is not, Filter or Mark, Add or Apply and Remove
- * (F162.4); and the view's card: the legend, the headings' row, the All row and a row per value of the By, each its label, its time where it has
+ * dimension's pane, its search, its values, Is or Is not, Filter or Mark, Add or Apply, Add as quick
+ * filter and its name, and Remove (F162.4); the quick filters' line under them, each its name, its
+ * count, its amount and its ×, and the dialog its × asks (F162.6); and the view's card: the legend, the headings' row, the All row and a row per value of the By, each its label, its time where it has
  * one, and a figure per measure; the medians, and the cut past 40 rows.
  */
 export class DashboardPage {
@@ -55,6 +56,7 @@ export class DashboardPage {
   readonly retry: Locator;
   readonly closeBanner: Locator;
   readonly main: Locator;
+  readonly scope: Locator;
   readonly path: Locator;
   readonly pathSegments: Locator;
   readonly pathKinds: Locator;
@@ -71,6 +73,11 @@ export class DashboardPage {
   readonly paneMark: Locator;
   readonly paneApply: Locator;
   readonly paneRemove: Locator;
+  readonly paneQuickFilter: Locator;
+  readonly quickFilterName: Locator;
+  readonly quickFilterSave: Locator;
+  readonly quickFilters: Locator;
+  readonly quickFilterRemoveDialog: Locator;
   readonly card: Locator;
   readonly legend: Locator;
   readonly legendValues: Locator;
@@ -125,6 +132,7 @@ export class DashboardPage {
     this.retry = page.getByTestId('dashboard.banner.retry');
     this.closeBanner = page.getByTestId('dashboard.banner.close');
     this.main = page.getByTestId('dashboard.main');
+    this.scope = page.getByTestId('dashboard.scope');
     this.path = page.getByTestId('dashboard.path');
     this.pathSegments = page.getByTestId('dashboard.path.segment');
     this.pathKinds = page.getByTestId('dashboard.path.kind');
@@ -141,6 +149,11 @@ export class DashboardPage {
     this.paneMark = page.getByTestId('dashboard.pane.mark');
     this.paneApply = page.getByTestId('dashboard.pane.apply');
     this.paneRemove = page.getByTestId('dashboard.pane.remove');
+    this.paneQuickFilter = page.getByTestId('dashboard.pane.quick-filter');
+    this.quickFilterName = page.getByTestId('dashboard.pane.quick-filter.name');
+    this.quickFilterSave = page.getByTestId('dashboard.pane.quick-filter.save');
+    this.quickFilters = page.getByTestId('dashboard.quick-filters');
+    this.quickFilterRemoveDialog = page.getByTestId('dashboard.quick-filter.remove-dialog');
     this.card = page.getByTestId('dashboard.card');
     this.legend = page.getByTestId('dashboard.legend');
     this.legendValues = page.getByTestId('dashboard.legend.value');
@@ -164,6 +177,20 @@ export class DashboardPage {
   /** A chip's words, which open its pane where it has one. */
   chipWords(chip: Locator): Locator {
     return chip.getByTestId('dashboard.chip.words');
+  }
+
+  /** The quick filter named `label` on the line: its toggle, its count, its amount and its ×. */
+  quickFilter(label: string): { item: Locator; toggle: Locator; count: Locator; amount: Locator; remove: Locator } {
+    const item = this.page
+      .getByTestId('dashboard.quick-filter')
+      .filter({ has: this.page.getByTestId('dashboard.quick-filter.label').getByText(label, { exact: true }) });
+    return {
+      item,
+      toggle: item.getByTestId('dashboard.quick-filter.toggle'),
+      count: item.getByTestId('dashboard.quick-filter.count'),
+      amount: item.getByTestId('dashboard.quick-filter.amount'),
+      remove: item.getByTestId('dashboard.quick-filter.remove'),
+    };
   }
 
   /** The picker's group of dimensions `group`, Parts or Attributes. */
@@ -235,6 +262,11 @@ export class DashboardPage {
       if (url.pathname === '/api/dashboard/rows') states.push(url.searchParams.get('state') ?? '');
     });
     return () => states;
+  }
+
+  /** The states the page asks the quick filters' counts of from the call on, each a task started; read by the answer. */
+  countsReads(): () => string[] {
+    return this.reads('/api/dashboard/counts/quick-filters');
   }
 
   /** The states the page asks the normal form of from the call on; read by the answer. */
