@@ -21,6 +21,8 @@ interface SSEProgressEvent {
     text: string;
     /** Fraction done, 0.0 to 1.0 (the backend's TaskProgressUpdate.value). */
     value: number;
+    /** What the task has answered so far, where the update carries it (TaskProgressUpdate.data). */
+    data?: Record<string, unknown> | null;
   };
 }
 
@@ -54,7 +56,7 @@ interface SSEStartedEvent {
 type SSEEvent = SSEProgressEvent | SSEResultEvent | SSEErrorEvent | SSEStartedEvent;
 
 interface UseSSETaskOptions {
-  onProgress?: (message: string, percentage?: number) => void;
+  onProgress?: (message: string, percentage?: number, data?: Record<string, unknown> | null) => void;
   onResult?: <T>(data: T) => void;
   onError?: (message: string, code?: string) => void;
 }
@@ -68,6 +70,7 @@ interface UseSSETaskReturn<T> {
   progress: {
     message: string;
     percentage?: number;
+    data?: Record<string, unknown> | null;
   } | null;
 }
 
@@ -134,7 +137,7 @@ export function useSSETask<T = unknown>(options: UseSSETaskOptions = {}): UseSSE
   const [isSubscribed, setIsSubscribed] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<T | null>(null);
-  const [progress, setProgress] = useState<{ message: string; percentage?: number } | null>(null);
+  const [progress, setProgress] = useState<{ message: string; percentage?: number; data?: Record<string, unknown> | null } | null>(null);
 
   const currentTaskIdRef = useRef<string | null>(null);
   const unsubscribeListenerRef = useRef<(() => void) | null>(null);
@@ -182,9 +185,10 @@ export function useSSETask<T = unknown>(options: UseSSETaskOptions = {}): UseSSE
           message: parsedEvent.data.text,
           // The wire value is a fraction; percentage is 0 to 100.
           percentage: parsedEvent.data.value * 100,
+          data: parsedEvent.data.data ?? null,
         };
         setProgress(progressData);
-        onProgress?.(progressData.message, progressData.percentage);
+        onProgress?.(progressData.message, progressData.percentage, progressData.data);
 
         if (isTestMode()) {
           const payload: Omit<SseTestEvent, 'timestamp'> = {
