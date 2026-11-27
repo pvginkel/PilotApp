@@ -757,6 +757,21 @@ class TestDeclareVocabularies:
         assert response.status_code == 204
         assert session.get(WorkUnitKind, "menu") is not None
 
+    def test_a_body_over_the_cap_is_413(
+        self,
+        session: DbSession,
+        app: Flask,
+        client: FlaskClient,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setitem(app.config, "MAX_CONTENT_LENGTH", 256)
+
+        with writes(session) as wrote:
+            response = self._put(client, declared())
+
+        assert response.status_code == 413
+        assert wrote == {}
+
     def test_no_other_method_is_served(self, client: FlaskClient) -> None:
         for method in ("GET", "POST", "DELETE"):
             response = client.open(
