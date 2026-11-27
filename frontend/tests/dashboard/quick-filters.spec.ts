@@ -202,14 +202,19 @@ test.describe('The quick filters', () => {
     const { first, chip } = await tally(people, projects, collection);
     await shell.open(`${projectAddress(first)}${dashboardAddress(`t=all&by=call&m=cost.sum&${chip}`)}`);
     await expectSeeded(dashboard);
+    await dashboard.newView.click();
+    await dashboard.scratch.click();
+    await expect(dashboard.lineTabs).toHaveCount(2);
     const name = makeUnique(MADE);
     const response = await page.request.post(`${backendUrl}/api/dashboard/quick-filters`, { data: { label: name, chip: 'source:chat', amount: 'cost' } });
     expect(response.status(), await response.text()).toBe(201);
-    await expect(dashboard.quickFilter(name).item).toHaveCount(0);
+    const stored = page.waitForResponse((answer) => new URL(answer.url()).searchParams.get('part') === 'stored');
 
-    await dashboard.newView.click();
-    await dashboard.scratch.click();
+    await dashboard.lineTabs.first().click();
+
+    await stored;
     await expect(dashboard.quickFilter(name).item).toHaveCount(1);
+    await expect(dashboard.panel).toHaveCount(0);
   });
 
   test('on the walk’s event reads the counts again with the rows', async ({ people, projects, collection, shell, dashboard, deploymentSse }) => {
