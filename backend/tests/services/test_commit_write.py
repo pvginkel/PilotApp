@@ -622,6 +622,50 @@ class TestReplayedAtRest:
             " file_edits 1"
         ]
 
+    def test_a_hash_it_gives_a_held_commit_is_logged_with_the_transcript(
+        self,
+        session: DbSession,
+        publications: PublicationService,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """A quiet commit is held with no hash; a later call shows it, which
+        the file read whole gives the commit: the hashless row goes and the
+        commit with its hash takes its place."""
+        quiet = _commit_call(1, commits=[commit(sha=None)])
+        publications.publish(_camp(calls=[call(1, tool_calls=[quiet])]))
+        publications.publish(
+            appended(
+                call=2,
+                repository="RecipeBox",
+                calls=[call(2, tool_calls=[_edit_call(2)])],
+            )
+        )
+
+        with caplog.at_level(logging.WARNING, "app.services.publication_service"):
+            publications.publish(
+                _camp(
+                    file_size=61_000,
+                    file_modified_at=(STARTED + timedelta(minutes=30)).isoformat(),
+                    calls=[
+                        call(1, tool_calls=[_commit_call(1)]),
+                        call(2, tool_calls=[_edit_call(2)]),
+                    ],
+                )
+            )
+
+        assert [
+            record.getMessage()
+            for record in caplog.records
+            if record.name == "app.services.publication_service"
+        ] == [
+            f"The replay at rest of transcript {CAMP}, 12888 of its 61000 bytes"
+            " taken in parts, wrote rows that differ from what Pilot held:"
+            " commits 2"
+        ]
+        assert _commits(session) == [
+            ("RecipeBox", "3f9a2c1", SUBJECT, "toolu_0001", None)
+        ]
+
 
 class TestClaimed:
     """A Commit is made by one Tool Call once (DB 577): a commit whose hash
