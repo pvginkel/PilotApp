@@ -22,7 +22,7 @@ import { useViewWords } from '@/hooks/use-view-words';
 import { useQuickFilterWrites } from '@/hooks/use-view-writes';
 import { figure, whole } from '@/lib/dashboard/figures';
 import { catalogueQuery, quickFilterCountsQuery, type QuickFilter } from '@/lib/dashboard/queries';
-import { chipDoes, chipText, chipWords, type LabelOf } from '@/lib/dashboard/scope';
+import { chipDoes, chipText, chipWords, QUICK_FILTER_NAME_LENGTH, type LabelOf } from '@/lib/dashboard/scope';
 import { chipKey, chipOf, type Chip, type ViewState } from '@/lib/dashboard/state';
 import { cn } from '@/lib/utils';
 
@@ -113,9 +113,6 @@ export function QuickFilters({ state, scope, label, onState }: QuickFiltersProps
   );
 }
 
-/** The longest name a quick filter takes (`backend/app/schemas/dashboard_store.py`, `NAME`). */
-const NAME_LENGTH = 60;
-
 interface QuickFilterNameProps {
   name: string;
   /** Whether the pane has a chip to keep. */
@@ -141,7 +138,7 @@ export function QuickFilterName({ name, ready, chip, onName, onBack, onSaved }: 
         type="text"
         className="field grow"
         value={name}
-        maxLength={NAME_LENGTH}
+        maxLength={QUICK_FILTER_NAME_LENGTH}
         placeholder="The quick filter’s name"
         aria-label="The quick filter’s name"
         autoFocus

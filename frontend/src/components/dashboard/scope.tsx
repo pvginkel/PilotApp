@@ -31,7 +31,7 @@ import { useViewWords } from '@/hooks/use-view-words';
 import { dimensionLabel } from '@/lib/dashboard/describe';
 import { figure, whole } from '@/lib/dashboard/figures';
 import { catalogueQuery, knowLabel, valuesQuery, valueText } from '@/lib/dashboard/queries';
-import { chipDoes, chipText, chipWords, pathWords, upTo, type LabelOf } from '@/lib/dashboard/scope';
+import { chipDoes, chipText, chipWords, pathWords, quickFilterName, upTo, type LabelOf } from '@/lib/dashboard/scope';
 import type { Chip, ViewState } from '@/lib/dashboard/state';
 import { cn } from '@/lib/utils';
 import { useDebouncedValue } from '@/lib/utils/debounce';
@@ -413,7 +413,7 @@ function ValuePane({ dimension, chip, scope, label, onDone, onClose, onRemove, f
               type="button"
               className="btn btn-sm"
               disabled={picked.length === 0}
-              onClick={() => setNaming(chipText(chipWords(built(), named, words)))}
+              onClick={() => setNaming(quickFilterName(chipText(chipWords(built(), named, words))))}
               title="Keep it as a quick filter, for everyone: a press on it turns it on, with no chip added"
               data-testid="dashboard.pane.quick-filter"
             >

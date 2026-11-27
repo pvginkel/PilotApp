@@ -292,4 +292,31 @@ test.describe('The quick filters', () => {
 
     await expectSeeded(dashboard);
   });
+
+  test('“Add as quick filter” fills a name past the 60 characters a name takes cut to them, which Save takes', async ({ page, people, projects, collection, shell, dashboard }) => {
+    const { first, chip } = await tally(people, projects, collection);
+    await shell.open(`${projectAddress(first)}${dashboardAddress(`t=all&by=call&m=cost.sum&${chip}`)}`);
+    await expectSeeded(dashboard);
+    await dashboard.addFilter.click();
+    await dashboard.filterGroup('Parts').getByText('Pilot session', { exact: true }).click();
+    for (const value of ['#2 Tidy the ride notes', '#2 Sort the spices', 'Project chat']) await dashboard.paneValue(value).getByRole('checkbox').check();
+
+    await dashboard.paneQuickFilter.click();
+
+    const name = await dashboard.quickFilterName.inputValue();
+    expect(name).toMatch(/^Pilot session: .*…$/);
+    expect(Array.from(name).length).toBeLessThanOrEqual(60);
+    const made = page.waitForResponse((response) => isMade(response.request()));
+    await dashboard.quickFilterSave.click();
+    expect((await made).status()).toBe(201);
+    await expect(toast(page)).toContainText(`Added the quick filter "${name}" for everyone`);
+    await expect(dashboard.banner).toHaveCount(0);
+
+    const filter = dashboard.quickFilter(name);
+    await filter.item.hover();
+    await filter.remove.click();
+    await dashboard.quickFilterRemoveDialog.getByTestId('dashboard.quick-filter.remove-dialog.confirm').click();
+    await expect(filter.item).toHaveCount(0);
+  });
 });
+

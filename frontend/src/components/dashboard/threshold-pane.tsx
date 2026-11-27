@@ -13,7 +13,7 @@ import { useEffect, useRef, useState } from 'react';
 import { ArrowLeft, Diamond, Filter } from 'lucide-react';
 import { useViewWords } from '@/hooks/use-view-words';
 import { measureWords } from '@/lib/dashboard/describe';
-import { chipText, chipWords, eachOf } from '@/lib/dashboard/scope';
+import { chipText, chipWords, eachOf, quickFilterName } from '@/lib/dashboard/scope';
 import type { Chip, ViewState } from '@/lib/dashboard/state';
 import { QuickFilterName } from './quick-filters';
 import { Segmented } from './segmented';
@@ -179,7 +179,7 @@ export function ThresholdPane({ measure, chip, onDone, onClose, onBack, onRemove
               type="button"
               className="btn btn-sm"
               disabled={number === null}
-              onClick={() => setNaming(chipText(chipWords(built()!, () => '', words)))}
+              onClick={() => setNaming(quickFilterName(chipText(chipWords(built()!, () => '', words))))}
               title="Keep it as a quick filter, for everyone: a press on it turns it on, with no chip added"
               data-testid="dashboard.threshold.quick-filter"
             >

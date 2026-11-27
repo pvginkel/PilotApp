@@ -194,6 +194,15 @@ export function chipText({ on, not, what, more }: ChipWords): string {
   return `${on}${not ? ` ${not}` : ''}${what}${more ? `, ${more}` : ''}`;
 }
 
+/** The longest name a quick filter takes (`backend/app/schemas/dashboard_store.py`, `NAME`). */
+export const QUICK_FILTER_NAME_LENGTH = 60;
+
+/** A quick filter's name filled with its chip's words: within the length the server takes, cut with … where they run past it. */
+export function quickFilterName(words: string): string {
+  const letters = Array.from(words);
+  return letters.length <= QUICK_FILTER_NAME_LENGTH ? words : `${letters.slice(0, QUICK_FILTER_NAME_LENGTH - 1).join('').trimEnd()}…`;
+}
+
 /** What a chip does, for its tooltip. */
 export function chipDoes(chip: Chip): string {
   switch (chip.kind) {
