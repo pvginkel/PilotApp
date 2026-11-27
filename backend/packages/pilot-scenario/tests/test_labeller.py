@@ -89,20 +89,30 @@ def _ids(content: bytes) -> list[str]:
     return list(ids)
 
 
-def _item(path: str, content: bytes, agent: str | None = None) -> dict[str, Any]:
+def _item(
+    path: str,
+    content: bytes,
+    agent: str | None = None,
+    launches: dict[str, int] | None = None,
+) -> dict[str, Any]:
     """A transcript as a collector hands it to be labelled whole: a main
-    thread's Calls all in one Launch."""
+    thread's Calls in the Launch `launches` gives each by its id, else all
+    in one Launch."""
     calls: list[dict[str, Any]] = [
         {"id": each, "position": n} for n, each in enumerate(_ids(content), start=1)
     ]
     if agent is not None:
         return {"agent_id": agent, "path": path, "mode": "whole", "calls": calls}
+    of = launches or {}
     return {
         "agent_id": None,
         "path": path,
         "mode": "whole",
-        "launches": [{"n": 1, "started_at": "2026-11-12T09:00:00Z"}],
-        "calls": [call | {"launch": 1} for call in calls],
+        "launches": [
+            {"n": n, "started_at": f"2026-11-12T{8 + n:02d}:00:00Z"}
+            for n in sorted({1, *of.values()})
+        ],
+        "calls": [call | {"launch": of.get(call["id"], 1)} for call in calls],
     }
 
 
@@ -783,10 +793,14 @@ def _file(*lines: dict[str, Any]) -> bytes:
     return b"".join(json.dumps(line).encode() + b"\n" for line in lines)
 
 
-def _whole(content: bytes, records: dict[str, Any] | None = None) -> dict[str, Any]:
+def _whole(
+    content: bytes,
+    records: dict[str, Any] | None = None,
+    launches: dict[str, int] | None = None,
+) -> dict[str, Any]:
     return labeller.label(
         content,
-        _item("t.jsonl", content),
+        _item("t.jsonl", content, launches=launches),
         {"session_id": RIDES},
         frozenset(),
         records or {},
@@ -798,10 +812,11 @@ def _appended(
     held: dict[str, Any],
     records: dict[str, Any] | None = None,
     version: str = labeller.VERSION,
+    launches: dict[str, int] | None = None,
 ) -> dict[str, Any]:
     """The labels of `content` from the boundary and checkpoint of the
     answer `held`."""
-    handed = _item("t.jsonl", content)
+    handed = _item("t.jsonl", content, launches=launches)
     calls = [call["id"] for call in handed["calls"]]
     start = calls.index(held["boundary"]["call"])
     item = handed | {
@@ -907,6 +922,44 @@ class TestAppendedLabelling:
         for cut in cuts:
             before = _whole(content[:cut])
             after = _appended(content, before)
+
+            assert after["answer"] == "labels", (cut, after)
+            merged = _merged(before, after)
+            for name in ("calls", "segments", "events", "context_parts"):
+                assert merged[name] == whole["labels"][name], (cut, name)
+            assert (after["boundary"], after["stamp"]) == (
+                whole["boundary"],
+                whole["stamp"],
+            )
+
+    def test_a_later_launch_is_labelled_so_at_every_cut_and_appended(self) -> None:
+        """A main thread's first Call of a later Launch is woken by the
+        return, takes the recipe card the prompt before it carries, and
+        closes a background stretch an earlier Launch opened; labelled at
+        every cut and appended from its boundary, it is the whole."""
+        card = "# Recipe card — stew\n\n## Pot (four)\nHalve it.\n"
+        content = _file(
+            _said(card),
+            _asked("m1", _tool("t1", "Bash", command="x", run_in_background=True)),
+            _result("t1"),
+            _asked("m2"),
+            _said(card),
+            _asked("m3"),
+        )
+        launches = {"m3": 2}
+
+        whole = _whole(content, launches=launches)
+
+        causes = {call["id"]: call["wait_cause"] for call in whole["labels"]["calls"]}
+        assert causes["m3"] == "return"
+        assert [part["call"] for part in whole["labels"]["context_parts"]] == [
+            "m1",
+            "m3",
+        ]
+        assert whole["boundary"]["call"] == "m3"
+        for cut in _cuts(content):
+            before = _whole(content[:cut], launches=launches)
+            after = _appended(content, before, launches=launches)
 
             assert after["answer"] == "labels", (cut, after)
             merged = _merged(before, after)
