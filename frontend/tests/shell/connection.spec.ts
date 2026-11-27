@@ -228,10 +228,23 @@ test.describe('A dropped connection', () => {
     const standing = await deploymentSse.ensureConnected();
     const moments = await watchConnection(page);
 
-    // Three heartbeats, more than two beats apart, with no other event: the stream stands.
-    getTestEventBuffer(page).clear();
+    // Three heartbeats, more than two beats apart: the stream stands. The server beats once the
+    // stream has been idle a beat, so any other frame puts the next beat back, such as the event a
+    // session another spec left starting sends everyone when its start fails: each beat is timed
+    // from the frame the page heard before it, on the page's clock, which stamps the events.
+    const buffer = getTestEventBuffer(page);
+    buffer.clear();
+    let before = Date.parse(await page.evaluate(() => new Date().toISOString()));
     for (let beat = 0; beat < 3; beat++) {
-      await waitForSseEvent(page, { streamId: 'connection', phase: 'message', event: 'heartbeat', timeoutMs: 8_000 });
+      await waitForSseEvent(page, { streamId: 'connection', phase: 'message', event: 'heartbeat', timeoutMs: 20_000 });
+    }
+    for (const frame of buffer.snapshot(0).events) {
+      if (frame.kind !== 'sse' || frame.phase !== 'message') continue;
+      const at = Date.parse(frame.timestamp);
+      if (frame.streamId === 'connection' && frame.event === 'heartbeat') {
+        expect(at - before, 'a beat at most 8 s after the frame before it').toBeLessThan(8_000);
+      }
+      before = at;
     }
     expect(await moments()).toHaveLength(1);
     expect(await deploymentSse.getStatus()).toEqual(standing);
