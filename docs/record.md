@@ -81,6 +81,8 @@ models in `backend/app/models/` and the Alembic revisions in `backend/alembic/ve
   latest save with its session; a registered document has no published text until its file is read,
   and none after a failed read.
   `writing_session_id` with `writing_since` is the session whose turn is writing it.
+  `ask_category_code`, a label, the labeller's, is the category of the asks it puts
+  ([`collection.md`](collection.md#the-labels)).
 - `document_versions`: a published text fixed, numbered from 1 per document, with its cause
   (`born`, `registered`, `turn`, `done`) and the session it is of, if any.
 - `blocks`: an ask inside a document, unique by document and `local_id`, with what its text says:
@@ -296,12 +298,18 @@ reaches a person or a member from
   conversation holds it, emptied when that Tool Call goes; a main thread has none of them
   (`ck_transcripts_main_thread`). `working_directory`, `repository_id`, and on a main thread alone
   `environment_id` (`ck_transcripts_environment`) and `adopted_project_id`, the adopted project of
-  the group its last publication named, none where it named none
+  the group its last labelling named, none where it named none
   (`ck_transcripts_adopted_project`). `file_size`, `file_modified_at`, `collected_at`, the server's
   time, and `read_under_id`, the collector's Component Version, are its last publication's;
   `replayed_size`, `bigint` as `file_size` is, the file's size at its last whole one, at most
-  `file_size` (`ck_transcripts_replayed_size`). `first_call_at` and `last_call_at`, caches, are the
-  `completed_at` of its first and its last Call by `position`, both none while it has no Call.
+  `file_size` (`ck_transcripts_replayed_size`). `labelled_under_id` is the labeller's own version
+  that wrote its labels, held whole, a Component Version of the Component `labeller`, and
+  `records_stamp` the stamp the labeller handed back with them, of all it read for them besides the
+  file; a publication with no labelling keeps the version and leaves no stamp, and a stamp has a
+  version (`ck_transcripts_records_stamp`) ([`collection.md`](collection.md#the-labels)). No key
+  holds `read_under_id` or `labelled_under_id` to its Component: the publication's write names it.
+  `first_call_at` and `last_call_at`, caches, are the `completed_at` of its first and its last Call
+  by `position`, both none while it has no Call.
 - `launches`: a run of Claude Code on a main thread, as its transcript's file shows it, from the
   file's first line with a time, the first such line after a cost line, or where a line names
   another version of Claude Code than the run's
@@ -311,7 +319,8 @@ reaches a person or a member from
   of that Session by its key, never without the Session (`ck_launches_turn`), each set by the
   placement ([`collection.md`](collection.md#a-launch-of-pilots)), once for a Launch a Turn
   started. `sessions.conversation_id` is
-  indexed for it (`ix_sessions_conversation_id`).
+  indexed for it (`ix_sessions_conversation_id`). Its label is `work_unit_id`, the lowest Work Unit
+  it carried out.
 - `component_versions`: a released version of one Component, unique by both, with `released_at`;
   `launch_components`: one Launch's use of one, one version of each Component a Launch
   (`launch_id`, `component_code` unique).
@@ -332,7 +341,10 @@ reaches a person or a member from
   `output_tokens`; `context_tokens`, the sum of the input and cache kinds', a generated column
   PostgreSQL stores; and the caches the publication derives ([below](#the-caches)): `cost`,
   `waited_seconds`, `rewind`, `cache_miss`, `past_ttl` and `launch_id`, the Launch it was made in,
-  set null when that Launch goes (`ix_calls_launch_id`).
+  set null when that Launch goes (`ix_calls_launch_id`). Its labels are `wait_cause_code`,
+  `call_class_code`, `avoidable_kind_code` and `segment_position`, the Segment it falls in by that
+  Segment's place, under a key to `segments (transcript_id, position)` checked at each statement, so
+  that a Segment a Call names cannot go.
 - `prices`: a rate in US dollars per million tokens for one Model and one Token Kind nothing is
   within (`ck_prices_kind`), from `effective_at` on, with `above_context`, the context size in
   tokens from which it applies, none for the base rate; unique by the four, a none counting as a
@@ -342,17 +354,89 @@ reaches a person or a member from
   Transcript, its `tool_use_id` unique in it: `tool_code`, `first_argument`, `requested_at`,
   `returned_at`, `failed`, `exit_code` where it was not 0 (`ck_tool_calls_exit_code`),
   `interrupted`, `denial_kind_code`, `hook` only on a failed call
-  (`ck_tool_calls_denied_by_hook`), `result_characters` and `saved_characters`.
+  (`ck_tool_calls_denied_by_hook`), `result_characters` and `saved_characters`. Its labels are
+  `command_class_code`, `effect_kind_code` and `effect_subject`, the id of what that change touched,
+  a card's or a fieldnote's, only with a kind (`ck_tool_calls_effect_subject`).
 - `events`: an occurrence on a Call at one moment that no other table records, `kind_code`, `at`
   and `detail`, never of the ten kinds a Compaction, a Call, a Tool Call or a Hook Run records
   (`RECORDED_ELSEWHERE`, `ck_events_kind`); `context_parts`: a part of what a Call carried that no
-  earlier Call of its Launch did, `kind_code`, `name` and `characters`.
+  earlier Call of its Launch did, `kind_code`, `name` and `characters`. On both, `labelled` says
+  whether the row is a label the labeller gave rather than one the collector read off the file,
+  false by default, so that the collector's rows and the labeller's stand apart under one Call.
 - `repositories`: a git repository the fleet works in, by the unique `name` of its checkout.
 - `walks`: a walk of the collector's over the fleet's home, `ended_at` when the server took its
   end, the latest 20 kept ([`collection.md`](collection.md#a-walks-end)).
 
 A Launch's delete takes its versions and Prompts, a Prompt's its Hook Runs, a Call's its Tool
-Calls, Events and Context Parts; nothing follows a Transcript's, which no publication deletes.
+Calls, Events and Context Parts, and a Tool Call's its Rule Breaches, Test Runs, CI Waits and File
+Edits (below); nothing follows a Transcript's, which no publication deletes.
+
+**The labels** ([`collection.md`](collection.md#the-labels)), the workflow's labeller's: what it
+recognised in a Transcript and in the run records. A Work Unit, a Test Suite, a Test and a CI Build
+are written by their keys and stay at a relabel, since no one Transcript's labels own them; every
+other row here, and each label column above, is a label of one Transcript's, replaced with its
+labels.
+
+- `work_units`: a piece of work at any level the Work Unit Kinds declare, by the labeller's unique
+  `key`, the same at every relabel: `kind_code`, `title`, `variant`, `role`, `round` (1 or more,
+  `ck_work_units_round`), `outcome_code`, `rework_kind_code`, `started_at`, `ended_at`, `card`, and
+  `occasioned_by_id`, the unit it was done for. `part_of_id` is the unit it sits in, beside
+  `part_of_kind_code`, that unit's kind, set together (`ck_work_units_part_of`): the key to
+  `work_units (id, kind_code)` cascades a kind the outer unit takes, and the key to
+  `work_unit_kind_nestings (inner_code, outer_code)` lets a unit sit only where a nesting pairs the
+  two kinds, both deferrable so that a write that gives units other kinds checks them once its units
+  stand. No unit is part of or occasioned by itself (`ck_work_units_not_itself`); through others,
+  the writer's to keep.
+- `work_unit_measures`: a figure the labeller read for one Work Unit, of one Unit Measure, its
+  `amount` `numeric` in that measure's unit, the unit and the measure the key; written with its
+  unit.
+- `segments`: a stretch of one Transcript classified by what it was doing, `kind_code`, at
+  `position` among the Transcript's Segments from 1 (`ck_segments_position`), unique in it, which
+  its Calls name; that the positions run 1 to their number and cover the Calls in order is the
+  writer's.
+- `rule_breaches`: one Rule a Tool Call broke, the two the key, deleted with the Tool Call.
+- `test_suites`: a suite of tests a project can run, by the labeller's unique `code`, with its
+  `name`; `tests`: a test case, its `name` unique in its suite.
+- `test_runs`: a run of one Test Suite on one tree by exactly one of a Tool Call, a Work Unit and a
+  CI Build (`ck_test_runs_runner`): `started_at`, `ended_at`, `passed`, `tests` and
+  `retries_allowed`, how often a failing test is tried again, neither negative
+  (`ck_test_runs_counts`). `transcript_id` is the Transcript whose labels carry it, on every run: a
+  Tool Call's run its Tool Call's, held by the key to `tool_calls (transcript_id, id)`, which takes
+  the run with the Tool Call, and a Work Unit's the Transcript whose labels gave it
+  (`ix_test_runs_transcript_id_tool_call_id`).
+- `test_failures`: a Test that failed at least one attempt in one Test Run, `attempts` (1 or more,
+  `ck_test_failures_attempts`) and `flaky`, whether a later attempt passed; it carries its run's
+  `suite_id`, so that two keys hold its Test to that suite, and goes with its run.
+- `ci_builds`: a Jenkins build a Tool Call waited on, or a pipeline it triggered that the wait
+  followed, unique by `job` and `number` (1 or more, `ck_ci_builds_number`): `commit_sha`, the hash
+  the wait's command named, `queued_at`, `started_at`, `ended_at`, `result_code` and `deployed_at`,
+  when the deploy it triggered finished; `ci_waits`: one Tool Call's wait on one CI Build, the two
+  the key, deleted with the Tool Call.
+
+**The commits and the files** ([`collection.md`](collection.md#commits-and-file-edits)), the work
+a Tool Call did in a Repository, as its call showed it and as the Repository's history gives it
+
+- `commits`: a git commit in a Repository, one a Tool Call made, `tool_call_id`, or one no
+  Transcript made, which the Repository's history alone gives: `subject`; `sha`, the hash as the
+  call showed it, abbreviated or whole, or none, until the Repository gives it whole, unique in its
+  Repository; and `made_at`, its author's time, and `lines_read_at`, when its File Changes were
+  read, set together and only with a hash (`ck_commits_read`)
+  ([`collection.md`](collection.md#a-repositorys-commits)). A Commit has a Tool Call or a
+  `lines_read_at` (`ck_commits_source`): the key sets a read one's `tool_call_id` none when its
+  Tool Call goes, and the publication deletes one no read completed first, finding a Tool Call's
+  through `ix_commits_tool_call_id`.
+- `files`: a file in a Repository by its `path` within the checkout, unique in it, made the first
+  time a File Edit or a File Change names it and never removed; a file that moved is two. Its label
+  is `class_code`, its File Class, none until it is classed
+  ([`collection.md`](collection.md#the-files-classes)); `ix_files_unclassed`, a partial index over
+  the Files with none, serves the walk's read of those that wait.
+- `file_changes`: a change one Commit made to one File, `lines_added` and `lines_removed`, neither
+  negative (`ck_file_changes_lines`), deleted with its Commit; it carries `repository_id`, under keys
+  to `commits (id, repository_id)` and `files (id, repository_id)`, so that its Commit and its File
+  are of one Repository.
+- `file_edits`: an edit of one File by one Tool Call, a successful Edit or Write, `lines_added` and
+  `lines_removed`, neither negative (`ck_file_edits_lines`), the two the key, deleted with the Tool
+  Call. Its File may be of another Repository than its Transcript's.
 
 **The waits** ([`waits.md`](waits.md))
 
@@ -481,6 +565,27 @@ Prices one with none of its own takes; the price file's load writes a model it n
 `event_kinds` (with `is_error`) and `context_part_kinds`. So is `step_kinds`, a step's kind, whose
 row a `set_progress` or `seed_step_timings` call writes when it first names the kind
 ([`mcp.md`](mcp.md)).
+
+The labeller's lists are tables too, sixteen, and no revision writes them either: the labeller
+declares them, through the collector, by `PUT /api/collector/vocabularies`
+([`collection.md`](collection.md#the-labellers-vocabularies)), so that Pilot's code names none of
+their values. Fourteen are its own: `work_unit_kinds`, `unit_outcomes`, `rework_kinds`,
+`unit_measures` (with `unit`, what it counts), `segment_kinds`, `wait_causes`, `call_classes`,
+`avoidable_kinds`, `command_classes`, `build_results`, `file_classes` (with `counted`, whether its
+Files count in the figures), `tool_effect_kinds`, `rules` (with `home`, the file that states the
+rule) and `ask_categories`. Each value is its `code`, `name`, `description`, the line that says
+what it is, and `position`, its place in its list from 1 (`ck_<table>_position`), unique in the
+table and checked at the commit (`uq_<table>_position`), so that a declaration reorders a list in
+its transaction; PostgreSQL takes no deferrable constraint as an `ON CONFLICT` arbiter, so an insert
+into these tables names `code`. The other two, `event_kinds` and `context_part_kinds`, hold the
+labeller's values beside the collector's: a value the labeller declares carries a `description`
+and a `position`, one the collector alone met neither, and a value with a place has a line
+(`ck_event_kinds_described`, `ck_context_part_kinds_described`). A value the labeller no longer
+declares is removed where no row names it and kept with no `position` while one does.
+`work_unit_kind_nestings`, `inner_code` and `outer_code`, both Work Unit Kinds and the key, is a
+pairing the labeller declares, units of the inner kind sitting in units of the outer; one no longer
+declared goes by the same rule, before the values do, so that a kind whose last nesting goes can go
+with it.
 
 ## The caches
 

@@ -1,25 +1,33 @@
 # The collection
 
 Pilot's record holds the facts of the Claude Code transcripts on the fleet's home, a main thread's
-and a sub-agent's alike, as a collector reads them off their files and publishes them, one
-transcript a call. The collector is a component of Pilot's own, a pod beside each stage's fleet's
-home that walks it every 30 s ([`collector.md`](collector.md)). It calls one door of Pilot's, under a
-bearer of its own; what it publishes lands in the tables of [`record.md`](record.md#the-tables),
-and a group of work done before Pilot that a transcript's label names stands in the record as an
-adopted project. Nothing of a transcript's text is published: its facts alone, its sizes, times,
-counts and codes. Its text is the collector's to serve, to Pilot's backend alone, as the
-conversation's reading ([`collector.md`](collector.md#the-reading)).
+and a sub-agent's alike, and the workflow's labels of them, as a collector reads the facts off their
+files, has the workflow's labeller label them, and publishes both, one transcript a call. The
+collector is a component of Pilot's own, a pod beside each stage's fleet's home that walks it every
+30 s ([`collector.md`](collector.md)). It calls one door of Pilot's, under a bearer of its own; what
+it publishes lands in the tables of [`record.md`](record.md#the-tables), a group of work done before
+Pilot that a transcript's labels name stands in the record as an adopted project, and a commit a
+call made gains its lines from its repository's history. Nothing of a transcript's text is
+published: its facts and its labels alone, its sizes, times, counts and codes. Its text is the
+collector's to serve, to Pilot's backend alone, as the conversation's reading
+([`collector.md`](collector.md#the-reading)). Pilot's code names none of the labeller's values: the
+labeller declares its lists, and Pilot stores them as they come.
 No key of those tables reaches a person or a project's members, so a conversation is open to
 everyone signed in, the operator's own sessions included.
 
 ## The door
 
-The collector's routes are three, under `/api/collector` (`backend/app/api/collector.py`):
+The collector's routes are eight, under `/api/collector` (`backend/app/api/collector.py`):
 
 - **`GET /api/collector/inventory`**, what Pilot holds, which a walk asks for as it starts
   ([below](#the-inventory));
 - **`POST /api/collector/publications`**, one transcript's publication, written in the request's
   transaction (`PublicationService.publish` in `backend/app/services/publication_service.py`);
+- **`PUT /api/collector/vocabularies`**, the labeller's lists ([below](#the-labellers-vocabularies));
+- **`GET /api/collector/repositories`** and **`POST /api/collector/commits`**, the cursor of the
+  repositories' histories and one read of them ([below](#a-repositorys-commits));
+- **`GET /api/collector/files`** and **`PUT /api/collector/classes`**, the Files and the classes the
+  labeller gives them ([below](#the-files-classes));
 - **`POST /api/collector/walks`**, a walk's end, which a walk tells after its last publication
   ([below](#a-walks-end)).
 
@@ -30,13 +38,15 @@ passes `PublicationService.admit` first, the blueprint's `before_request`:
 - **The bearer.** `Authorization: Bearer <token>`, the setting `COLLECTOR_TOKEN`, compared in
   constant time. While the setting is empty every call is refused.
 - **The protocol version.** The call names the version it speaks in `X-Pilot-Collector-Protocol`;
-  the server takes `COLLECTOR_PROTOCOL_MIN` to `COLLECTOR_PROTOCOL_MAX`, version 1 alone today. A
-  change to a request or response shape of the collector's routes bumps the maximum, and the
-  minimum with it where the server cannot serve the old collector.
+  the server takes `COLLECTOR_PROTOCOL_MIN` to `COLLECTOR_PROTOCOL_MAX`, 1 to 2 today, and the
+  collector speaks 2. A collector of version 1 sends no labelling, which the server takes as a call
+  with none. A change to a request or response shape of the collector's routes bumps the maximum,
+  and the minimum with it where the server cannot serve the old collector.
 
 The bearer is asked for before the version, and both before the body is read. Past them the
-inventory answers `200` and a walk's end `204`, with no other answer. A publication's answer is the
-call's outcome, and every answer but `204` leaves the record as it was:
+inventory and the repositories answer `200` and a walk's end `204`, with no other answer. A call
+that writes, a publication, a declaration, a read or a classing, is one transaction, its answer the
+call's outcome, and every answer but `204` leaves the record as it was. A publication's are:
 
 | Answer | When | Then |
 |---|---|---|
@@ -44,7 +54,7 @@ call's outcome, and every answer but `204` leaves the record as it was:
 | `401` | the call does not carry the bearer, and every call while `COLLECTOR_TOKEN` is empty | no call of the collector's is taken until its bearer is the server's |
 | `426` `{min, max}` | the version is outside the range, or the call names none | no call is taken until the collector speaks a version in the range |
 | `400` | the call does not validate, every fault named at once | the same call is refused again; the collector's other transcripts are not |
-| `409` `PUBLICATION_NOT_APPENDABLE` | an appended call does not continue what Pilot holds (below), the reasons in `error` | the collector publishes the transcript whole |
+| `409` `PUBLICATION_NOT_APPENDABLE` | an appended call does not continue what Pilot holds, its facts or its labels (below), the reasons in `error` | the collector publishes the transcript whole |
 | `409` `TRANSCRIPT_NOT_ADOPTABLE` | the call names a `group` for a transcript a Session of Pilot's ran (below) | the same call is refused again, and the call without its `group` is taken |
 | `409` `NO_SERVICE_USER` | the call names a `group` no project holds yet, and the stage has no service user to make its project | the same call is taken once the stage has one |
 | `413` | the body is over `MAX_UPLOAD_SIZE_MB`, the app's cap on every request, 50 by default | the same call is refused again |
@@ -64,16 +74,32 @@ server's log line (below).
 ## The inventory
 
 **`GET /api/collector/inventory`** answers `200` `{walk_interval_seconds, settling_seconds,
-transcripts}`, in protocol version 1 (`InventorySchema` in `pilot_collection.inventory`,
-`PublicationService.inventory`). It is every transcript Pilot holds, whole at every call, in one
-read, ordered by `session_id`, a main thread before its sub-agents'. Each transcript is
-`{session_id, agent_id, file_size, file_modified_at, replayed_size, collector}`. `agent_id` is null
-on a main thread. `file_size`, `file_modified_at` and `collector`, the version's string, are its
-last publication's, which an appended call's `builds_on` names. `file_modified_at` is as Pilot holds
-it, to the microsecond. A transcript the home has and the inventory lacks, or holds at another size,
-time or version, is one for the collector to publish. One whose `replayed_size` is short of its
-`file_size`, its file unchanged for `settling_seconds`, is due its replay at rest, a whole
-publication once ([`collector.md`](collector.md#the-walk)). The inventory names no `collected_at`.
+transcripts, conversations}` (`InventorySchema` in `pilot_collection.inventory`,
+`PublicationService.inventory`), whole at every call. `transcripts` is every transcript Pilot
+holds, in one read, ordered by `session_id`, a main thread before its sub-agents'. Each transcript is
+`{session_id, agent_id, file_size, file_modified_at, replayed_size, collector, labeller, stamp}`.
+`agent_id` is null on a main thread. `file_size`, `file_modified_at` and `collector`, the version's
+string, are its last publication's, which an appended call's `builds_on` names. `file_modified_at`
+is as Pilot holds it, to the microsecond. `labeller` is the labeller's version its labels were
+written under, none while no labelling was published for it, and `stamp` the stamp handed back with
+them, none where its last publication carried no labelling ([below](#the-labels)). A transcript the
+home has and the inventory lacks, or holds at another size, time or version, is one for the
+collector to publish. One whose `replayed_size` is short of its `file_size`, its file unchanged for
+`settling_seconds`, is due its replay at rest, a whole publication once
+([`collector.md`](collector.md#the-walk)). The inventory names no `collected_at`.
+
+`conversations` is what the labeller is handed with each conversation a Session of Pilot's ran,
+collected or not, by `session_id` (`backend/app/services/labeller_context.py`): `{session_id,
+sessions, documents}`. Its Sessions come in `created_at` order, each `{id, kind, created_at, brief,
+repo, clarification, holds, turns}`: `brief` is the first 400 characters of its first Turn no person
+wrote, `repo` its Work's repository, else its project's, `clarification` whether its Work is a
+clarification run, `holds` its Holds `{kind, started_at, ended_at}` in the order they started, and
+`turns` its Turns `{started_at, cause}` in the order sent. Its Documents, `{id, session,
+source_path}`, in the order they were made, are the prose items' documents its Sessions created; a
+project's draft, handbook and journal are not handed. The labeller's stamp covers what is handed and
+its order, so every list is present at every walk, empty where Pilot holds nothing, and each is read
+in an order its rows' own columns fix. A conversation that only a step names, and that no Session of
+Pilot's ran, is not handed. The inventory's read is five statements however much the record holds.
 
 ## A walk's end
 
@@ -112,11 +138,13 @@ Code's `session_id` of its main thread and, on a sub-agent's thread, its `agent_
 size and time; the collector's version that read it; the directory it was first launched in, the
 name of the checkout that holds it, and on a main thread the id of the environment it ran in,
 each where the file shows it; a sub-agent's `agent_type`, `description` and `spawned_by`, the
-`tool_use_id` of the call that started it; a main thread's `group`; then its Launches with the
-versions each ran with and the Prompts each received with their Hook Runs, its Compactions, and
-its Calls, each with its five token counts, its Tool Calls, its Events and its Context Parts, all
-in the file's order. Every model refuses a field it does not know, a time names its offset, and a
-file's size is at most 2^53 - 1, the largest integer every JSON reader takes exactly.
+`tool_use_id` of the call that started it; its `labelling`, the labeller's labels of it, and with
+it a main thread's `group` ([below](#the-labels)); then its Launches with the versions each ran with
+and the Prompts each received with their Hook Runs, its Compactions, and its Calls, each with its
+five token counts, its Tool Calls, each with the commits it made and the files it edited
+([below](#commits-and-file-edits)), its Events and its Context Parts, all in the file's order. Every
+model refuses a field it does not know, a time names its offset, and a file's size is at most
+2^53 - 1, the largest integer every JSON reader takes exactly.
 
 A row is named by what the file names it by: a Call by its `message_id`, its `predecessor` by that
 Call's, a Tool Call by its `tool_use_id`, and a Prompt and a Compaction a Call follows by their
@@ -134,8 +162,9 @@ Context Parts, a Launch past the call's last with its versions, Prompts and Hook
 other row past the last under its parent. Pilot follows the file, a rewritten one included, and
 a whole call that loses Calls is logged at `WARNING`, "Transcript <session_id>[/<agent_id>] no
 longer has <n> of the calls Pilot held". No call removes a Transcript, an Environment, a
-Repository, a Component Version or a reference code: a transcript whose file is gone from the home
-stays as Pilot holds it. After a whole call the Transcript's `replayed_size` is its `file_size`.
+Repository, a File, a Component Version or a reference code: a transcript whose file is gone from
+the home stays as Pilot holds it. After a whole call the Transcript's `replayed_size` is its
+`file_size`.
 
 **An appended call**, one with `appended`, is a file that grew and nothing else. `builds_on` names
 the file's size, its time and the collector's version as the publication before it read them, and
@@ -159,22 +188,27 @@ it carries again, and a time the collector reads must read the same at every wal
 only grew, or each growth costs a whole publication.
 
 **The replay at rest** is a whole call of the file Pilot holds, at the `file_size`,
-`file_modified_at` and collector's version Pilot holds, part of it taken in appended calls since
-the last whole one: `replayed_size` short of `file_size`. Pilot holds no boundary, so a row the
-replay writes that differs from what Pilot held is logged at `WARNING`, on
+`file_modified_at` and collector's version Pilot holds, part of it taken in appended calls since the
+last whole one: `replayed_size` short of `file_size`. Pilot holds no boundary, so a row the replay
+writes that differs from what Pilot held is logged at `WARNING`, on
 `app.services.publication_service`, with how much of the file was taken in parts and the rows it
 wrote by table: "The replay at rest of transcript <session_id>[/<agent_id>], 12888 of its 61000
 bytes taken in parts, wrote rows that differ from what Pilot held: calls 1, tool_calls 1". The line
 counts the rows changed, added and removed under the Transcript; a row that goes with the one it
-hangs on is not counted, nor a Launch's placing under its Session. A whole call of a file that
-changed, or read under another version, logs nothing.
+hangs on is not counted, nor a Launch's placing under its Session. Where the call's labelling is
+under the labeller's version and stamp Pilot held, the labels it changed follow, "…, and labels that
+differ: segments 1", or "labels that differ from what Pilot held: …" where no fact differs: under
+another version or stamp what the labels improve is no replay's difference. A whole call of a file
+that changed, or read under another version, logs nothing.
 
 **What Pilot first meets.** An Environment the call names that Pilot has no row for is written as
 the fleet stream reports it, its name, exemption and state with it. One the stream has not given,
 and any while the stream is down, is written named by its id, not exempt and with no
 `last_seen_at`: a row no report of the controller's has reached, which the stream's next report and
 Pilot's first touch of the environment both make the controller's (D260,
-[`controller.md`](controller.md#environments-on-demand)); a Repository by its checkout's name; a Component Version with its release time, which a later call
+[`controller.md`](controller.md#environments-on-demand)); a Repository by its checkout's name, every
+one the call names, the transcript's and its commits' and edits', met in one write; a Component
+Version with its release time, which a later call
 that gives one sets and one that gives none leaves; a reference code with the code as its name, a
 Tool with the `mcp_server` the call gives and an Event Kind with its `is_error`. A reference code
 Pilot holds stands as it is, whatever a later call says of it. `collected_at` is the server's clock
@@ -194,6 +228,184 @@ sub-agents', take turns under a transaction's advisory lock, `(247, <a key drawn
 session_id>)` (`conversation_turn` in `backend/app/services/launch_placement.py`), which the relay
 takes too when a Session names the conversation, and a work item's `set_progress` when a step newly
 names it (below).
+
+## The labeller's vocabularies
+
+**`PUT /api/collector/vocabularies`** takes the labeller's lists whole, as the labeller declares
+them (`VocabulariesSchema` in `pilot_collection.vocabularies`, `VocabularyService.declare` in
+`backend/app/services/vocabulary_service.py`): `version`, the labeller's own version that declared
+them; `lists`, one field per list a label takes its value from, named after the reference entity it
+fills, `work_unit_kind`, `unit_outcome`, `rework_kind`, `unit_measure`, `segment_kind`,
+`wait_cause`, `call_class`, `avoidable_kind`, `command_class`, `build_result`, `file_class`,
+`tool_effect_kind`, `rule`, `ask_category`, `event_kind` and `context_part_kind`; and `nesting`, each
+pairing `{inner, outer}` of Work Unit Kinds whose units of `inner` may sit in units of `outer`. A
+value is `{code, name, description, position}`, the line that says what it is and its place in its
+list from 1, with the fact about its category where its entity has one: a Unit Measure's `unit`,
+what it counts; a File Class's `counted`, whether its Files are written work the figures count; a
+Rule's `home`, the file that states it; an Event Kind's `is_error`. A list the record has no place
+for is no part of the call, so one that names it is a `400`.
+
+After its `204` Pilot holds every list and every nesting as declared, only the values that differ
+written. A value the call no longer declares is removed where no row names it, and kept with no
+`position` where one does, so a value its list declares now is one with a place; a nesting goes by
+the same rule, and a kind whose nesting goes goes in the same call. Of Event Kind and Context Part
+Kind the labeller's values are those with a `description`, and the collector's stand as they are: a
+code the collector met that the labeller declares takes the labeller's words. Its faults, all named
+at once in a `400`'s `error`: a code or a `position` given twice in a list, an Event Kind another
+table records, and a nesting given twice or naming a Work Unit Kind the call does not declare. A
+`413` is a body over the app's cap. Where a row was written the dashboard's catalogue is dropped
+after the commit ([`dashboard.md`](dashboard.md#the-catalogue)). The labeller's version is not
+stored with the lists; it is logged with what was written, at `INFO`: "Took the vocabularies of the
+labeller 1.0.1: 3 values written, 0 nestings written or removed, 0 values removed and 1 kept with no
+place, no longer declared".
+
+## The labels
+
+A publication's `labelling` (`PublishedLabellingSchema` in `pilot_collection.publication`) is the
+labeller's answer for its transcript: `version`, the labeller's own version, which is not its
+plugin's; `stamp`, its stamp of all it read for the transcript besides the file, the run records,
+what Pilot handed with the conversation and what it took from another transcript of the
+conversation; `labels`, the transcript's own; and `units`, `test_suites` and `ci_builds`: every Work
+Unit the labels name and every one above it, each after the units it sits in and is occasioned by,
+every Test Suite a Test Run names and every CI Build a CI Wait names. A label names its row as both
+sides compute it: a Launch by its place, `n`, a Call by its `message_id`, a Segment by its
+`position` from 1, a Tool Call by its `tool_use_id`, an Event and a Context Part by the Call they are
+held on, a Document by the id the inventory handed. Its lists:
+
+- `launches`, the Work Unit each carried out;
+- `calls`, each Call's Segment, Call Class, Avoidable Kind and Wait Cause;
+- `segments`, each `{position, kind}`, a run of consecutive Calls of one Segment Kind;
+- `tool_calls`, each Tool Call's Command Class, its effect, `effect_kind` with its `effect_subject`,
+  and the Rules it breached;
+- `events` and `context_parts`, the labeller's own, `{call, kind, at, detail}` and `{call, kind,
+  name, characters}`;
+- `test_runs`, each a Tool Call's or a Work Unit's run of one suite, with its failures;
+- `ci_waits`, each Tool Call's wait on a CI Build, by its job and number;
+- `documents`, each handed Document's Ask Category, none among them.
+
+A main thread's `group` rides with a labelling alone ([below](#the-adopted-project)).
+
+**A whole call's labelling** replaces every label Pilot holds of the transcript together, and writes
+only the rows that differ (`LabelWrite.write`, `backend/app/services/label_write.py`), in the
+publication's transaction after its facts: the label columns of its Launches, Calls and Tool Calls,
+its Segments, Rule Breaches, labelled Events and Context Parts, Test Runs with their Test Failures,
+CI Waits, and on a main thread its Documents' Ask Category. Work Units with their measures, Test
+Suites, Tests and CI Builds are written by their keys and never removed: no one transcript's labels
+own them. A labelled Event or Context Part keeps its row by its place among its Call's labelled ones,
+and a Test Run by its place among its transcript's. The Transcript holds the version as
+`labelled_under`, a version of the Component `labeller`, and the stamp as `records_stamp`.
+
+**Facts and labels apart.** An Event or a Context Part is the collector's or the labeller's,
+`labelled`, and a publication's facts are the collector's rows alone, so that its facts never remove
+or overwrite a label, nor its labels a fact. They meet in one place, the carve (D266): a Call's
+labelled Context Parts, a dispatch's digest sections among them, are sections of its opening prompt,
+and Pilot stores the Call's first collector part of the kind `prompt` as what the collector counted
+less the labelled parts, so that a first Call's parts add up to what it carried once. Labelled parts
+that carry more than that prompt's characters, or that stand on a Call with no `prompt` part, are a
+`400`; a call with no labelling is held to the labelled parts Pilot holds the same way.
+
+**A call with no labelling**, one no labeller answered for, writes its facts and leaves every label
+Pilot holds of the transcript as it stands, its adoption and `labelled_under` included, and its
+stamp none, so that the labeller's next answer differs from it. It names no `group`, or is a `400`.
+
+**An appended call's labelling** is the labeller's answer from the publication's own boundary on,
+and replaces that alone: the Launches' labels from the boundary's Launch, the Segments from the
+labelling's first, the Calls' from the boundary's Call with their Tool Calls', Rule Breaches,
+labelled Events and Context Parts and CI Waits, the Test Runs of those Tool Calls, and, on every
+answer, the Test Runs of the transcript's Work Units and its Documents' Ask Category; the rest
+stands. It is no relabel: it continues the labels Pilot holds (`LabelWrite.gaps`), or the call is
+the `409` `PUBLICATION_NOT_APPENDABLE`, its reasons among "Pilot holds its labels under no stamp",
+"Pilot holds its labels under another stamp than the labelling's", "Pilot holds its labels under the
+labeller's 1.2.0, of another major than the labelling's 2.0.0", and "the labelling's segments start
+at 5, and Pilot holds the call before its boundary in segment 3": the labelling's first Segment is
+the one the Call before the boundary falls in or the next, the first at a boundary on the first
+Call, and none where the Call before falls in none. The Transcript then takes the labelling's
+version, a newer minor or patch of the labeller's included, so that all its labels stand under one
+stamp and one major (D292, [`collector.md`](collector.md#the-labeller)).
+
+**Its faults**, all named at once in a `400`'s `error`. Against the call itself: a label of a
+Launch, a Call or a Tool Call the call does not carry, an appended one's before its boundary among
+them; a row labelled twice; Segments that do not run one after another over the Calls in their
+order; a Test Run or a CI Wait naming a unit, a suite or a build the labelling does not give, or run
+by both or neither of a Tool Call and a unit; a Document on a sub-agent's thread; units out of their
+order. Against the record: a value no list holds now, "`call_class` `look`: no value the labeller
+declares", so the labeller's vocabularies are declared before a label of them is published; a unit
+placed in one whose kind no nesting pairs with its own; a Document Pilot does not hold.
+
+A held Work Unit may take another kind under a later labelling. Another transcript's unit in it that
+no nesting then lets sit there sits in none until its own labelling places it again.
+
+## Commits and file edits
+
+A Tool Call carries `commits`, each `{repository, subject, sha}`, a commit it made as its command and
+its output show it, in the order its output shows them: the checkout's name, the message's first
+line as git's `%s` gives it, and the hash as the call showed it, abbreviated or whole, none where
+none showed ([`collector.md`](collector.md#a-transcripts-facts)). It carries `file_edits`, each
+`{repository, path, lines_added, lines_removed}`, what a successful Edit or Write changed of a file a
+Repository keeps, its path within that checkout. Both are facts of the Tool Call, written with the
+publication's other facts, only the rows that differ (`CommitWrite`,
+`backend/app/services/commit_write.py`). A Commit held so has no lines; a read of its Repository
+completes it ([below](#a-repositorys-commits)). They go with a Tool Call the file no longer names,
+but for a Commit a read completed, which stays, with no Tool Call once its call no longer names it.
+An appended call writes no commit or edit of a Tool Call before its boundary. A File, a Repository's
+and a path, is made the first time a File Edit or a read names it, and never removed.
+
+A commit whose hash names a Commit another Tool Call holds is not held again: a Commit is made by
+one Tool Call once, and the server logs it at `WARNING`, "Transcript <session_id>[/<agent_id>]: tool
+call <tool_use_id> names the commit <sha> of <repository>, which Pilot holds as another's". One a
+read gave first, a Commit no Tool Call holds, is tied to its Tool Call by the rule a read ties by,
+whichever of the two arrived first. Its faults, each a `400`: a file edit of a call that is no
+successful Edit or Write, one file edited twice by one call, and one commit's hash given twice in
+the call.
+
+## A repository's commits
+
+A commit's lines are read from its repository's own history, which the collector keeps a clone of
+([`collector.md`](collector.md#the-clones)), and Pilot is the cursor
+(`RepositoryService`, `backend/app/services/repository_service.py`):
+
+- **`GET /api/collector/repositories`** answers `200` `{repositories}` (`RepositoriesSchema` in
+  `pilot_collection.repositories`): every Repository Pilot holds by name, `{name, read}`, `read`
+  the whole hash of every Commit a read of it gave, in hash order. A commit of its history not in
+  `read` is one Pilot lacks; a Repository with none is read whole.
+- **`POST /api/collector/commits`** `{repository, read_at, commits}`, what one read gave: each
+  commit `{sha, made_at, subject, files}`, its whole hash, its author's time, which a rebase keeps,
+  its subject as `%s` gives it, and its lines per file, `{path, lines_added, lines_removed}`, none
+  for a merge commit; `read_at`, when the lines were read. Its `204`: each commit Pilot does not
+  hold as read completes the held Commit the tie gives it, which takes its whole hash, its
+  `made_at`, its File Changes and `read_at` as its `lines_read_at`; one the tie gives none is a
+  Commit no transcript made. A commit Pilot holds as read already changes nothing. A `400` is a
+  Repository Pilot does not hold, a commit given twice, or a file one commit changes twice, and a
+  `413` a body over the app's cap, so that a large read comes in several calls. Logged at `INFO`:
+  "Read RecipeBox: 12 commits, 3 held already; of the 9 taken, 2 completed the commit of their call
+  by its hash and 1 by its subject, and 6 no transcript made".
+
+**The tie** (`tie` in `backend/app/services/commit_tie.py`) is one rule, whichever arrived first: a
+read meets the Commits held from calls that no read completed, and a publication the read Commits
+no Tool Call holds. A read commit completes the held one whose hash it starts with, the longest
+held hash first; else the one whose subject it has and whose call its author's time lies within the
+hour of, no more than an hour before the call was requested or after it returned, each held one in
+its call's order taking the earliest made. A hash wins over a subject: every hash is settled before
+any subject, so that of an amended commit's two calls the one whose hash matches has it. A held
+Commit with a hash may still be tied by its subject, which is how a rebased commit, its hash new
+and its author's time kept, finds its call. A Commit is tied once.
+
+**The commits' turn** (`commits_turn`, advisory lock 283): a read takes it alone and every
+publication beside the others, so that what a read ties no publication holds or removes meanwhile.
+
+## The files' classes
+
+A File's class is the labeller's, from its repository's name and its path alone, the classes the
+labeller's declared File Classes, each with whether it counts:
+
+- **`GET /api/collector/files`** answers `200` `{files}` (`FilesSchema` in `pilot_collection.files`),
+  every File Pilot holds by its Repository's name and its path, `{repository, path}`, in that
+  order; with `unclassed=true`, those with no class. An `unclassed` that is no boolean is a `400`.
+- **`PUT /api/collector/classes`** `{classes}`, each `{repository, path, file_class}`: its `204` has
+  each File named hold the class named, only those that differed written and their number logged,
+  "Took the classes of 412 files: 3 of them differed"; a File the call does not name keeps its
+  class. A `400` is a File given twice, one Pilot does not hold, or a class the labeller does not
+  declare now; a `413` a body over the app's cap.
 
 ## A launch of Pilot's
 
@@ -289,10 +501,11 @@ query ([`dashboard.md`](dashboard.md#the-answers)).
 ## The adopted project
 
 A main thread's `group`, `{key, name, summary}`, is the workflow's label of the group of work run
-before Pilot that the transcript belongs to: its key never changes, and its name and summary are
-as they now stand. The transcript is then adopted by the group's adopted project, and by none
-where its call names no group, whole or appended: the label is the call's
-(`backend/app/services/adoption_service.py`, `AdoptionService.adopt`).
+before Pilot that the transcript belongs to, given with a labelling alone: its key never changes,
+and its name and summary are as they now stand. The transcript is then adopted by the group's
+adopted project, and by none where its labelling names no group, whole or appended: the label is
+the labeller's (`backend/app/services/adoption_service.py`, `AdoptionService.adopt`). A call with
+no labelling keeps the adoption as it stands ([above](#the-labels)).
 
 - **Its birth.** Pilot makes the project the first time a publication names the group: in the
   state `adopted`, archived, its `adopted_group` the key, with no slug and no member, created by the
@@ -311,7 +524,7 @@ where its call names no group, whole or appended: the label is the call's
   of Pilot's ran, `409` `TRANSCRIPT_NOT_ADOPTABLE`. A Session ran the transcript where one runs a
   Launch of it, or names its conversation, itself or by a step, while no project has adopted it. One adopted before a
   Session named it stays adopted, and its Launches stay off that Session, the server logging it at
-  each placement; once a call names no group, the same write places them.
+  each placement; once a labelling names no group, the same write places them.
 
 Every transition is refused on an adopted project, Bring back included, and so are Join and Leave;
 no request makes an `adopted` transition ([`projects.md`](projects.md)). It is listed with the
@@ -326,9 +539,12 @@ each into what a layer reads, and imports nothing but the standard library, so t
 depends on it by path, editable, the image installs it, and the backend's pytest runs its tests,
 as it does the DSL's ([`block-dsl.md`](block-dsl.md#the-package)). `SCENARIO`, named `supper`, is
 in the dev seed's world, the people `ada` and `ben` and the projects `recipe-box` and `bike-log`,
-with kinds of work of its own, `errand` and `leg`. Its session `halving` is a Turn of Pilot's on
-`recipe-box`, run with the plugin `pantry`, whose skill it loads, with a sub-agent, `counting`, an
-API error its request is sent again after, a compaction and a Stop hook; `counting` asks for one
+with kinds of work of its own, `errand` and `leg`: the errand `Scale the recipes` holds the legs
+`Halve the stew` and `Halve the dumplings`. Its session `halving` is a Turn of Pilot's on
+`recipe-box` that carries out `Halve the stew`, run with the plugin `pantry`, whose skill it loads,
+with a sub-agent, `counting`, an API error its request is sent again after, an Edit of
+`recipes/stew.md`, a Write of the new `recipes/shopping.md`, a commit of both, "Halve the stew"
+(`4be1d2c`), a compaction and a Stop hook; `counting` asks for one
 model and another answers, a hook and a permission rule each deny it a call, and its last answer
 runs out of tokens. `gears` is Ada's, run by hand on no project, with an instruction file loaded
 mid-run, a rewind, a miss past the cache's lifetime, an edit she turns down and two Stop hooks, one
@@ -361,19 +577,37 @@ shapes (`pilot_scenario.transcript`, [`collector.md`](collector.md#a-transcripts
 publications' order, each followed by the outputs its results say were saved to disk, under
 `<session_id>/tool-results/`, and a sub-agent's by its record, `agent-<agent_id>.meta.json`, so a
 reader of every file as a transcript takes the `.jsonl` ones alone. `write(home)` puts them under
-`home`, the folder that holds `projects`, each at the time its publication gives. A collector's
-reading of them is what `publications()` says, but for the `group`, the labeller's, which no line
-carries ([`collector.md`](collector.md#testing-it)). `_facts` in the package's
-`tests/test_transcript.py` cuts a publication to what its file's lines and record say, and `_read`
-there is an independent reading of the files. The builder's times are cut to the millisecond, as a
-line's `timestamp` is. `halving`'s brief is an `sdk` prompt and `gears`' prompts are `typed`;
-`gears` interrupts a Bash call; and two results, the sub-agent's grep and the MCP call, are outputs
-saved to disk, one in each of Claude Code's wordings. The lines the facts are read off include a
-Call's request line and the line of the shape it sent; a Launch's instruction files and what was
-injected before a Call; a compaction's boundary and summary; a failed attempt's request and its
-error; a denied call's result in Claude Code's words; a Prompt's Stop hooks' summary and a failing
-hook's error; and a plugin's skill's body under the plugin's cache at its Launch's version.
+`home`, the folder that holds `projects`, each at the time its publication gives, and the stub
+labeller's run records, `records()`, where the stub reads them under `plugins`. Each of
+`publications()` carries the stub's labelling of its thread's file, labelled whole with Pilot
+handing nothing, and the group the stub adopts, so that a collector that runs the stub over the
+files publishes what `publications()` says ([`collector.md`](collector.md#testing-it)). `_facts` in
+the package's `tests/test_transcript.py` cuts a publication to what its file's lines and record say,
+and `_read` there is an independent reading of the files. The builder's times are cut to the
+millisecond, as a line's `timestamp` is. `halving`'s brief is an `sdk` prompt and `gears`' prompts
+are `typed`; `gears` interrupts a Bash call; and two results, the sub-agent's grep and the MCP call,
+are outputs saved to disk, one in each of Claude Code's wordings. The lines the facts are read off
+include a Call's request line and the line of the shape it sent; a Launch's instruction files and
+what was injected before a Call; a compaction's boundary and summary; a failed attempt's request and
+its error; a denied call's result in Claude Code's words; a Prompt's Stop hooks' summary and a
+failing hook's error; and a plugin's skill's body under the plugin's cache at its Launch's version.
 The files are generated when a suite runs and never committed.
+
+**The stub labeller.** `pilot_scenario.labeller`, a file of the standard library alone, is the
+command a suite's collector names in place of the workflow's labeller, which no suite reaches:
+`labeller.command(*options)`, the verb appended. It speaks the labeller's contract 1, the verbs
+`info`, `vocabularies`, `stamps`, `label`, whole and appended, and `classes`, with the contract's
+refusals, exit codes and error lines, and writes nothing. Its options are `--version` (default
+`VERSION`, `1.0.0`), `--speaks`, the contract it speaks, and `--pause`, the seconds it takes before
+each transcript's line of a `label` answer. Its lists, units, file classes and rules are the
+scenario's, each a few lines over what a file, the run records and what Pilot handed say, with no
+word of the workflow: its Segment Kinds `prep`, `cook` and `simmer`, its six File Classes `recipe`,
+`tasting`, `note` and `menu`, counted, and `printout` and `logbook`, not. Its run records are
+`records.json` in the folder the request's `home.data` names, else
+`<home.plugins>/data/scenario-labeller`, a home without the file holding none: the kinds and their
+nesting, the units, the unit each conversation ran, the units' Test Runs and Suites, the groups and
+the conversations each adopts, and a repository's own file rules ahead of its starting list.
+`Builder.vocabularies()` is the declaration a collector sends ([above](#the-labellers-vocabularies)).
 
 **Its load.** `POST /api/testing/scenarios` `{scenario, projects}`, one of the record's testing
 routes ([`projects.md`](projects.md#testing-it)), loads `supper` or `tally` on the projects given
@@ -381,18 +615,19 @@ for those the scenario's sessions of Pilot's are on, by the scenario's name of e
 (`{"recipe-box": <a project's id>}`), its last moment the transaction's `now()`
 (`ScenarioService.load`, `backend/app/services/scenario_service.py`): for each session Pilot ran,
 its Session on the project given, over, with its Turns, a run's Work and Item done at its end or a
-chat's Chat closed then, then each thread published whole through `PublicationService.publish`. It
-answers `201` `{transcripts}`, in the builder's order, each `{session_id, agent_id, adopted_by}`,
-`adopted_by` the adopted project's `{id, name}` or null. A load's conversations' ids are drawn from
-the scenario's name and the projects it is loaded on, so a second load on the same projects
-publishes the same transcripts whole and replaces the first, the record holding it once, as it was
-loaded last, and a load on other projects is a scenario of its own beside it; the group's project
-is found by its key. Another set of projects than the scenario's is a `400`, an unknown project or
-a Turn's author the record lacks (the tally's `ada` and `ben`) a `404`, and a stage with no service
-user a `409` `NO_SERVICE_USER`, each writing nothing. The fake collector serves each scenario
-loaded. A Playwright spec makes the service user with `people.serviceUser()` and loads a scenario
-with `collection.loadScenario(scenario, projects)`, then ends a walk with `collection.walk()`
-(`frontend/tests/support/collection.ts`); a backend test takes the `service_user` fixture.
+chat's Chat closed then, then the stub's vocabularies declared and each thread published whole
+through `PublicationService.publish`, with the stub's labels. It answers `201` `{transcripts}`, in
+the builder's order, each `{session_id, agent_id, adopted_by}`, `adopted_by` the adopted project's
+`{id, name}` or null. A load's conversations' ids are drawn from the scenario's name and the
+projects it is loaded on, so a second load on the same projects publishes the same transcripts whole
+and replaces the first, the record holding it once, as it was loaded last, and a load on other
+projects is a scenario of its own beside it; the group's project is found by its key. Another set of
+projects than the scenario's is a `400`, an unknown project or a Turn's author the record lacks (the
+tally's `ada` and `ben`) a `404`, and a stage with no service user a `409` `NO_SERVICE_USER`, each
+writing nothing. The fake collector serves each scenario loaded. A Playwright spec makes the service
+user with `people.serviceUser()` and loads a scenario with `collection.loadScenario(scenario,
+projects)`, then ends a walk with `collection.walk()` (`frontend/tests/support/collection.ts`); a
+backend test takes the `service_user` fixture.
 
 **A walk's end.** `POST /api/testing/walks`, with no body, for a signed-in editor on every stage but
 prd, as the record's testing routes are, ends a walk through the same service and answers `201`
@@ -412,23 +647,32 @@ a transcript in a test is generated when the suite runs, and the six invented st
 `backend/tests/fixtures/raw/`, a turn's events as the controller relays them, are the one kind of
 JSON Lines file the tree holds.
 
-The door and its three routes are pinned in `backend/tests/api/test_collector.py`, the write in
-`tests/services/test_publication_service.py`, the call's shape in `tests/schemas/test_publication.py`,
-on the package's import, the walk's end, its event and the readiness check in
-`tests/services/test_walk_service.py`, the Walk's revision in `tests/migrations/test_0050_walks.py`,
-the placement in `tests/services/test_launch_placement.py`, the adoption in
-`tests/services/test_adoption_service.py`, the load in `tests/services/test_scenario_service.py`
-and the walks' testing route in `tests/api/test_testing_record.py`. The package `pilot-collection`'s
+The door and its routes are pinned in `backend/tests/api/test_collector.py` and
+`tests/api/test_collector_repositories.py`, the write in
+`tests/services/test_publication_service.py`, the labels in
+`tests/services/test_publication_labels.py`, the vocabularies in
+`tests/services/test_vocabulary_service.py`, what the labeller is handed in
+`tests/services/test_labeller_context.py`, the commits and edits in
+`tests/services/test_commit_write.py`, the tie in `tests/services/test_commit_tie.py`, a read and
+the classes in `tests/services/test_repository_service.py`, the call's shapes in
+`tests/schemas/test_publication.py` and `test_vocabularies.py`, on the package's import, the walk's
+end, its event and the readiness check in `tests/services/test_walk_service.py`, the Walk's revision
+in `tests/migrations/test_0050_walks.py`, the placement in
+`tests/services/test_launch_placement.py`, the adoption in
+`tests/services/test_adoption_service.py`, the load in `tests/services/test_scenario_service.py` and
+the walks' testing route in `tests/api/test_testing_record.py`. The package `pilot-collection`'s
 `tests/test_package.py` pins that it stands without the app, and the builder is pinned in
-`pilot-scenario`'s `tests/test_builder.py`, its files in `tests/test_transcript.py`, and the tally
-and the history in `tests/test_tally.py` and `tests/test_history.py`. A collector's
-walk against these routes is `tests/collector/test_walk.py` ([`collector.md`](collector.md#testing-it)).
+`pilot-scenario`'s `tests/test_builder.py`, its files in `tests/test_transcript.py`, the tally and
+the history in `tests/test_tally.py` and `tests/test_history.py`, and the stub labeller in
+`tests/test_labeller.py`. A collector's walk against these routes is `tests/collector/test_walk.py`
+([`collector.md`](collector.md#testing-it)).
 `tests/support/publications.py` makes a call (`whole()`, `sub_agent()`, `appended()`,
-`collector_headers()`), `tests/support/transcripts.py` the rows, and `writes()` in
-`tests/support/database.py` counts the rows a block writes, by table. The cost and the caches are
-pinned in `tests/services/test_price_service.py`, `tests/services/test_call_caches.py` and
-`tests/services/test_quota_week_service.py`, with their revisions' tests in `tests/migrations/`.
-The adopted project's row and head are pinned in
+`collector_headers()`), `tests/support/transcripts.py` the rows, `tests/support/vocabularies.py` and
+`labels.py` a declaration and labelled rows in a kitchen's words, `tests/support/repositories.py` a
+read, and `writes()` in `tests/support/database.py` counts the rows a block writes, by table. The
+cost and the caches are pinned in `tests/services/test_price_service.py`,
+`tests/services/test_call_caches.py` and `tests/services/test_quota_week_service.py`, with their
+revisions' tests in `tests/migrations/`. The adopted project's row and head are pinned in
 `frontend/tests/projects/adopted-project.spec.ts`. A Playwright backend's `COLLECTOR_TOKEN` is the
 fake collector's it serves itself ([`dashboard.md`](dashboard.md#testing-it)), so the door takes a
 call that carries it; no collector walks there, so its readiness check `collector` reads as it does

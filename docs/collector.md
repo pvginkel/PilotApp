@@ -1,8 +1,10 @@
 # The collector
 
 The collector reads the Claude Code transcripts on a fleet's home. It publishes their facts into
-Pilot's record, one transcript a call, through the door of [`collection.md`](collection.md), and
-it serves a conversation's reading to Pilot's backend. It is a component of PilotApp's own,
+Pilot's record, one transcript a call, through the door of [`collection.md`](collection.md), with
+the labels the workflow's labeller gives them; it gives Pilot the commits of the repositories the
+transcripts name, read from clones of the mirror, and the files' classes; and it serves a
+conversation's reading to Pilot's backend. It is a component of PilotApp's own,
 `collector/`: a uv project in Python beside the backend's code (D255), with its own `uv.lock`,
 the package `pilot_collector` and the image `registry:5000/pilot-collector`. Each stage runs it as
 a pod of its own beside the stage's fleet's home ([`deployment.md`](deployment.md#what-runs)).
@@ -32,6 +34,12 @@ a home with no `projects` folder ends it at its first walk.
 | `COLLECTOR_CHECKOUT_ROOTS` | `["/work"]` | the directories an environment's repositories are checked out under, each an absolute path, as a JSON list |
 | `COLLECTOR_CARRY_TRANSCRIPTS` | `2500` | how many transcripts' carries are kept between walks ([below](#whole-or-appended)) |
 | `COLLECTOR_CARRY_BYTES` | `64000000` | the bytes of memory the carries are kept within |
+| `COLLECTOR_LABELLER` | `["python3", "-B", "{install_path}/tools/labeller.py"]` | the command that runs the workflow's labeller, a JSON list, each call's verb appended; `{install_path}` is the folder of the installed `dev@aiworkflow` copy ([below](#the-labeller)) |
+| `COLLECTOR_LABELLER_SECONDS` | `60` | the seconds a call of the labeller may take, above 0: past them it is stopped |
+| `COLLECTOR_MIRROR_URL` | `http://gitblit.git-sync-prd.svc.cluster.local/r` | where the Gitblit mirror serves the repositories, with no credential ([below](#the-clones)) |
+| `COLLECTOR_MIRROR_OWNERS` | `["pvginkel"]` | the owners on the mirror a repository is looked for under, in the order tried, a JSON list |
+| `COLLECTOR_MIRROR_SECONDS` | `3600` | the seconds from one read of the clones to the next, above 0 |
+| `COLLECTOR_CLONES` | `/tmp/pilot-collector/clones` | the folder the bare clones are kept in, on the collector's own storage |
 
 Each is read from the environment variable of its name (`Settings`, `settings.py`). The walk's
 interval and the settling time are Pilot's, and each inventory hands them over
@@ -60,11 +68,17 @@ two turns, one call a transcript:
 1. **New or changed**: every transcript the inventory lacks, or holds at another size or time than
    its file's, the most recently changed first.
 2. **Behind**: a transcript held at its file's size and time that was read under another version of
-   the collector's, or is due its replay at rest. A transcript is due it where its `replayed_size`
-   is short of its `file_size`, appended publications having been taken since its last whole one,
-   and its file has not changed for the settling time. This turn too goes the most recently changed
-   first. Each publication is begun only while the walk's interval has not passed since the walk
-   began; the rest wait for the next walk.
+   the collector's, or is due its replay at rest, or, where a labeller answers, whose labels Pilot
+   holds under another major of the labeller's version than the one answering, or under another
+   stamp than the one it would give now ([below](#the-labeller)). A transcript is due its replay at
+   rest where its `replayed_size` is short of its `file_size`, appended publications having been
+   taken since its last whole one, and its file has not changed for the settling time. This turn
+   too goes the most recently changed first. Each of its batches is begun only while the walk's
+   interval has not passed since the walk began; the rest wait for the next walk.
+
+Each turn is published in batches of at most 64 transcripts, and past 32,000,000 bytes of files of
+its first alone (`_BATCH`, `_BATCH_BYTES`), a batch labelled in one call where a labeller answers
+([below](#the-labeller)).
 
 A file's time is compared cut to the microsecond, as Pilot holds it. A transcript Pilot holds and
 the home lacks is left alone, and so is what Pilot holds of it. After its last publication the walk
@@ -73,28 +87,35 @@ tells Pilot it ended, `POST /api/collector/walks`, whether it published or not
 walk at a time. A walk starts the interval after the start of the one before, or at once after a
 walk that took longer; before a first inventory has given the interval, it is 30 s.
 
-**A walk that ends early.** A `401` or a `426` from Pilot is logged at `ERROR`, "The walk ended early:
-<why>". No answer, a `409` other than `PUBLICATION_NOT_APPENDABLE`, and any other status the route's
-table does not name, a `500` among them, are logged the same at `WARNING`. Each ends the walk where
-it stands, its end untold, and the next walk starts over from the inventory. A call waits 10 s to
-connect and 300 s for each part of an answer.
+**A walk that ends early.** A `401` or a `426` from Pilot is logged at `ERROR`, "The walk ended
+early: <why>". No answer, a `409` of another code than `PUBLICATION_NOT_APPENDABLE`,
+`TRANSCRIPT_NOT_ADOPTABLE` and `NO_SERVICE_USER`, and any other status the route's table does not
+name, a `500` among them, are logged the same at `WARNING`. Each ends the walk where it stands, its
+end untold, and the next walk starts over from the inventory. A call waits 10 s to connect and 300 s
+for each part of an answer.
 
 **What it sets aside.** Some transcripts are logged at `WARNING` and set aside: one it cannot read,
-whatever its read raises, and one Pilot refuses with `400` or `413`. The line reads "The transcript
-<session_id>[/<agent_id>], <file>, is set aside until its file changes: <reason>". The reason is
-"it cannot be read: <why>", "reading it raised <the error's type>: <its message>" or "Pilot refused
-it with <status>: <its answer>". No walk takes it again until its file's size or time changes. What
-is set aside is held in memory alone, so a restart logs each once more. A transcript whose own file
-went between the listing and its read logs nothing.
+whatever its read raises, and one Pilot refuses with `400`, `413` or `409` `NO_SERVICE_USER`. A main
+thread whose `group` Pilot refuses, `409` `TRANSCRIPT_NOT_ADOPTABLE`, is published again without it,
+logged at `WARNING`, "The main thread <session_id> is published with no group: <why>". One whose
+labels Pilot refuses is published without them before it is set aside ([below](#the-labeller)). The
+line reads "The transcript <session_id>[/<agent_id>], <file>, is set aside until its file changes:
+<reason>". The reason is "it cannot be read: <why>", "reading it raised <the error's type>: <its
+message>" or "Pilot refused it with <status>: <its answer>". No walk takes it again until its file's
+size or time changes. What is set aside is held in memory alone, so a restart logs each once more. A
+transcript whose own file went between the listing and its read logs nothing.
 
 **Its line.** A walk that published, set aside or left anything logs one line at `INFO`; any other
 walk logs it at `DEBUG`:
 
 ```
-A walk over 22874 transcripts: 12 published, 9 of them appended, 0 set aside, 0 left for the next walk, in 0.4 s
+A walk over 22874 transcripts: 12 published, 9 of them appended and 12 labelled, 0 set aside, 0 left for the next walk, in 0.9 s; the labeller 1.0.1's stamps took 0.45 s
 ```
 
-The line ends "; Pilot was not told it ended" where the walk's end was not told.
+It ends "; no labeller's stamps" where no labeller answered them, and then "; Pilot was not told it
+ended" where the walk's end was not told. The walk's interval, which bounds its behind turn, leaves
+out the time the stamps and their declaration took. After its end a walk reads the clones and has
+the Files classed ([below](#the-clones)).
 
 ## A transcript's lines
 
@@ -135,7 +156,11 @@ exits.
   `from` the model asked for, and a `system` line of subtype `model_refusal_fallback` names the
   request's `requestId` and that `originalModel`.
 - A tool's result is a `user` line holding a `tool_result` block that names its request's id,
-  with `toolUseResult`, the tool's own record of it. From 2.1.201 a denied call's line names how,
+  with `toolUseResult`, the tool's own record of it: an Edit's and a Write's hold the patch,
+  `structuredPatch`, a list of hunks, and a Write's its `type`, `create` or `update`; a Bash call's
+  that made a commit, `gitOperation.commit.sha`, where Claude Code records one, and the commit's own
+  line in its output, `[<branch> <hash>] <subject>`, unless the command ran quiet. From 2.1.201 a
+  denied call's line names how,
   `toolDenialKind`: `permission-rule`, `user-rejected`, or `interrupted` for a call the person
   interrupted. A `PreToolUse` hook's block is an error result opening `PreToolUse:<tool> hook
   error:`.
@@ -302,6 +327,24 @@ each rule in full. The facts are read off the lines in the file's order:
     lines can follow the characters. The full size is the saved file's characters, the file found
     under `projects` by the path's last four parts. Where that file is gone it is the characters the
     result states, and in the first wording it is then none.
+  - Its `file_edits`, a successful Edit's or Write's of the file its input's `file_path` names,
+    from the `cwd` its own line names, where a checkout holds it: the checkout's Repository and the
+    path within it, a worktree under the checkout's `.claude/worktrees/<name>` the checkout's own.
+    An Edit whose record holds the patch counts its `+` and `-` lines, one with none a line diff of
+    its old and new text; a Write of a new file counts its content's lines as added, one over a
+    file the patch's lines, and with no patch its content's lines as added and none removed. A
+    failed call, and any other tool's, edits none.
+  - Its `commits`, a successful Bash call's, each `git commit` its command makes, read as the shell
+    reads it so far as it is words (`changes.py`): its directory a `-C` of its `git`, else the last
+    `cd` before it, else its line's `cwd`, a commit in no checkout none; its subject its message's
+    as git's `%s` gives it, the first paragraph with its lines joined by a space, from `-m`,
+    `--message`, `-F -`'s here-document or a here-document's `cat`; its hash its own line's in the
+    output, else, where the command makes one commit, Claude Code's `gitOperation.commit.sha` where
+    that is 7 to 64 hex characters, else a `git log --oneline` after it in its Repository under its
+    subject, else, of one commit alone, a `git rev-parse` after it, else none. A commit whose hash
+    the reading holds as another's is not held again, a failed call makes none, and a later call's
+    `git log --oneline` in the Repository gives its hash to the latest commit made there under that
+    subject that showed none.
 - **A Hook Run** is each hook a Stop hook's summary names, on a main thread, under the latest
   Prompt before the summary, with its `command` and `duration_ms`. It `failed` where a
   `hook_non_blocking_error` for the Stop event names its command and the summary's `toolUseID`,
@@ -330,7 +373,10 @@ each rule in full. The facts are read off the lines in the file's order:
     the `Skill` call its `sourceToolUseID` names asked for, none where it names no call or another
     tool's; a compaction's summary is a `compact_summary` of its text's characters.
 
-The reader publishes no label: a main thread's `group`, the workflow's, is not read off the file.
+The reader publishes no label: the labels, a main thread's `group` among them, are the labeller's
+([below](#the-labeller)). It hands the labeller the Calls the labeller reads in what it took, the
+`message.id` of every assistant line in the order of its first, a `<synthetic>` one and a fork's
+copy of its parent's among them, which the facts publish no Call for.
 
 A file the reader cannot turn into a publication raises `UnreadableError` with the reason: a line
 that is not one it reads, named by its number, no line that names a working directory, a Launch that
@@ -343,8 +389,11 @@ A grown transcript is read from its boundary on, its tail, and published appende
 keeps a carry of each transcript it published (`carry.py`), in its memory alone. The carry holds the
 file it was built on, the file's size, its time and the collector's version, and where the reading
 stood at its **boundary**, the transcript's first Call that is not settled. A Call's facts are
-settled once the next Call has begun, so the boundary is the file's last Call, and in a file with no
-Call the place its first would take. Of the reading there, the carry holds:
+settled once the next Call has begun, and its labels from where the labeller says: the boundary is
+the file's last Call, or, where the labeller labelled the reading and named an earlier Call, that
+one, and in a file with no Call the place its first would take. A reading keeps where it stood
+before each Call's first line for that (`Read.stood`), until its batch is published. Of the reading
+there, the carry holds:
 
 - the byte the boundary's first line starts at;
 - how many Calls, published Launches, Prompts and Compactions lie before it, from which the
@@ -370,6 +419,12 @@ Call the place its first would take. Of the reading there, the carry holds:
   held as the queue holds them;
 - on a fork's thread, the call that started it, with the message that holds it and that line's
   time;
+- the commits made before it whose hash no line has shown, each its making call's id, its
+  Repository and its subject, which a later call's `git log` gives a hash;
+- where the labeller labelled it, the checkpoint it handed back: the labeller's version and the
+  stamp its labels were given under, its boundary's Call and the byte that Call's first line starts
+  at, the checkpoint's text, which the collector never reads, that Call's place among the Calls the
+  labeller reads, and how far the labeller's numbering of its Segments runs ahead of Pilot's;
 - a digest of the file's bytes from the boundary's on, as they were read.
 
 No id of any other line before the boundary is held, and of no Call but the one the chain leads
@@ -382,7 +437,12 @@ from there on and with the components it named before the boundary too, the Comp
 there on, and the four places. A Stop hook's summary follows its run's last Call, so its Prompt was
 received before the boundary: where one from there on lies on the carry's Prompt, the first
 Launch's Prompts open with that one, published again with its Hook Runs, and the boundary names its
-place. Every other transcript is published whole. A transcript that has a carry and is published
+place. Where a labeller answers for the transcript, the carry must also hold the checkpoint the
+labeller handed back with its last labels, Pilot must hold its labels under that checkpoint's stamp
+and the major of its version, and the labeller's stamps must give that stamp under that major now:
+the labeller is then handed the Calls from that boundary on with the checkpoint, and the appended
+publication carries their labels ([below](#the-labeller)). Every other transcript is published
+whole. A transcript that has a carry and is published
 whole instead, in the same walk, logs a line at `INFO`: "The transcript <session_id>[/<agent_id>],
 <file>, is published whole, not from its boundary on: <reason>". The reasons are:
 
@@ -405,20 +465,139 @@ whole instead, in the same walk, logs a line at `INFO`: "The transcript <session
   fork's or stopped being one among them, and "a fork's line from its boundary on holds the call
   that started it", where the carry was read with no line of it;
 - "reading it from its boundary on raised <the error's type>: <its message>";
+- "a call shows the hash of a commit made before its boundary", a `git log` from the boundary's
+  byte on that names a commit the carry holds with no hash;
 - "Pilot refused it appended: <Pilot's reasons>", a `409` `PUBLICATION_NOT_APPENDABLE`, or "Pilot
-  refused it appended with <status>: <its answer>", a `400` or a `413`.
+  refused it appended with <status>: <its answer>", a `400` or a `413`;
+- where a labeller answers: "the labeller handed back no checkpoint of its last reading", "Pilot
+  does not hold its labels as the labeller last gave them", "the labeller would label it under
+  another stamp or major now, which relabels it whole", and "the labeller answered whole: <its
+  why>".
 
 A rewrite before the boundary's byte is not seen there. The replay at rest, a whole publication
 once the file has settled, follows it. A line that reaches back behind the boundary stays in what is
 read until the next Call begins, so every walk that sees the file grow until then publishes it
-whole. The second turn of a walk publishes whole without trying the carry.
+whole. The second turn of a walk publishes whole without trying the carry. A transcript the
+labeller answers `whole` for, or whose appended publication Pilot refuses, is read and labelled
+whole once the rest of its batch is published.
 
 **The bound.** The carries are kept up to `COLLECTOR_CARRY_TRANSCRIPTS` transcripts and
 `COLLECTOR_CARRY_BYTES` of memory, a carry counted at about 1.5 KB and more for each id, request,
-Event, Prompt, Hook Run, file, part and plugin it holds. Past either, the carry of the transcript
+Event, Prompt, Hook Run, file, part, plugin and commit with no hash it holds, and for its
+checkpoint. Past either, the carry of the transcript
 whose file changed longest ago is forgotten first, and that transcript's next growth costs one
 whole publication. A carry stays through a walk Pilot stopped answering, and goes when its
 transcript is set aside. The carries are the walker's, read and written on its thread alone.
+
+## The labeller
+
+The labels are the workflow's labeller's, a command the collector runs (`labeller.py`, `Labeller`):
+`COLLECTOR_LABELLER` with each call's verb appended, one JSON request on its stdin and one answer on
+its stdout, under the labeller's contract 1, each call cut at `COLLECTOR_LABELLER_SECONDS`.
+`{install_path}` in the command is the folder of the first `dev@aiworkflow` copy the home's
+`plugins/installed_plugins.json` names, its path's last four parts,
+`cache/<marketplace>/<plugin>/<version>`, taken under the home's `plugins`; a command that names no
+`{install_path}` reads no such file. Nothing of the workflow is in the image: the labeller runs from
+the home's copy. A request names the contract and the home as the collector sees it, its `projects`
+and its `plugins`. Four verbs are called:
+
+- **`stamps`**, at every walk, one call over every transcript listed: the stamp the labeller would
+  give now for each, handed in its conversation with what the inventory gives for that conversation
+  ([`collection.md`](collection.md#the-inventory)), a sub-agent's with the `agent_type` its record
+  names, and each with the stamp Pilot holds; with the index the last call handed back, which the
+  collector keeps in its memory. A conversation on the home that the inventory lacks is handed with
+  no Sessions and no Documents. The answer names the labeller's version, a digest of its
+  declarations, a digest of its file rules and each transcript's stamp.
+- **`vocabularies`**, which the collector declares to Pilot, `PUT /api/collector/vocabularies`
+  ([`collection.md`](collection.md#the-labellers-vocabularies)), once after it starts and again
+  whenever the stamps come from another version or name another digest of the declarations than
+  those it last declared, and before it publishes labels under another version than the one last
+  declared. It keeps the labeller's groups, of which a main thread's publication takes the one its
+  labels name as its `group`.
+- **`label`**, over a batch: each transcript handed as `stamps` hands it, with its file's path, its
+  Launches and the Calls the labeller reads in it, to label whole, or from the boundary of the
+  checkpoint its carry holds, with that checkpoint ([above](#whole-or-appended)). The answer is a
+  line a transcript, its labels with the checkpoint it hands back, the answer `whole`, or an error,
+  `unreadable`, `calls_mismatch` or `internal`.
+- **`classes`**, the class of each File it is handed ([below](#the-clones)).
+
+A call that gives no answer the collector takes is the labeller not answering: no copy installed, a
+refusal (exit 2, an `{"error": {"code", "detail"}}` on stdout), a crash (exit 1), no answer within
+the time, or an answer that is not the call's. A `label` call cut short keeps the lines it gave
+before the cut.
+
+**The stamps and a relabel.** The stamps are asked after the listing and before the walk's plan,
+and a transcript whose labels Pilot holds under another stamp than the one now, or under another
+major of the labeller's version than the one answering, is behind and is labelled again whole
+(D292): a conversation is relabelled whole only where the labeller's own major version, or its
+stamp, differs from what its labels were written under. A minor or a patch of the labeller keeps
+the labels Pilot holds, and what is labelled after it is labelled under the new version, which
+`labelled_under` holds whole; a plugin release that leaves the labeller's version alone relabels
+nothing. The labeller's version is its own, not its plugin's. A walk the labeller does not answer,
+or whose vocabularies Pilot refuses, publishes as it would with none, logged at `WARNING` where the
+reason is new, "The walk has no labeller's stamps, and publishes no label: <why>", and at `INFO`
+"The labeller 1.0.1 answers again" once it does. A sub-agent's `agent_type` is kept by its record's
+size, time and inode, so an unchanged record costs a `stat` a walk.
+
+**A batch's labels.** Where the stamps answered, each transcript of a batch the labeller gave a
+stamp is read, whole or appended, and the batch is labelled in one `label` call. Each transcript is
+published with the labels of the rows its publication holds, the Calls of its own with their Tool
+Calls and the Segments they fall in, renumbered from where Pilot holds the first, and of a main
+thread its adopted group, under the version the answer names. A reading holds its file's bytes and
+where it stood at each Call until its batch is published. A transcript the labeller gives no labels,
+an error line or one a cut answer lacks, is logged, "The labeller gave the transcript
+<session_id>[/<agent_id>], <file>, no labels: <why>", and published with its facts alone where its
+file, the collector's version or the replay at rest made it differ, and left for the next walk,
+among those the walk's line counts as left, where only the labeller did. A call that gives no
+answer, or is cut short, labels nothing further in the walk, "The labeller labels nothing further in
+this walk: <why>".
+
+**Labels Pilot refuses.** Pilot refusing a transcript's labels has the vocabularies declared again,
+once a walk, and the labels given again; refused once more, the transcript is published with its
+facts alone, logged at `WARNING`, "Pilot refused the labels of the transcript
+<session_id>[/<agent_id>], <file>, which are not given again until its file, the labeller's version
+or its stamp changes: <why>", and its labels are held back until one of the three changes. What is
+refused is in the collector's memory alone.
+
+## The clones
+
+After a walk's end the collector reads the commits of every Repository Pilot holds from bare clones
+of the Gitblit mirror, the nightly mirror of the operator's GitHub repositories, which serves them
+inside the cluster with no credential (`mirror.py`, `Clones`). A Repository's address is
+`<COLLECTOR_MIRROR_URL>/<owner>/<name>.git`, the owners of `COLLECTOR_MIRROR_OWNERS` tried in their
+order and the first that holds it cloned into `COLLECTOR_CLONES`, in a folder of its own renamed into
+place once whole, so that a clone cut short is never read. A clone held is fetched, every branch as
+the mirror has it. A name with a `/`, or `.` or `..`, is never cloned. git runs with no global or
+system configuration and no prompt, each call cut at 900 s (`GIT_SECONDS`). A commit's lines show
+once the mirror's daily sync has taken its push, and a commit never pushed shows none.
+
+**A read.** Pilot is the cursor: the repositories' answer names what a read of each gave, and the
+collector reads every commit of its clone's branches that is not among them, oldest first, all of
+them where none is ([`collection.md`](collection.md#a-repositorys-commits)): its whole hash, its
+author's time, its subject and its lines per file under git's rename detection, a moved file's on
+its new path with the lines changed in it, a deleted file's as removed, a binary file's none, and a
+merge commit none. A read goes to Pilot in one call, or past 32,000,000 bytes of commits
+(`READ_BYTES`) in several, within Pilot's cap on a request. The clones are read at the first walk
+after a start, then at the first walk once `COLLECTOR_MIRROR_SECONDS` have passed since the last
+read began; a walk that left transcripts of its behind turn for the next waits for one that did not,
+so that a Repository is read once every transcript on the home is published, since Pilot's tie
+settles a commit's hash before its subject within one call alone. A transcript left waiting on the
+labeller alone does not hold it back. A Repository whose clone cannot be made, fetched or read is
+logged at `WARNING` where its reason is new, "The clone of the Repository <name> is not read:
+<why>", tried again at the next read, and logged "The clone of the Repository <name> is read again"
+once it is. A read ends with "The clones gave Pilot 9 commits in 2 calls, in 1.4 s", at `INFO` where
+it gave any.
+
+**The classes.** Then, where the labeller answered the stamps, the collector has it class the Files
+Pilot holds with no class, or every File after a start and wherever the stamps' file rules differ
+from those it last classed every File under, and gives Pilot every class at once
+([`collection.md`](collection.md#the-files-classes)), "412 Files are classed under the labeller
+1.0.1's file rules". A walk where nothing changed asks Pilot for no File beyond the knowledge that
+none waits. A labeller that gives no classes is asked again at the next walk, "No File is classed in
+this walk: the labeller did not answer: <why>". Classes Pilot refuses have the vocabularies declared
+again and are given once more; refused again, no File is classed until the labeller's version or its
+file rules change, "No File is classed until the labeller's version or its file rules change:
+<why>".
 
 ## The reading
 
@@ -487,9 +666,10 @@ images, with the repository's root as its build context, since the packages the 
 path lie under `backend/packages/`. The root `.dockerignore` is an allow-list that keeps that
 context to what the file copies. The image holds the environment alone, at `/app/.venv`, synced
 `--locked --no-dev --no-editable`. It runs `python -m pilot_collector` under `tini` as uid and gid
-1000, the user a fleet's home and its transcripts belong to, and exposes 3503. Its build fails where
-that user cannot load the process. `PilotApp/Build-Main` runs the collector's tests in its stage
-`Test collector` and builds the image in `Build pilot-collector image`
+1000, the user a fleet's home and its transcripts belong to, and exposes 3503. It installs `git`,
+which the clones are made, fetched and read with. Its build fails where that user cannot load the
+process. `PilotApp/Build-Main` runs the collector's tests in its stage `Test collector` and builds
+the image in `Build pilot-collector image`
 ([`deployment.md`](deployment.md#how-a-change-gets-to-dev)).
 
 ## Testing it
@@ -498,16 +678,20 @@ that user cannot load the process. `PilotApp/Build-Main` runs the collector's te
 `kc project lint --project collector` its ruff, format check, mypy and vulture. The reader's rules
 are pinned in `test_reader.py` and `test_appended.py`, the carry and its bound in `test_carry.py`,
 the home in `test_home.py`, the walk's plan in `test_walk.py`, the reading in `test_reading.py`,
-its route in `test_serve.py` and the process in `test_main.py`, which asks the running process for
-a reading. `tests/support.py` builds a file's lines for one rule and `settings()` the settings,
-inventing the three that have no default. `test_reader.py` also reads the invented scenario's
-files, and two of its own, a resumed thread and a nested sub-agent, each as the builder's whole
-publication of it but for the `group`.
+its route in `test_serve.py`, the process in `test_main.py`, which asks the running process for
+a reading, the labeller's calls in `test_labeller.py`, the clones in `test_mirror.py` and the
+settings in `test_settings.py`. `tests/support.py` builds a file's lines for one rule and
+`settings()` the settings, inventing the three that have no default. `test_reader.py` also reads
+the invented scenario's files, and two of its own, a resumed thread and a nested sub-agent, each as
+the builder's whole publication of it but for the `labelling` and the `group`, which the reader
+reads none of; `test_labeller.py` labels the scenario's files under the stub labeller as the
+builder labels them.
 
-The walk against Pilot's routes is the backend suite's, `backend/tests/collector/test_walk.py`.
-The backend's dev group takes the collector by path, so that a walk publishes into a database of
-its own per test. Pilot is served by werkzeug's `make_server` on `committed_app`, and the walk runs
-over the invented scenario's files written to a home of the test's
-([`collection.md`](collection.md#testing-it)). A dependency the collector gains is locked twice, in
-`collector/` and in `backend/`, whose lock names the collector's dependencies: the backend's
-`uv sync --locked` fails until both are.
+The walk against Pilot's routes is the backend suite's, `backend/tests/collector/test_walk.py`. The
+backend's dev group takes the collector by path, so that a walk publishes into a database of its own
+per test. Pilot is served by werkzeug's `make_server` on `committed_app`, and the walk runs over the
+invented scenario's files written to a home of the test's
+([`collection.md`](collection.md#testing-it)), with the stub labeller as its labeller and a folder
+of the home's as its mirror, so that a walk's publications carry the builder's labels and group. A
+dependency the collector gains is locked twice, in `collector/` and in `backend/`, whose lock names
+the collector's dependencies: the backend's `uv sync --locked` fails until both are.

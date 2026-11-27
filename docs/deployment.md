@@ -240,10 +240,16 @@ objects into each stage's namespace:
   the values (the table above), read-only: `<home>/.claude/projects` and `<home>/.claude/plugins`
   at `/home/ubuntu/.claude/projects` and `/home/ubuntu/.claude/plugins`, host paths of type
   `Directory`, so that a folder the node lacks keeps the pod from starting; never `.claude` whole,
-  no other volume and no service account token. It runs as uid 1000, the image's user, which owns
-  the transcripts. Its settings are `COLLECTOR_HOME` `/home/ubuntu/.claude`, `COLLECTOR_PILOT_URL`
-  `http://pilot`, Service `pilot`, whose nginx proxies `/api/` to the backend, and
-  `COLLECTOR_TOKEN` from the Secret `pilot-collector-token`. The Service, port 3503, is the
+  no other volume and no service account token. The labeller it runs is the home's installed copy,
+  under `plugins` ([`collector.md`](collector.md#the-labeller)). It runs as uid 1000, the image's
+  user, which owns the transcripts. It requests and is limited to 4Gi of ephemeral storage, its
+  writable layer, which keeps the clones of the mirror at `/tmp/pilot-collector/clones`, under no
+  mount ([`collector.md`](collector.md#the-clones)); past the limit the kubelet evicts the pod. Its
+  settings are `COLLECTOR_HOME` `/home/ubuntu/.claude`, `COLLECTOR_PILOT_URL` `http://pilot`,
+  Service `pilot`, whose nginx proxies `/api/` to the backend, and `COLLECTOR_TOKEN` from the Secret
+  `pilot-collector-token`; the labeller's command and time, the mirror's address, owners and
+  cadence and the clones' folder are set only where a stage's values give them, and neither stage
+  gives one, so each runs the image's defaults. The Service, port 3503, is the
   backend's way to the readings, `http://pilot-collector:3503` in the stage's own namespace, and
   carries none of the front door's annotations, so nothing outside the cluster reaches it. The
   probes are TCP probes of that port, since every path there asks for the bearer. A walk that meets

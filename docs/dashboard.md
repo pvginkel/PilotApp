@@ -7,8 +7,10 @@ server alone gives it its meaning, down one path: read, checked against the cata
 part, written back in its normal form as the answer's `address`, planned, run under the engine's
 bounds, shaped. No copy of the calls is kept and nothing is fed, so a change in the record shows at
 the next read. The facts it reads are the transcripts' a collector publishes
-([`collection.md`](collection.md)) with the caches each publication derives, Pilot's own Sessions
-and Turns, the Prices and the Quota Weeks ([`record.md`](record.md#the-tables)). What
+([`collection.md`](collection.md)) with the caches each publication derives, the workflow's labels
+the publications carry and the vocabularies its labeller declares
+([`collection.md`](collection.md#the-labels)), Pilot's own Sessions and Turns, the Prices and the
+Quota Weeks ([`record.md`](record.md#the-tables)). What
 the dashboard stores, the saved views, quick filters, custom ratios and favourites, is
 [below](#what-the-dashboard-stores); the screen that reads it is
 [`dashboard-screen.md`](dashboard-screen.md).
@@ -23,10 +25,13 @@ What a view may name (`catalogue.py`), assembled and never written down (`assemb
 Pilot's code, its facts, joins, dimensions, figures, aggregates, built-in ratios and time ranges;
 from the record's rows, a vocabulary's codes as a dimension's values and a version dimension per
 Component, `<code>_version` (`claude_code_version`), with the marker of its versions; from the
-stored configuration, the custom ratios and the quick filters. Every entry is a row of one shape
-whatever source gave it, so a source that declares more adds rows and no shape. Pilot's code
-declares nothing of a workflow: its dimensions are Pilot's own sessions, turns and work items and
-the collector's facts.
+labeller's declared rows ([`collection.md`](collection.md#the-labellers-vocabularies)) a part per
+Work Unit Kind, each along its order, a figure per Unit Measure, and the values of its lists, each
+with its line and its place; from the stored configuration, the custom ratios and the quick
+filters. Every entry is a row of one shape whatever source gave it, so a source that declares more
+adds rows and no shape. Pilot's code declares nothing of a workflow: its dimensions are Pilot's own
+sessions, turns and work items, the collector's facts and the labels' columns, and where it reads
+the workflow's kinds of work it holds one rule for every kind and names none.
 
 - **The facts** (`facts.py`), each a table of the record or a union of a few, one row a thing that
   happened. **Call**: a Call, and each Turn of Pilot's whose conversation's main thread was never
@@ -37,44 +42,74 @@ the collector's facts.
   refusal, a saved output, a denied tool call and a failed hook), each at its own moment on the
   Call it is held on, with its `is_error` and one short detail from the fact behind it (D274): an API
   error's status, a saved output's tool and size, a denial's kind and tool, a hook's command, a
-  compaction's trigger, a fallback's model. Every fact's row carries the thread, Pilot's Session
-  and Turn and its moment, so a filter falls from one fact to another by the conversation.
+  compaction's trigger, a fallback's model. **Work unit**: a Work Unit the labeller recognised, at
+  its `started_at`, which the Unit Measures' figures are read on. Every fact's row but a Work
+  Unit's carries the thread, Pilot's Session and Turn and its moment, so a filter falls from one
+  fact to another by the conversation; a Work Unit lies in no conversation, so a filter on another
+  fact's dimension keeps none of its rows (`statements._threaded`). A Call's and an Event's row
+  carry the Work Unit their Launch carried out, the lowest, and the Call's Segment.
 - **The joins** reach the record from a fact's row, all of them many to one, so that a row is never
-  lost or doubled. A Call's work item and project are reached through its Launch's Session.
+  lost or doubled. A Call's work item and project are reached through its Launch's Session; a row's
+  Work Unit through `unit` and each unit above it through `unit_1`, `unit_2`… (`facts.unit_joins`),
+  as many steps as the longest chain of the declared nestings; a Call's Segment through `segment`;
+  and a unit's figure of a Unit Measure through `measure_<code>`.
 - **The dimensions** (`dimensions.py`) are what a view is By, filtered on and colored by: the parts
-  `project`, `psession` (a Session of Pilot's), `pturn`, `sitting`, `conversation` and `call`; the
-  attributes `source` (`work`, `pilot` or `chat`), `work_type` (`chat:<kind>`, `conversation`,
-  `job:<trigger>`, `clarification`, `research`, `claimed` or `work`), `session_kind`,
-  `turn_cause`, `person`, `failed`, `environment`, `repository`, `agent_type`, `sub`, `model`,
-  `effort`, `stop_reason`, `miss`, `miss_cause`, `past_ttl`, `rewind`, `compaction`,
-  `compact_trigger`, `estimate`, `event_kind`, `event_error` and the version dimensions; the times
-  `qweek`, `day`, `weekday` and `hod`, the last three derived in `DASHBOARD_ZONE`; and the orders
-  `session_start` and `turn_seq`. A two-valued dimension's values are `1` and `0`. A sitting is the
-  threads on no project that follow one another within `DASHBOARD_SITTING_GAP_SECONDS`, keyed by
-  the first one's first Call. Four parts read their names from what Pilot records (D287) and carry
-  the instant a value is at (`Dimension.at`): a Pilot session its work item's number and title,
-  "#2 Sort the spices", else its chat's kind, "Project chat", else its Session Kind's name, at its
-  start; a Pilot turn its number and its cause, underscores as spaces, "Turn 1 · brief", at its
-  start; a conversation its sub-agent's type and task, "Explore · Find where the jars are counted",
+  `project`, `psession` (a Session of Pilot's), `pturn`, `sitting`, `conversation`, `call` and
+  `work_unit` (a Call's the lowest Work Unit its Launch carried out), and a part per Work Unit
+  Kind; the attributes `source` (`work`, `pilot` or `chat`), `work_type` (`chat:<kind>`,
+  `conversation`, `job:<trigger>`, `clarification`, `research`, `claimed` or `work`),
+  `session_kind`, `turn_cause`, `person`, `failed`, `environment`, `repository`, `agent_type`,
+  `sub`, `model`, `effort`, `stop_reason`, `miss`, `miss_cause`, `past_ttl`, `rewind`,
+  `compaction`, `compact_trigger`, `estimate`, `event_kind`, `event_error` and the version
+  dimensions; the labels' attributes, a Call's `call_class`, `avoidable_kind`, `wait_cause` and
+  `segment_kind` (its Segment's kind), and its Work Unit's `role`, `round`, `variant`, `outcome`,
+  `rework_kind` and `rework` (any rework kind); the times `qweek`, `day`, `weekday` and `hod`, the
+  last three derived in `DASHBOARD_ZONE`; and the orders `session_start`, `turn_seq` and each Work
+  Unit Kind's. A two-valued dimension's values are `1` and `0`. A sitting is the threads on no
+  project that follow one another within `DASHBOARD_SITTING_GAP_SECONDS`, keyed by the first one's
+  first Call. Four parts read their names from what Pilot records (D287) and carry the instant a
+  value is at (`Dimension.at`): a Pilot session its work item's number and title, "#2 Sort the
+  spices", else its chat's kind, "Project chat", else its Session Kind's name, at its start; a Pilot
+  turn its number and its cause, underscores as spaces, "Turn 1 · brief", at its start; a
+  conversation its sub-agent's type and task, "Explore · Find where the jars are counted",
   "Sub-agent" with neither, or "Main thread", at its first Call; a Call its place in its
   conversation, "Call 12", at its end. Every reader of a dimension's name reads them: the rows, the
-  items, a series, a color's values and a filter's pane.
+  items, a series, a color's values and a filter's pane. A value of a list the labeller declares
+  carries its line and its place, the values standing in their list's order and one it no longer
+  declares last, with no place; an Event Kind it declares carries its own too.
+- **A Work Unit Kind's part** is a row's unit of that kind, its own Work Unit or the nearest one it
+  sits in (`dimensions._level`, a `CASE` up the unit joins), named by the unit's title and by the
+  kind's name for one and many alike, `(No <kind>)` for a row with none. It can be an entry's
+  focus. Its row drills to the first kind by its place that sits in it, else to `conversation`, and
+  its row of none to `work_unit`, whose row drills to `conversation` and its row of none to
+  `psession`. It lies along its order, `<key>_start` ("<kind>, in the order started",
+  `dimensions.kind_order`), each unit by its `started_at`, else its first row's moment, so that the
+  units of one parent stand in the order of their start. A key the labeller's code takes is its
+  code where Pilot's code has not taken it, else the code with `_2`, `_3`… after it
+  (`dimensions.declared_keys`), so a declared code never displaces an entry of Pilot's; a kind's
+  order and a Unit Measure's figure are keyed the same way.
 - **The figures** (`measures.py`) are numbers of one fact's row: `cost`, `tokens`, `calls`,
   `misses`, `miss_cost`, `past_ttl`, `compactions`, `rewinds`, `ctx` (the context's tokens),
-  `waited`, `took`, `turns`, `turn_time`, `failed_turns`, `reported_cost`, `events` and
-  `error_events`. A measure is a figure under an **aggregate**, `sum`, `median`, `mean`, `max`,
-  `p90` or `count`, at a **grain**: any part, or a fact's own rows. A figure says how an item takes
-  its rows together, a sum but for `ctx`, the largest.
+  `waited`, `took`, `turns`, `turn_time`, `failed_turns`, `reported_cost`, `events`,
+  `error_events` and `units`, the Work Units; and a figure of the Work Unit fact per Unit Measure
+  the labeller declares (`measures.measure_figure`), a unit's amount of it. A measure is a figure
+  under an **aggregate**, `sum`, `median`, `mean`, `max`, `p90` or `count`, at a **grain**: any
+  part, or a fact's own rows. A figure says how an item takes its rows together, a sum but for
+  `ctx`, the largest.
 - **The built-in ratios**: `overhead`, the cost of Pilot's chats, jobs and runs over that of its
-  work items, what ran outside Pilot in neither; `miss_share`, the misses' cost over all; and
-  `per_call`, cost over Calls. A stored ratio joins them ([below](#what-the-dashboard-stores)).
+  work items, what ran outside Pilot in neither; `miss_share`, the misses' cost over all;
+  `rework_share`, the cost of work done again, `cost.sum(rework=1)`, over all; and `per_call`, cost
+  over Calls. A stored ratio joins them ([below](#what-the-dashboard-stores)).
 - **The time ranges**: `today`, `d2`, `d7`, `qw` (the running quota week), `lqw` (the one before
   it), `l2`, `l4`, `l8` and `all`, each a unit of days or quota weeks, a count and a step back.
-- **The markers**: a version marker per Component, a line where a version was first seen.
+- **The markers**: a version marker per Component, a line where a version was first seen; and
+  `model`, "Model and effort", where a role's configuration changed as it ran, which names no
+  dimension ([below](#the-answers)).
 
 **The process keeps its catalogue** (`CatalogueService`, the container's `catalogue_service`)
 until something it was assembled from changes: a publication that writes a vocabulary's row, a
-write of a quick filter or a ratio, and a load of the workflow's views and ratios each drop it
+declaration of the labeller's vocabularies that writes one, a write of a quick filter or a ratio,
+and a load of the workflow's views and ratios each drop it
 after their commit, and the next read assembles it again. A stored ratio or quick filter is offered
 only where what it names reads under the rest of the catalogue, its measures, its chip and its
 amount's figure, and a ratio only under a key no built-in ratio has: one that does not is left out,
@@ -168,7 +203,7 @@ times as instants with the engine's zone beside them, never text: the page write
 | `GET /api/dashboard/rows` | each measure on every row of the By and on the All row, split by the color, in the view's sort, a row of one of the four parts that carry an instant with its `at` (`rows.py`) |
 | `GET /api/dashboard/series` | a view in order or over time: its points along the axis, each measure as a panel with its dots, outliers, rolling band and median, and the markers (`series.py`) |
 | `GET /api/dashboard/series/events` | a series' events strip: each point's events by kind and how many are errors, apart from the series so that it never holds the chart up (`strip.py`) |
-| `GET /api/dashboard/lanes` | a lane per row of the By that holds Calls, with each measure, its waits and its events (`lanes.py`) |
+| `GET /api/dashboard/lanes` | a lane per row of the By that holds Calls, with each measure, its runs, its waits and its events, and `run_color`, what the runs are colored by (`lanes.py`) |
 | `GET /api/dashboard/items` | the items of the row selected, else of every row, at the view's grain, or an opened item's calls (`items.py`) |
 | `GET /api/dashboard/conversations/<transcript_id>/calls` | every Call of one thread over all time, in its file's order, each with its events and whether the view's window and scope hold it; `404` for a thread the record lacks |
 | `GET /api/dashboard/values?dimension=&search=` | one attribute's values for a filter's pane, at once ([below](#the-two-counts)) |
@@ -195,12 +230,29 @@ times as instants with the engine's zone beside them, never text: the page write
   no part. A sum or a count is a column per point, stacked by the color; a measure over the items of
   a part other than the points' is the items' dots, at most 4,000; any other one dot a point. The
   band is the rolling median and its quartiles over `roll`'s items, warmed on the members or items
-  before the window under the scope alone; the markers the latest 24 of a kind within the axis.
+  before the window under the scope alone. A panel's outliers, its points' in order and its dots',
+  are judged by the outlier rows' rule above among the items every row of which carries one
+  `role`, the rest together, and over time the points all together (`series._outlying`). The
+  markers are the latest 24 of a kind within the axis: a version first seen, with the one it
+  followed, or a `Shift` of the marker `model`, where a Work Unit's model and effort, those of its
+  first Call on a main thread, differ from those of the unit of the same role before it, under the
+  scope over all time, at the unit's start, else its first Call's moment, with its `role`, the
+  configuration it ran on and the one before (`statements.shifts`).
 - **The lanes**, at most 200, the earliest first: a wait is a gap of 60 s or more between a lane's
   rows, past the cache's lifetime where the Call ending it waited past it; an event carries its
-  thread, the Call it is held on and that Call's cost, and its detail (D274). Past 12,000 waits and
-  events in all they merge at the whole span's resolution, the span over 4,000, doubled until they
-  fit, a merged one saying how many it holds and an event of more than one carrying no detail.
+  thread, the Call it is held on and that Call's cost, and its detail (D274). A run is a stretch of
+  a lane's consecutive rows of one value and one thread with no wait in it, from its first row's
+  moment to the next run's first, or to its own last row's where a wait or the lane's end follows,
+  with its conversation, its rows and their cost (`statements.runs`). Its value is the view's
+  color's where the Calls carry that color, else its Segment's kind (`lanes.run_dimension`; D294), so
+  `col=token_kind` and a color the Calls do not carry color them by the Segment's kind; `run_color`
+  lists the values the runs hold, a color's by their runs' cost, the largest first, past 12 folded
+  into one, the Segment kinds in their list's order, none last, and a run names its value by its
+  place there. Past 12,000 runs, waits and events in all they merge at the whole span's resolution,
+  the span over 4,000, doubled until they fit: two abutting runs where either is shorter than the
+  resolution, or both are of one value and one thread, into one of the costlier's value and thread
+  holding both's rows and cost; a merged wait or event says how many it holds, and an event of more
+  than one carries no detail.
 - **The items** are those of the state's `ig`, else the first measure's grain, else the
   conversations; with an item opened (`it`) its calls; at most 2,000, the earliest first, with the
   count of all. Each carries the figures the catalogue gives its grain, and an item that is one row
@@ -397,20 +449,32 @@ a view's band as its state writes it; a part of a view's state a read drops is a
 `backend/tools/timing/` times every part of the engine on a generated history, at production's
 database settings: `instance.py` makes a PostgreSQL of its own in the prd cluster's `development`
 namespace and removes it after (`instance.yaml`, run in `cexec iac`); `history.py` writes a history
-of a given number of Calls in the scenario's invented words, through the app's own publication;
-`parts.py` reads each part through the app as the page reads it, over all time and over a quota
-week, and runs each statement again under `EXPLAIN (ANALYZE, BUFFERS)`, writing
-`results/<calls>.json`; and `report.py` renders the report, `report.md`, from two results. The
-report gives each part's time at both sizes, the size at which it passes two seconds, the record's
-size on disk and the burst, and the engine's two defaults above are read off it. Its *One walk*
-prices what the walk's event makes one page with the dashboard open read again, the view in view's
-rows and its quick filters' counts ([`dashboard-screen.md`](dashboard-screen.md#kept-current)),
-summed from the parts at both sizes against the walk's 30 s, with an open filter's pane's values
-beside them (D288); no bar is set for it. `tests/tools/` pins the tools.
+of a given number of Calls in the scenario's invented words, a day of `pilot_scenario.history`'s
+at a time, through the app's own publication, each conversation labelled by the stub labeller and
+its vocabularies declared first. Over each day it draws Work Units from a seed of their own
+(`draw`): each work session of Pilot's carries out a leg of its project's errand of the day in one
+of three roles (`ROLES`), under six kinds nested as the workflow's labeller nests its own (`KINDS`,
+`NESTING`), a role's model drawn again every four weeks (`configured`) and a later round now and
+then work done again. `parts.py` reads each part through the app as the page reads it, over all
+time and over a quota week, a collector's call under the collector's bearer, and runs each
+statement again under `EXPLAIN (ANALYZE, BUFFERS)`, writing the file its `--out` names:
+`results/<calls>.json` for the engine's parts, `results/labeller/<calls>.json` for those the
+labels give and the inventory, timed with `--only` and so with no burst. `report.py` prints the
+report's tables from two results, a table with no row left out: `report.md` holds the engine's,
+and in § The labeller's part the labeller's part's. The report gives each part's time at both
+sizes, the size at which it passes two seconds, the record's size on disk and the burst where one
+was read, and the engine's two defaults above are read off it. Its *One walk* prices what the walk's
+event makes one page with the dashboard open read again, the view in view's rows and its quick
+filters' counts ([`dashboard-screen.md`](dashboard-screen.md#kept-current)), summed from the parts
+at both sizes against the walk's 30 s, with an open filter's pane's values beside them (D288); no
+bar is set for it. `tests/tools/` pins the tools.
 
 ## Testing it
 
-The engine's suite is `backend/tests/dashboard/`, a module a file of the package, with the routes'
+The engine's suite is `backend/tests/dashboard/`, a module a file of the package, and the one
+rule for every kind of work, a kind's order, the configuration's marker, the outliers among one
+role and work done again, in `test_rules.py`, on invented units and on the scenario's units as the
+stub labeller gives them; with the routes'
 in `tests/api/test_dashboard.py` and `test_dashboard_store.py`, the store in
 `tests/services/test_dashboard_store_service.py` and `tests/models/test_dashboard.py`, and the
 load's tool in `tests/pilot_mcp/`. `tests/support/dashboard.py` assembles a test's own catalogue
