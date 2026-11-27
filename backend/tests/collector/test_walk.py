@@ -1777,7 +1777,9 @@ class TestTheLabels:
         rides = [each for each in sent if _named(each) == RIDES]
         assert [each.labelling is None for each in rides] == [False, False, True]
         (refused,) = _refused_labels(caplog)
-        assert refused.startswith(f"Pilot refused the labels of the transcript {RIDES}, ")
+        assert refused.startswith(
+            f"Pilot refused the labels of the transcript {RIDES}, "
+        )
         assert "409: " in refused
         assert "the stage has no service user to make it" in refused
 
