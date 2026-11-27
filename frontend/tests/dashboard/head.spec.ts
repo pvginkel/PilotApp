@@ -48,6 +48,13 @@ const historyLength = (page: Page) => page.evaluate(() => history.length);
 /** The state the address names, its tab's id read off. */
 const stateOf = (page: Page) => decodeURIComponent(new URL(page.url()).hash.replace(/^#dash\/[^/=]+\//, ''));
 
+/**
+ * By's list once every entry it draws has its count: until then an entry of one value or none moves
+ * behind "n hidden" as its count arrives, and the entries under it move up.
+ */
+const counted = (dashboard: DashboardPage, page: Page) =>
+  expect(dashboard.listGroups('by').getByTestId('dashboard.by.entry').filter({ hasNot: page.getByTestId('dashboard.by.entry.count') })).toHaveCount(0);
+
 /** The text of every heading of the list `of`'s groups, in its order; a group under a rule has none. */
 const headings = (dashboard: DashboardPage, of: 'by' | 'color') => dashboard.listGroups(of).evaluateAll((groups) => groups.map((group) => group.querySelector('.menu-head')?.textContent ?? null));
 
@@ -175,6 +182,7 @@ test.describe('By', () => {
     const { recipeBox, chip } = await tally(people, projects, collection);
     await shell.open(`${projectAddress(recipeBox)}${dashboardAddress(`t=all&by=project&m=cost.sum&${chip}`)}`);
     await dashboard.by.click();
+    await counted(dashboard, page);
     const model = dashboard.entry('by', 'Model');
     await expect(model.star).toHaveCSS('opacity', '0');
     await model.item.hover();
@@ -191,6 +199,7 @@ test.describe('By', () => {
 
     await page.reload();
     await dashboard.by.click();
+    await counted(dashboard, page);
     await expect(dashboard.listLabels('by', dashboard.listGroups('by').first())).toHaveText(['Call', 'Model']);
     await dashboard.entry('by', 'Call').item.hover();
     await dashboard.entry('by', 'Call').star.click();
