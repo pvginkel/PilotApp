@@ -1,6 +1,7 @@
-"""The collector's routes (F152.2, F152.3, F152.6, F152.14): Pilot's
-inventory, a publication of one transcript, the labeller's vocabularies and a
-walk's end, under the collector's bearer.
+"""The collector's routes (F152.2, F152.3, F152.6, F152.11, F152.14,
+F158.5): Pilot's inventory, a publication of one transcript, the labeller's
+vocabularies, the Repositories and a read of one, the Files and their
+classes, and a walk's end, under the collector's bearer.
 
 Registered on the app, not on `api_bp`, so the OIDC gate never sees them:
 the caller is a collector, which signs in to nothing, and every call passes
@@ -12,8 +13,10 @@ from typing import Any
 
 from dependency_injector.wiring import Provide, inject
 from flask import Blueprint, Response, g, jsonify, request
+from pilot_collection.files import FileClassesSchema, FilesQuerySchema, FilesSchema
 from pilot_collection.inventory import InventorySchema
 from pilot_collection.publication import CollectorProtocolRangeSchema, PublicationSchema
+from pilot_collection.repositories import RepositoriesSchema, RepositoryReadSchema
 from pilot_collection.vocabularies import VocabulariesSchema
 from spectree import Response as SpectreeResponse
 
@@ -21,6 +24,7 @@ from app.exceptions import CollectorProtocolUnsupportedException
 from app.schemas.common import ApiErrorResponseSchema
 from app.services.container import ServiceContainer
 from app.services.publication_service import PublicationService
+from app.services.repository_service import RepositoryService
 from app.services.vocabulary_service import VocabularyService
 from app.services.walk_service import WalkService
 from app.utils.auth import public
@@ -217,6 +221,169 @@ def declare_vocabularies(
     """
     vocabularies = VocabulariesSchema.model_validate(request.get_json())
     vocabulary_service.declare(vocabularies)
+    return Response(status=204)
+
+
+@collector_bp.route("/repositories", methods=["GET"])
+@public
+@api.validate(
+    resp=SpectreeResponse(
+        HTTP_200=RepositoriesSchema,
+        HTTP_401=ApiErrorResponseSchema,
+        HTTP_426=CollectorProtocolRangeSchema,
+    ),
+)
+@inject
+def repositories(
+    repository_service: RepositoryService = Provide[
+        ServiceContainer.repository_service
+    ],
+) -> Any:
+    """Every Repository Pilot holds, the cursor of a collector's reads of
+    their histories from its clones of the mirror.
+
+    Headers: `Authorization`, `Bearer` and the setting `COLLECTOR_TOKEN`;
+    `X-Pilot-Collector-Protocol`, the protocol version the collector speaks.
+
+    - 200: each Repository by name, with the whole hash of every Commit a
+      read of it gave. A commit of its history not among them is one Pilot
+      lacks, to be read; a Repository with none is read whole.
+    - 401: the call does not carry the collector's bearer, and every call
+      while `COLLECTOR_TOKEN` is empty.
+    - 426, with the range `{min, max}`: the call names a protocol version
+      outside it, or none.
+    """
+    return repository_service.repositories()
+
+
+@collector_bp.route("/commits", methods=["POST"])
+@public
+@api.validate(
+    json=RepositoryReadSchema,
+    resp=SpectreeResponse(
+        HTTP_204=None,
+        HTTP_400=ApiErrorResponseSchema,
+        HTTP_401=ApiErrorResponseSchema,
+        HTTP_413=ApiErrorResponseSchema,
+        HTTP_426=CollectorProtocolRangeSchema,
+    ),
+)
+@inject
+def read_commits(
+    repository_service: RepositoryService = Provide[
+        ServiceContainer.repository_service
+    ],
+) -> Any:
+    """What a read of one Repository's history gave: commits Pilot lacked,
+    each with its whole hash, its author's time, its subject and its lines
+    per file, and when they were read. One call, one transaction.
+
+    Headers: `Authorization`, `Bearer` and the setting `COLLECTOR_TOKEN`;
+    `X-Pilot-Collector-Protocol`, the protocol version the collector speaks.
+
+    Each answer is the call's outcome, and all but the first leave the record
+    as it was:
+
+    - 204: Pilot holds every commit as read. One completes the Commit held
+      from the call that made it whose hash it starts with, else the one
+      whose subject it has and whose call its author's time lies within the
+      hour of; a hash wins over a subject, and a Commit is tied once. One
+      that completes none is a Commit no Transcript made. A commit Pilot
+      holds as read already changes nothing.
+    - 401: the call does not carry the collector's bearer, and every call
+      while `COLLECTOR_TOKEN` is empty.
+    - 426, with the range `{min, max}`: the call names a protocol version
+      outside it, or none.
+    - 400: the call does not validate, every fault named at once: the fields
+      that are not the call's shape, or, in `error`, a Repository Pilot does
+      not hold, a commit given twice or a file one commit changes twice. The
+      same call is refused again.
+    - 413: the body is over `MAX_UPLOAD_SIZE_MB`. The same call is refused
+      again.
+    """
+    read = RepositoryReadSchema.model_validate(request.get_json())
+    repository_service.read(read)
+    return Response(status=204)
+
+
+@collector_bp.route("/files", methods=["GET"])
+@public
+@api.validate(
+    query=FilesQuerySchema,
+    resp=SpectreeResponse(
+        HTTP_200=FilesSchema,
+        HTTP_400=ApiErrorResponseSchema,
+        HTTP_401=ApiErrorResponseSchema,
+        HTTP_426=CollectorProtocolRangeSchema,
+    ),
+)
+@inject
+def files(
+    repository_service: RepositoryService = Provide[
+        ServiceContainer.repository_service
+    ],
+) -> Any:
+    """The Files a collector has the labeller class: every File Pilot
+    holds, or with `unclassed` those with no class.
+
+    Headers: `Authorization`, `Bearer` and the setting `COLLECTOR_TOKEN`;
+    `X-Pilot-Collector-Protocol`, the protocol version the collector speaks.
+
+    - 200: each File by its Repository's name and its path, in that order;
+      none where none is asked for.
+    - 400: `unclassed` is not a boolean.
+    - 401: the call does not carry the collector's bearer, and every call
+      while `COLLECTOR_TOKEN` is empty.
+    - 426, with the range `{min, max}`: the call names a protocol version
+      outside it, or none.
+    """
+    query = FilesQuerySchema.model_validate(request.args.to_dict())
+    return repository_service.files(unclassed=query.unclassed)
+
+
+@collector_bp.route("/classes", methods=["PUT"])
+@public
+@api.validate(
+    json=FileClassesSchema,
+    resp=SpectreeResponse(
+        HTTP_204=None,
+        HTTP_400=ApiErrorResponseSchema,
+        HTTP_401=ApiErrorResponseSchema,
+        HTTP_413=ApiErrorResponseSchema,
+        HTTP_426=CollectorProtocolRangeSchema,
+    ),
+)
+@inject
+def classify_files(
+    repository_service: RepositoryService = Provide[
+        ServiceContainer.repository_service
+    ],
+) -> Any:
+    """The classes the labeller gave Files Pilot holds, each by its
+    Repository's name and its path. One call, one transaction.
+
+    Headers: `Authorization`, `Bearer` and the setting `COLLECTOR_TOKEN`;
+    `X-Pilot-Collector-Protocol`, the protocol version the collector speaks.
+
+    Each answer is the call's outcome, and all but the first leave the record
+    as it was:
+
+    - 204: each File the call names holds the class it names; only those
+      that differed were written. A File the call does not name keeps its
+      class.
+    - 401: the call does not carry the collector's bearer, and every call
+      while `COLLECTOR_TOKEN` is empty.
+    - 426, with the range `{min, max}`: the call names a protocol version
+      outside it, or none.
+    - 400: the call does not validate, every fault named at once: the fields
+      that are not the call's shape, or, in `error`, a File given twice, one
+      Pilot does not hold, or a class the labeller does not declare. The
+      same call is refused again.
+    - 413: the body is over `MAX_UPLOAD_SIZE_MB`. The same call is refused
+      again.
+    """
+    classes = FileClassesSchema.model_validate(request.get_json())
+    repository_service.classify(classes)
     return Response(status=204)
 
 

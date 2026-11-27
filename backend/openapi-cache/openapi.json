@@ -4136,6 +4136,113 @@
         "title": "FavouritesSchema",
         "type": "object"
       },
+      "FileClassesSchema.c83c044": {
+        "additionalProperties": false,
+        "description": "The classes the labeller gave a collector's Files.",
+        "properties": {
+          "classes": {
+            "description": "Each File's class",
+            "items": {
+              "$ref": "#/components/schemas/FileClassesSchema.c83c044.FileClassSchema"
+            },
+            "title": "Classes",
+            "type": "array"
+          }
+        },
+        "required": [
+          "classes"
+        ],
+        "title": "FileClassesSchema",
+        "type": "object"
+      },
+      "FileClassesSchema.c83c044.FileClassSchema": {
+        "additionalProperties": false,
+        "description": "The class the labeller gives one File.",
+        "properties": {
+          "file_class": {
+            "description": "The File Class's code, one the labeller declares",
+            "examples": [
+              "code"
+            ],
+            "minLength": 1,
+            "title": "File Class",
+            "type": "string"
+          },
+          "path": {
+            "description": "Its path within the repository",
+            "pattern": "^[^/]",
+            "title": "Path",
+            "type": "string"
+          },
+          "repository": {
+            "description": "The File's Repository's name",
+            "minLength": 1,
+            "title": "Repository",
+            "type": "string"
+          }
+        },
+        "required": [
+          "repository",
+          "path",
+          "file_class"
+        ],
+        "title": "FileClassSchema",
+        "type": "object"
+      },
+      "FilesQuerySchema.c83c044": {
+        "description": "Which Files: every one, or those with no class.",
+        "properties": {
+          "unclassed": {
+            "default": false,
+            "description": "True for the Files with no class; false for every File",
+            "title": "Unclassed",
+            "type": "boolean"
+          }
+        },
+        "title": "FilesQuerySchema",
+        "type": "object"
+      },
+      "FilesSchema.c83c044": {
+        "description": "The Files asked for.",
+        "properties": {
+          "files": {
+            "description": "Each File, by its Repository's name and its path",
+            "items": {
+              "$ref": "#/components/schemas/FilesSchema.c83c044.HeldFileSchema"
+            },
+            "title": "Files",
+            "type": "array"
+          }
+        },
+        "required": [
+          "files"
+        ],
+        "title": "FilesSchema",
+        "type": "object"
+      },
+      "FilesSchema.c83c044.HeldFileSchema": {
+        "description": "A File Pilot holds.",
+        "properties": {
+          "path": {
+            "description": "Its path within the repository",
+            "pattern": "^[^/]",
+            "title": "Path",
+            "type": "string"
+          },
+          "repository": {
+            "description": "Its Repository's name",
+            "minLength": 1,
+            "title": "Repository",
+            "type": "string"
+          }
+        },
+        "required": [
+          "repository",
+          "path"
+        ],
+        "title": "HeldFileSchema",
+        "type": "object"
+      },
       "FinishRequestSchema.4ff8b5e": {
         "additionalProperties": false,
         "description": "How the project is finished.",
@@ -18717,6 +18824,155 @@
         "title": "RenameViewSchema",
         "type": "object"
       },
+      "RepositoriesSchema.8c3a6c7": {
+        "description": "Every Repository Pilot holds.",
+        "properties": {
+          "repositories": {
+            "description": "Every Repository Pilot holds, by name",
+            "items": {
+              "$ref": "#/components/schemas/RepositoriesSchema.8c3a6c7.HeldRepositorySchema"
+            },
+            "title": "Repositories",
+            "type": "array"
+          }
+        },
+        "required": [
+          "repositories"
+        ],
+        "title": "RepositoriesSchema",
+        "type": "object"
+      },
+      "RepositoriesSchema.8c3a6c7.HeldRepositorySchema": {
+        "description": "A Repository Pilot holds, and what a read of it gave.",
+        "properties": {
+          "name": {
+            "description": "The name of its checkout under `/work`",
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "read": {
+            "description": "The whole hash of every Commit a read of it gave, in their order: a commit of its history not here is one Pilot lacks",
+            "items": {
+              "pattern": "^(?:[0-9a-f]{40}|[0-9a-f]{64})$",
+              "type": "string"
+            },
+            "title": "Read",
+            "type": "array"
+          }
+        },
+        "required": [
+          "name",
+          "read"
+        ],
+        "title": "HeldRepositorySchema",
+        "type": "object"
+      },
+      "RepositoryReadSchema.8c3a6c7": {
+        "additionalProperties": false,
+        "description": "What a read of one Repository's clone gave: the commits Pilot\nlacked.",
+        "properties": {
+          "commits": {
+            "description": "The commits read",
+            "items": {
+              "$ref": "#/components/schemas/RepositoryReadSchema.8c3a6c7.ReadCommitSchema"
+            },
+            "title": "Commits",
+            "type": "array"
+          },
+          "read_at": {
+            "description": "When their lines were read",
+            "format": "date-time",
+            "title": "Read At",
+            "type": "string"
+          },
+          "repository": {
+            "description": "The Repository's name, as Pilot holds it",
+            "minLength": 1,
+            "title": "Repository",
+            "type": "string"
+          }
+        },
+        "required": [
+          "repository",
+          "read_at",
+          "commits"
+        ],
+        "title": "RepositoryReadSchema",
+        "type": "object"
+      },
+      "RepositoryReadSchema.8c3a6c7.ReadCommitSchema": {
+        "additionalProperties": false,
+        "description": "A commit of the Repository's history, as its clone gives it.",
+        "properties": {
+          "files": {
+            "description": "Its changes, one per file; none for a merge commit",
+            "items": {
+              "$ref": "#/components/schemas/RepositoryReadSchema.8c3a6c7.ReadFileChangeSchema"
+            },
+            "title": "Files",
+            "type": "array"
+          },
+          "made_at": {
+            "description": "Its author's time, which a rebase keeps",
+            "format": "date-time",
+            "title": "Made At",
+            "type": "string"
+          },
+          "sha": {
+            "description": "Its whole hash",
+            "pattern": "^(?:[0-9a-f]{40}|[0-9a-f]{64})$",
+            "title": "Sha",
+            "type": "string"
+          },
+          "subject": {
+            "description": "Its message's first line, as `%s` gives it",
+            "title": "Subject",
+            "type": "string"
+          }
+        },
+        "required": [
+          "sha",
+          "made_at",
+          "subject",
+          "files"
+        ],
+        "title": "ReadCommitSchema",
+        "type": "object"
+      },
+      "RepositoryReadSchema.8c3a6c7.ReadFileChangeSchema": {
+        "additionalProperties": false,
+        "description": "A change one commit made to one file, as git's rename detection\ngives it: a moved file's on its new path, a deleted file's lines as\nremoved.",
+        "properties": {
+          "lines_added": {
+            "description": "The lines the commit added to it",
+            "maximum": 2147483647,
+            "minimum": 0,
+            "title": "Lines Added",
+            "type": "integer"
+          },
+          "lines_removed": {
+            "description": "The lines the commit removed from it",
+            "maximum": 2147483647,
+            "minimum": 0,
+            "title": "Lines Removed",
+            "type": "integer"
+          },
+          "path": {
+            "description": "The file's path within the repository",
+            "pattern": "^[^/]",
+            "title": "Path",
+            "type": "string"
+          }
+        },
+        "required": [
+          "path",
+          "lines_added",
+          "lines_removed"
+        ],
+        "title": "ReadFileChangeSchema",
+        "type": "object"
+      },
       "RowsResponseSchema.b67cf98": {
         "description": "A view's rows.",
         "properties": {
@@ -27735,6 +27991,198 @@
         "tags": []
       }
     },
+    "/api/collector/classes": {
+      "put": {
+        "description": "Headers: `Authorization`, `Bearer` and the setting `COLLECTOR_TOKEN`; `X-Pilot-Collector-Protocol`, the protocol version the collector speaks.\n\nEach answer is the call's outcome, and all but the first leave the record as it was:\n\n- 204: each File the call names holds the class it names; only those   that differed were written. A File the call does not name keeps its   class. - 401: the call does not carry the collector's bearer, and every call   while `COLLECTOR_TOKEN` is empty. - 426, with the range `{min, max}`: the call names a protocol version   outside it, or none. - 400: the call does not validate, every fault named at once: the fields   that are not the call's shape, or, in `error`, a File given twice, one   Pilot does not hold, or a class the labeller does not declare. The   same call is refused again. - 413: the body is over `MAX_UPLOAD_SIZE_MB`. The same call is refused   again.",
+        "operationId": "put__api_collector_classes",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FileClassesSchema.c83c044"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Content Too Large"
+          },
+          "426": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CollectorProtocolRangeSchema.9ed0c05"
+                }
+              }
+            },
+            "description": "Upgrade Required"
+          }
+        },
+        "summary": "The classes the labeller gave Files Pilot holds, each by its Repository's name and its path. One call, one transaction.",
+        "tags": []
+      }
+    },
+    "/api/collector/commits": {
+      "post": {
+        "description": "Headers: `Authorization`, `Bearer` and the setting `COLLECTOR_TOKEN`; `X-Pilot-Collector-Protocol`, the protocol version the collector speaks.\n\nEach answer is the call's outcome, and all but the first leave the record as it was:\n\n- 204: Pilot holds every commit as read. One completes the Commit held   from the call that made it whose hash it starts with, else the one   whose subject it has and whose call its author's time lies within the   hour of; a hash wins over a subject, and a Commit is tied once. One   that completes none is a Commit no Transcript made. A commit Pilot   holds as read already changes nothing. - 401: the call does not carry the collector's bearer, and every call   while `COLLECTOR_TOKEN` is empty. - 426, with the range `{min, max}`: the call names a protocol version   outside it, or none. - 400: the call does not validate, every fault named at once: the fields   that are not the call's shape, or, in `error`, a Repository Pilot does   not hold, a commit given twice or a file one commit changes twice. The   same call is refused again. - 413: the body is over `MAX_UPLOAD_SIZE_MB`. The same call is refused   again.",
+        "operationId": "post__api_collector_commits",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RepositoryReadSchema.8c3a6c7"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Content Too Large"
+          },
+          "426": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CollectorProtocolRangeSchema.9ed0c05"
+                }
+              }
+            },
+            "description": "Upgrade Required"
+          }
+        },
+        "summary": "What a read of one Repository's history gave: commits Pilot lacked, each with its whole hash, its author's time, its subject and its lines per file, and when they were read. One call, one transaction.",
+        "tags": []
+      }
+    },
+    "/api/collector/files": {
+      "get": {
+        "description": "Headers: `Authorization`, `Bearer` and the setting `COLLECTOR_TOKEN`; `X-Pilot-Collector-Protocol`, the protocol version the collector speaks.\n\n- 200: each File by its Repository's name and its path, in that order;   none where none is asked for. - 400: `unclassed` is not a boolean. - 401: the call does not carry the collector's bearer, and every call   while `COLLECTOR_TOKEN` is empty. - 426, with the range `{min, max}`: the call names a protocol version   outside it, or none.",
+        "operationId": "get__api_collector_files",
+        "parameters": [
+          {
+            "description": "True for the Files with no class; false for every File",
+            "in": "query",
+            "name": "unclassed",
+            "required": false,
+            "schema": {
+              "default": false,
+              "description": "True for the Files with no class; false for every File",
+              "title": "Unclassed",
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FilesSchema.c83c044"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "426": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CollectorProtocolRangeSchema.9ed0c05"
+                }
+              }
+            },
+            "description": "Upgrade Required"
+          }
+        },
+        "summary": "The Files a collector has the labeller class: every File Pilot holds, or with `unclassed` those with no class.",
+        "tags": []
+      }
+    },
     "/api/collector/inventory": {
       "get": {
         "description": "Headers: `Authorization`, `Bearer` and the setting `COLLECTOR_TOKEN`; `X-Pilot-Collector-Protocol`, the protocol version the collector speaks.\n\n- 200: every transcript Pilot holds, a main thread's and a sub-agent's,   each by its `session_id` and `agent_id` with its last publication's   `file_size`, `file_modified_at` and collector's version, which are what   an appended publication of it builds on, its `replayed_size`, and the   labeller's version and stamp its labels were written under, none for   one published with no labelling; every conversation a Session of   Pilot's ran, collected or not, with what the labeller is handed with   it, its Sessions with their Holds and Turns and the Documents they   put; and the walk's two settings, `COLLECTOR_WALK_INTERVAL_SECONDS` and   `COLLECTOR_SETTLING_SECONDS`. A transcript the home has and the answer   lacks, or holds at another size, time or version, is one to publish;   one whose `replayed_size` is short of its `file_size`, its file   unchanged for the settling time, is published whole once. - 401: the call does not carry the collector's bearer, and every call   while `COLLECTOR_TOKEN` is empty. - 426, with the range `{min, max}`: the call names a protocol version   outside it, or none.",
@@ -27857,6 +28305,57 @@
           }
         },
         "summary": "A collector's publication of one transcript, a main thread's or one sub-agent's: one call, one transaction.",
+        "tags": []
+      }
+    },
+    "/api/collector/repositories": {
+      "get": {
+        "description": "Headers: `Authorization`, `Bearer` and the setting `COLLECTOR_TOKEN`; `X-Pilot-Collector-Protocol`, the protocol version the collector speaks.\n\n- 200: each Repository by name, with the whole hash of every Commit a   read of it gave. A commit of its history not among them is one Pilot   lacks, to be read; a Repository with none is read whole. - 401: the call does not carry the collector's bearer, and every call   while `COLLECTOR_TOKEN` is empty. - 426, with the range `{min, max}`: the call names a protocol version   outside it, or none.",
+        "operationId": "get__api_collector_repositories",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RepositoriesSchema.8c3a6c7"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ValidationError.6a07bef"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "426": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CollectorProtocolRangeSchema.9ed0c05"
+                }
+              }
+            },
+            "description": "Upgrade Required"
+          }
+        },
+        "summary": "Every Repository Pilot holds, the cursor of a collector's reads of their histories from its clones of the mirror.",
         "tags": []
       }
     },

@@ -8,9 +8,11 @@ from typing import Any
 
 import pilot_collection
 import pytest
+from pilot_collection.files import FileClassesSchema, FilesQuerySchema, FilesSchema
 from pilot_collection.inventory import InventorySchema
 from pilot_collection.publication import PublicationSchema
 from pilot_collection.reading import ReadingSchema, ToolCallBlockSchema
+from pilot_collection.repositories import RepositoriesSchema, RepositoryReadSchema
 from pilot_collection.vocabularies import VocabulariesSchema
 from pydantic import ValidationError
 
@@ -250,3 +252,64 @@ class TestThePackage:
         ReadingSchema.model_validate(reading)
         with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
             ReadingSchema.model_validate(reading | {"lines": []})
+
+    def test_the_repositories_are_read_by_the_shape_pilot_answers_with(self) -> None:
+        whole = "3f9a2c1e7b04d6a51c8f2930d4e6b7a8c9d0e1f2"
+
+        held = RepositoriesSchema.model_validate(
+            {"repositories": [{"name": "RecipeBox", "read": [whole]}]}
+        )
+
+        assert held.repositories[0].read == [whole]
+
+    @pytest.mark.parametrize(
+        "sha",
+        ["3f9a2c1", "3F9A2C1E7B04D6A51C8F2930D4E6B7A8C9D0E1F2", "3f9a2c1e" * 6],
+        ids=["abbreviated", "in capitals", "of neither length"],
+    )
+    def test_a_read_takes_a_whole_hash_alone(self, sha: str) -> None:
+        read: dict[str, Any] = {
+            "repository": "RecipeBox",
+            "read_at": "2026-11-13T09:30:00Z",
+            "commits": [
+                {
+                    "sha": "3f9a2c1e7b04d6a51c8f2930d4e6b7a8c9d0e1f2",
+                    "made_at": "2026-11-12T09:31:00Z",
+                    "subject": "Scale the stew for six",
+                    "files": [
+                        {
+                            "path": "recipes/stew.md",
+                            "lines_added": 12,
+                            "lines_removed": 2,
+                        }
+                    ],
+                }
+            ],
+        }
+
+        assert (
+            RepositoryReadSchema.model_validate(read).commits[0].files[0].lines_added
+            == 12
+        )
+        read["commits"][0]["sha"] = sha
+        with pytest.raises(ValidationError, match="String should match pattern"):
+            RepositoryReadSchema.model_validate(read)
+
+    def test_the_files_and_their_classes_are_read_by_their_shapes(self) -> None:
+        files = FilesSchema.model_validate(
+            {"files": [{"repository": "RecipeBox", "path": "recipes/stew.md"}]}
+        )
+        classes = FileClassesSchema.model_validate(
+            {
+                "classes": [
+                    {
+                        "repository": "RecipeBox",
+                        "path": "recipes/stew.md",
+                        "file_class": "recipe",
+                    }
+                ]
+            }
+        )
+
+        assert files.files[0].path == classes.classes[0].path
+        assert FilesQuerySchema.model_validate({}).unclassed is False

@@ -24,6 +24,7 @@ from sqlalchemy import (
     Integer,
     Text,
     UniqueConstraint,
+    text,
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -86,6 +87,8 @@ class File(db.Model):  # type: ignore[name-defined]
         UniqueConstraint("repository_id", "path"),
         # What a File Change's key references (DB 557).
         UniqueConstraint("id", "repository_id"),
+        # Read at every walk, for the Files that wait to be classed.
+        Index("ix_files_unclassed", "id", postgresql_where=text("class_code IS NULL")),
     )
 
     id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)

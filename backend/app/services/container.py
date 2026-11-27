@@ -83,6 +83,7 @@ from app.services.quota_overrule_service import QuotaOverruleService
 from app.services.quota_week_service import QuotaWeekService
 from app.services.relay_service import RelayService
 from app.services.relay_watchdog import RelayWatchdog
+from app.services.repository_service import RepositoryService
 from app.services.scenario_service import ScenarioService
 from app.services.session_record_service import SessionRecordService
 from app.services.session_start_service import SessionStartService
@@ -732,6 +733,10 @@ class ServiceContainer(containers.DeclarativeContainer):
     vocabulary_service = providers.Factory(
         VocabularyService, db=db_session, catalogue_service=catalogue_service
     )
+
+    # The Repositories a collector reads from the mirror, and the Files'
+    # classes (F152.11, F158.5)
+    repository_service = providers.Factory(RepositoryService, db=db_session)
 
     # A walk's end, its event and the collector's readiness check (F152.14)
     walk_service = providers.Factory(

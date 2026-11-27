@@ -138,6 +138,28 @@ class PublicationInvalidException(ValidationException):
         )
 
 
+class RepositoryReadInvalidException(ValidationException):
+    """Raised when a collector's read of a Repository contradicts itself or
+    names a Repository Pilot does not hold; `faults` names each one, and
+    nothing of the call is written."""
+
+    def __init__(self, repository: str, faults: list[str]) -> None:
+        self.faults = faults
+        super().__init__(
+            f"Cannot take the read of repository {repository} because "
+            + "; ".join(faults)
+        )
+
+
+class FileClassesInvalidException(ValidationException):
+    """Raised when a collector's classes of the Files name what Pilot does
+    not hold; `faults` names each one, and nothing of the call is written."""
+
+    def __init__(self, faults: list[str]) -> None:
+        self.faults = faults
+        super().__init__("Cannot take the files' classes because " + "; ".join(faults))
+
+
 class VocabulariesInvalidException(ValidationException):
     """Raised when a collector's declaration of the labeller's vocabularies
     contradicts itself; `faults` names each one, and nothing of the call is

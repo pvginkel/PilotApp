@@ -8,9 +8,11 @@ differ, and they go with a Tool Call the file no longer names. A Commit read
 from its Repository keeps what the read gave it: it stays the Commit of the
 Tool Call whose call it was tied to while the call names it, by the rule
 that tied them (`_tied`), and stays with no Tool Call once the call no longer
-names it or the Tool Call goes. A commit a call names whose hash Pilot holds
-already, of another Tool Call or of none, is not held again, and is logged:
-a Commit is made by one Tool Call once (DB 577).
+names it or the Tool Call goes. A commit a call names that a read gave
+first, one no Tool Call holds, is tied to its Tool Call by the rule a read
+ties by (`commit_tie`), whichever of the two arrived first; one whose hash
+names a Commit another Tool Call holds is not held again, and is logged: a
+Commit is made by one Tool Call once (DB 577).
 
 A File is a Repository's and a path, made the first time a File Edit names
 it, and never removed.
@@ -26,17 +28,46 @@ from pilot_collection.publication import (
     PublishedCommitSchema,
     PublishedToolCallSchema,
 )
-from sqlalchemy import BigInteger, any_, delete, literal, select, tuple_
+from sqlalchemy import (
+    BigInteger,
+    ColumnElement,
+    Integer,
+    Text,
+    and_,
+    any_,
+    cast,
+    delete,
+    func,
+    literal,
+    or_,
+    select,
+    tuple_,
+)
 from sqlalchemy.dialects.postgresql import ARRAY
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
 from app.models import Commit, File, FileEdit, Repository, ToolCall
+from app.services.commit_tie import Held, Read, tie
 
 logger = logging.getLogger(__name__)
 
 EDITS = ("Edit", "Write")
 """The Tools whose successful call makes a File Edit (DB 579)."""
+
+COMMITS_LOCK = 283
+"""The advisory lock's class of the commits' turn: a read of a Repository's
+history alone, a publication beside every other publication."""
+
+
+def commits_turn(db: Session, *, read: bool = False) -> None:
+    """Take the commits' turn, held until `db`'s transaction ends: a read's
+    alone, so that what it ties no publication holds or removes meanwhile;
+    a publication's beside every other publication's."""
+    lock = func.pg_advisory_xact_lock if read else func.pg_advisory_xact_lock_shared
+    db.execute(
+        select(lock(cast(literal(COMMITS_LOCK), Integer), cast(literal(0), Integer)))
+    )
 
 
 def made_faults(publication: PublicationSchema) -> list[str]:
@@ -178,8 +209,10 @@ class CommitWrite:
         """Each Tool Call's Commits as its call names them. A read one keeps
         the commit it was tied by, and is left with no Tool Call where none
         is; one no read completed stays where a commit has its Repository,
-        hash and subject, and goes otherwise. The commits left are held new,
-        in the call's order, but one whose hash Pilot holds already."""
+        hash and subject, and goes otherwise. Of the commits left, one whose
+        hash names a Commit a Tool Call holds is not held; a read Commit no
+        Tool Call holds that the tie gives one becomes its Tool Call's; the
+        rest are held new, in the call's order."""
         held: dict[int, list[Commit]] = {}
         for row in self.db.scalars(
             select(Commit).where(Commit.tool_call_id == any_(ids)).order_by(Commit.id)
@@ -193,11 +226,11 @@ class CommitWrite:
             for row in rows:
                 if row.lines_read_at is None:
                     continue
-                tie = _tied(row, wanted, repositories)
-                if tie is None:
+                own = _tied(row, wanted, repositories)
+                if own is None:
                     row.tool_call_id = None
                 else:
-                    wanted.remove(tie)
+                    wanted.remove(own)
             for row in rows:
                 if row.lines_read_at is not None:
                     continue
@@ -221,24 +254,14 @@ class CommitWrite:
         if not new:
             return
 
-        shas = [
-            (repositories[commit.repository], commit.sha)
-            for _, _, commit in new
-            if commit.sha is not None
-        ]
-        taken: set[tuple[int, str | None]] = set()
-        if shas:
-            taken = {
-                (repository_id, sha)
-                for repository_id, sha in self.db.execute(
-                    select(Commit.repository_id, Commit.sha).where(
-                        tuple_(Commit.repository_id, Commit.sha).in_(shas)
-                    )
-                )
-            }
+        taken = self._taken(new, repositories)
+        loose = self._loose(new, repositories)
+        kept: list[tuple[int, str, PublishedCommitSchema]] = []
         for tool_call_id, tool_use_id, commit in new:
             repository_id = repositories[commit.repository]
-            if (repository_id, commit.sha) in taken:
+            if commit.sha is not None and any(
+                sha.startswith(commit.sha) for sha in taken.get(repository_id, [])
+            ):
                 logger.warning(
                     "Transcript %s: tool call %s names the commit %s of %s, which"
                     " Pilot holds as another's",
@@ -248,15 +271,92 @@ class CommitWrite:
                     commit.repository,
                 )
                 continue
+            kept.append((tool_call_id, tool_use_id, commit))
+        by_request = {tool_call.tool_use_id: tool_call for _, tool_call in requested}
+        tied: set[int] = set()
+        for repository_id, rows in loose.items():
+            ours = [
+                (place, made)
+                for place, made in enumerate(kept)
+                if repositories[made[2].repository] == repository_id
+            ]
+            for named, made in tie(
+                [
+                    Held(
+                        key=place,
+                        sha=commit.sha,
+                        subject=commit.subject,
+                        requested_at=by_request[tool_use_id].requested_at,
+                        returned_at=by_request[tool_use_id].returned_at,
+                    )
+                    for place, (_, tool_use_id, commit) in ours
+                ],
+                [_read(row) for row in rows],
+            ):
+                self.db.get_one(Commit, made.key).tool_call_id = kept[named.key][0]
+                tied.add(named.key)
+        for place, (tool_call_id, _, commit) in enumerate(kept):
+            if place in tied:
+                continue
             self.db.add(
                 Commit(
-                    repository_id=repository_id,
+                    repository_id=repositories[commit.repository],
                     sha=commit.sha,
                     subject=commit.subject,
                     tool_call_id=tool_call_id,
                 )
             )
         self.db.flush()
+
+    def _taken(
+        self,
+        new: list[tuple[int, str, PublishedCommitSchema]],
+        repositories: dict[str, int],
+    ) -> dict[int, list[str]]:
+        """The hash of each Commit a Tool Call made, by its Repository's id,
+        among those a new commit's hash names: a Commit is made by one Tool
+        Call once (DB 577)."""
+        named = _named(new, repositories)
+        if not named:
+            return {}
+        taken: dict[int, list[str]] = {}
+        for repository_id, sha in self.db.execute(
+            select(Commit.repository_id, Commit.sha).where(
+                Commit.tool_call_id.is_not(None), or_(*named)
+            )
+        ):
+            assert sha is not None
+            taken.setdefault(repository_id, []).append(sha)
+        return taken
+
+    def _loose(
+        self,
+        new: list[tuple[int, str, PublishedCommitSchema]],
+        repositories: dict[str, int],
+    ) -> dict[int, list[Commit]]:
+        """The Commits a read of their Repository gave that no Tool Call
+        holds, by their Repository's id, among those a new commit's hash
+        names or whose subject it has: those a new commit may complete,
+        locked so that one is tied once."""
+        subjects = sorted(
+            {(repositories[commit.repository], commit.subject) for _, _, commit in new}
+        )
+        loose: dict[int, list[Commit]] = {}
+        for row in self.db.scalars(
+            select(Commit)
+            .where(
+                Commit.tool_call_id.is_(None),
+                Commit.lines_read_at.is_not(None),
+                or_(
+                    tuple_(Commit.repository_id, Commit.subject).in_(subjects),
+                    *_named(new, repositories),
+                ),
+            )
+            .order_by(Commit.id)
+            .with_for_update()
+        ):
+            loose.setdefault(row.repository_id, []).append(row)
+        return loose
 
     def _edits(
         self,
@@ -267,7 +367,7 @@ class CommitWrite:
         """Each Tool Call's File Edits as its call names them, by their
         File: a held one whose lines differ is written in place, one the
         call no longer names goes."""
-        files = self._files(
+        files = self.files(
             sorted(
                 {
                     (repositories[edit.repository], edit.path)
@@ -302,7 +402,7 @@ class CommitWrite:
             self.db.delete(row)
         self.db.flush()
 
-    def _files(self, paths: list[tuple[int, str]]) -> dict[tuple[int, str], int]:
+    def files(self, paths: list[tuple[int, str]]) -> dict[tuple[int, str], int]:
         """The id of each File by its Repository's id and its path, in
         their order; one Pilot has no row for is written, with no class."""
         if not paths:
@@ -323,11 +423,25 @@ class CommitWrite:
         return held
 
     def _held_files(self, paths: list[tuple[int, str]]) -> dict[tuple[int, str], int]:
+        """Read through two arrays, a first read of a Repository naming more
+        paths than a statement takes parameters."""
+        asked = select(
+            func.unnest(
+                literal([repository for repository, _ in paths], ARRAY(BigInteger))
+            ).label("repository_id"),
+            func.unnest(literal([path for _, path in paths], ARRAY(Text))).label(
+                "path"
+            ),
+        ).subquery()
         return {
             (repository_id, path): file_id
             for file_id, repository_id, path in self.db.execute(
-                select(File.id, File.repository_id, File.path).where(
-                    tuple_(File.repository_id, File.path).in_(paths)
+                select(File.id, File.repository_id, File.path).join(
+                    asked,
+                    and_(
+                        asked.c.repository_id == File.repository_id,
+                        asked.c.path == File.path,
+                    ),
                 )
             )
         }
@@ -338,6 +452,26 @@ class CommitWrite:
                 select(Repository.name, Repository.id).where(Repository.name.in_(names))
             ).all()
         )
+
+
+def _named(
+    new: list[tuple[int, str, PublishedCommitSchema]], repositories: dict[str, int]
+) -> list[ColumnElement[bool]]:
+    """Of each new commit that shows a hash, the Commits of its Repository
+    whose hash starts with it."""
+    return [
+        and_(
+            Commit.repository_id == repositories[commit.repository],
+            Commit.sha.startswith(commit.sha),
+        )
+        for _, _, commit in new
+        if commit.sha is not None
+    ]
+
+
+def _read(row: Commit) -> Read:
+    assert row.sha is not None and row.made_at is not None
+    return Read(key=row.id, sha=row.sha, subject=row.subject, made_at=row.made_at)
 
 
 def _requested(calls: list[PublishedCallSchema]) -> list[PublishedToolCallSchema]:

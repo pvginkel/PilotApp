@@ -155,7 +155,7 @@ from app.models.call import RECORDED_ELSEWHERE
 from app.services import labeller_context
 from app.services.adoption_service import AdoptionService, group_faults
 from app.services.call_caches import caches, hold_sub_agents_calls
-from app.services.commit_write import CommitWrite, made_faults
+from app.services.commit_write import CommitWrite, commits_turn, made_faults
 from app.services.environment_service import reported_columns
 from app.services.fleet_consumer import FleetConsumer
 from app.services.label_write import (
@@ -564,6 +564,7 @@ class PublicationService:
             raise PublicationInvalidException(_name(publication), found)
         conversation_turn(self.db, publication.session_id)
         prices_turn(self.db)
+        commits_turn(self.db)
         boundary = _WHOLE
         ids: dict[str, int] = {}
         held = self._held(publication)
