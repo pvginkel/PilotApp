@@ -21,7 +21,10 @@ import { dashboardAddress, type DashboardPage } from '../support/page-objects/da
 import type { People } from '../support/people';
 import { projectAddress, type Projects } from '../support/projects';
 
-/** The tally loaded on two projects of the person's, and the chip that keeps them; `more()` loads it on two more of theirs, outside the chip. */
+/**
+ * The tally loaded on two projects of the person's, and the chip that keeps them; `beside()` makes two
+ * more of theirs, empty, and answers the chip that keeps all four and the tally's load on the two.
+ */
 async function tally(people: People, projects: Projects, collection: Collection) {
   const me = await people.signIn();
   const recipes = makeUnique('Recipes');
@@ -34,9 +37,12 @@ async function tally(people: People, projects: Projects, collection: Collection)
     recipes,
     bikes,
     chip: `c=project:${[recipeBox, bikeLog].sort().join(',')}`,
-    more: async () => {
+    beside: async () => {
       const others = [await projects.make({ name: makeUnique('Pantry'), members: [me.handle!] }), await projects.make({ name: makeUnique('Rides'), members: [me.handle!] })];
-      await collection.loadScenario('tally', { 'recipe-box': others[0], 'bike-log': others[1] });
+      return {
+        chip: `c=project:${[recipeBox, bikeLog, ...others].sort().join(',')}`,
+        load: () => collection.loadScenario('tally', { 'recipe-box': others[0], 'bike-log': others[1] }),
+      };
     },
   };
 }
@@ -187,10 +193,13 @@ test.describe('A measure’s heading', () => {
     dashboard,
     deploymentSse,
   }) => {
-    const { recipeBox, chip, more } = await tally(people, projects, collection);
-    await shell.open(`${projectAddress(recipeBox)}${dashboardAddress(`t=all&by=project&m=cost.sum&m=calls.count&m=turns.count&${chip}&col=none`)}`);
+    const { recipeBox, beside } = await tally(people, projects, collection);
+    const others = await beside();
+    // The chip keeps two projects the walk's load fills, so that its re-read answers rows the page has not drawn.
+    await shell.open(`${projectAddress(recipeBox)}${dashboardAddress(`t=all&by=project&m=cost.sum&m=calls.count&m=turns.count&${others.chip}&col=none`)}`);
     await deploymentSse.ensureConnected();
     await expect(dashboard.measureHeadings).toHaveText(['Cost', 'Calls', 'Pilot turns']);
+    await expect(dashboard.rows).toHaveCount(2);
     await expect(dashboard.labels.first()).toHaveText(/^Bikes/);
     const entries = await historyLength(page);
 
@@ -198,20 +207,21 @@ test.describe('A measure’s heading', () => {
     await expect(dashboard.dragGhost).toHaveText('Pilot turns');
     await expect(dashboard.dropMark).toBeVisible();
     await expect(dashboard.measure('Pilot turns').head).toHaveClass(/\bdragging\b/);
-    await more();
-    const read = page.waitForResponse((response) => new URL(response.url()).pathname === '/api/dashboard/rows');
+    await others.load();
     expect((await collection.walk()).announced).toBe(true);
-    await read;
+    await expect(dashboard.rows).toHaveCount(4);
     await expect(dashboard.dragGhost).toHaveText('Pilot turns');
     await expect(dashboard.dropMark).toBeVisible();
+    await expect(dashboard.measure('Pilot turns').head).toHaveClass(/\bdragging\b/);
     await page.mouse.up();
 
     await expect(dashboard.measureHeadings).toHaveText(['Pilot turns', 'Cost', 'Calls']);
     await expect(dashboard.dragGhost).toHaveCount(0);
-    // The rows sorted by Cost by default keep that sort, pinned to it.
+    // The rows sorted by Cost by default keep that sort, pinned to it: the two bike logs, the most Cost, first.
     expect(stateOf(page)).toContain('m=turns.count&m=cost.sum&m=calls.count');
     expect(stateOf(page)).toContain('o=desc,cost.sum');
-    await expect(dashboard.labels.first()).toHaveText(/^Bikes/);
+    await expect(dashboard.labels.nth(0)).toHaveText(/^(Bikes|Rides)/);
+    await expect(dashboard.labels.nth(1)).toHaveText(/^(Bikes|Rides)/);
     expect(await historyLength(page)).toBe(entries);
 
     const before = stateOf(page);
