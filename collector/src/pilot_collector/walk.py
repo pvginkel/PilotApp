@@ -61,9 +61,10 @@ that gives no answer, or is cut short, labels nothing further in the walk.
 
 Pilot refusing a transcript's labels has the vocabularies declared again,
 once a walk, and the labels published again; refused once more, the
-transcript is published as with no labeller, and its labels are not given
-again until its file, the labeller's version or the stamp it would give now
-changes. What is refused is in the collector's memory alone.
+transcript is published as with no labeller, and, where Pilot took that
+declaration, its labels are not given again until its file, the labeller's
+version or the stamp it would give now changes. What is refused is in the
+collector's memory alone.
 
 After its last publication the walk tells Pilot it ended, whether it
 published or not. A walk Pilot does not admit, or cannot be reached by, ends
@@ -300,8 +301,9 @@ class _Labelling:
     inventory: InventorySchema
     answers: bool = True
     """Whether it labels further in the walk."""
-    redeclared: bool = False
-    """Whether a refusal of labels had the vocabularies declared again."""
+    redeclared: bool | None = None
+    """Whether the vocabularies a refusal of labels had declared again were
+    taken by Pilot; none before a refusal had them declared."""
 
 
 class Walker:
@@ -838,11 +840,9 @@ class Walker:
         if given is not None and labelling is not None:
             try:
                 refused = self._refusal(given.publication)
-                declared = True
-                if refused is not None and not labelling.redeclared:
-                    labelling.redeclared = True
-                    declared = self._declared_again(labelling)
-                    if declared:
+                if refused is not None and labelling.redeclared is None:
+                    labelling.redeclared = self._declared_again(labelling)
+                    if labelling.redeclared:
                         refused = self._refusal(given.publication)
             except NotAppendable as error:
                 return self._whole(listed, f"Pilot refused it appended: {error}")
@@ -854,6 +854,7 @@ class Walker:
                 walked.appended += appended
                 walked.labelled += 1
                 return True
+            declared = bool(labelling.redeclared)
             stamp = labelling.stamps.stamps.get(ids)
             if declared and stamp is not None:
                 self._refused[listed.transcript.path] = (

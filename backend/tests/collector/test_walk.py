@@ -1598,6 +1598,56 @@ class TestTheLabels:
         assert _kinds(committed_app)[0][:2] == _scenarios_kinds()[0]
         assert _refused_labels(caplog) == []
 
+    def test_labels_refused_after_a_declaration_that_failed_are_not_held_back(
+        self,
+        committed_app: Flask,
+        pilot_url: str,
+        home: Path,
+        walker: Walker,
+        monkeypatch: pytest.MonkeyPatch,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """Another declaration took the place from the stub's kinds of work,
+        and the labeller's vocabularies then give no answer: each refusal of
+        the batch, the first's and those after it, is published with its
+        facts and left to be labelled at the next walk, which declares them
+        again."""
+        records = json.loads(_records(home).read_text())
+        records["ran"][RIDES] = "recipe-box|Scale the recipes|Halve the dumplings"
+        _records(home).write_text(json.dumps(records))
+        walker.walk()
+        other = Builder(SCENARIO, UNTIL).vocabularies()
+        other["lists"]["work_unit_kind"] = [
+            {"code": "pinch", "name": "Pinch", "description": "A pinch.", "position": 1}
+        ]
+        other["nesting"] = []
+        answer = httpx.put(
+            f"{pilot_url}/api/collector/vocabularies",
+            json=other,
+            headers=collector_headers(),
+        )
+        assert answer.status_code == 204, answer.text
+        _grown(_file(home, RECIPES))
+        _grown(_file(home, RIDES))
+
+        with monkeypatch.context() as failing:
+
+            def unanswered() -> Any:
+                raise running.Unanswered("its `vocabularies` call exited 1")
+
+            failing.setattr(walker._labeller, "vocabularies", unanswered)
+            with caplog.at_level(logging.WARNING, LOGGER):
+                refused = walker.walk()
+        lines = _refused_labels(caplog)
+        labelled = walker.walk()
+
+        assert (refused.published, refused.labelled) == (2, 0)
+        assert len(lines) == 2
+        assert not any("not given again" in line for line in lines)
+        assert walker._refused == {}
+        assert labelled.labelled == 2
+        assert _kinds(committed_app)[0][:2] == _scenarios_kinds()[0]
+
     def test_labels_pilot_refuses_again_wait_on_their_file_or_stamp(
         self,
         committed_app: Flask,

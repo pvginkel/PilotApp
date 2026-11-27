@@ -556,8 +556,10 @@ this walk: <why>".
 once a walk, and the labels given again; refused once more, the transcript is published with its
 facts alone, logged at `WARNING`, "Pilot refused the labels of the transcript
 <session_id>[/<agent_id>], <file>, which are not given again until its file, the labeller's version
-or its stamp changes: <why>", and its labels are held back until one of the three changes. What is
-refused is in the collector's memory alone.
+or its stamp changes: <why>", and its labels are held back until one of the three changes. Where
+that walk's declaration failed, a refused transcript is published with its facts alone and its labels
+are not held back: the line leaves out what it waits on. What is refused is in the collector's memory
+alone.
 
 ## The clones
 
