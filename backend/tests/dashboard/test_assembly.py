@@ -152,7 +152,12 @@ class TestAssemble:
     def test_a_component_adds_the_marker_of_its_versions(
         self, session: DbSession
     ) -> None:
-        assert assemble(session, ZONE, GAP).markers == ()
+        configuration = Marker(
+            "model",
+            "Model and effort",
+            "Where the model or the effort a role ran with changed",
+        )
+        assert assemble(session, ZONE, GAP).markers == (configuration,)
         reference(session, Component, "plugin:pantry")
 
         assert assemble(session, ZONE, GAP).markers == (
@@ -162,6 +167,7 @@ class TestAssemble:
                 "Where a version of plugin:pantry was first seen",
                 "plugin_pantry_version",
             ),
+            configuration,
         )
 
     def test_the_sittings_gap_is_the_one_given(self, session: DbSession) -> None:

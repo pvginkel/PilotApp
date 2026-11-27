@@ -879,6 +879,8 @@ class TestLook:
         assert _state(reads, "rel=1").relative
         assert not _state(reads, "rel=0").relative
         assert _state(reads, "mk=none").markers == ()
+        # The mockup's key of the marker of a role's configuration.
+        assert _state(reads, "mk=model").markers == ("model",)
         assert reads(
             "mk=plugin_pantry_version,claude_code_version,plugin_pantry_version",
             marked,
@@ -961,9 +963,8 @@ class TestLook:
         [
             ("rel=yes", '- rel=yes: "yes" is no switch. rel takes 1.'),
             (
-                "mk=model",
-                '- mk=model: "model" is no kind of marker. A kind of marker is the '
-                "version of a component the record holds, and it holds none.",
+                "mk=ccv",
+                '- mk=ccv: "ccv" is no kind of marker. A kind of marker is model.',
             ),
             (
                 "dw=dots:some",

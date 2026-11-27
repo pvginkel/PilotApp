@@ -2402,9 +2402,16 @@
         "description": "A kind of marker a series draws.",
         "properties": {
           "dimension": {
-            "description": "The dimension a value of which, first seen, it marks",
-            "title": "Dimension",
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The dimension a value of which, first seen, it marks; null on the marker of a role's configuration, which marks where the model or the effort a role ran with changed",
+            "title": "Dimension"
           },
           "key": {
             "description": "What a state's `mk=` names it by",
@@ -20135,9 +20142,16 @@
             "type": "array"
           },
           "markers": {
-            "description": "Within the span of the axis, by kind, each in the order first seen",
+            "description": "Within the span of the axis, by kind, each in the order first seen: a version's sightings, then a role's configuration's changes",
             "items": {
-              "$ref": "#/components/schemas/SeriesResponseSchema.b67cf98.SightingSchema"
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/SeriesResponseSchema.b67cf98.SightingSchema"
+                },
+                {
+                  "$ref": "#/components/schemas/SeriesResponseSchema.b67cf98.ShiftSchema"
+                }
+              ]
             },
             "title": "Markers",
             "type": "array"
@@ -20492,6 +20506,39 @@
           "others"
         ],
         "title": "ColorValueSchema",
+        "type": "object"
+      },
+      "SeriesResponseSchema.b67cf98.ConfigurationSchema": {
+        "description": "The model and the effort a role ran with.",
+        "properties": {
+          "effort": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "As Claude Code wrote it; null where it wrote none",
+            "examples": [
+              "high"
+            ],
+            "title": "Effort"
+          },
+          "model": {
+            "examples": [
+              "claude-opus-4-5"
+            ],
+            "title": "Model",
+            "type": "string"
+          }
+        },
+        "required": [
+          "model",
+          "effort"
+        ],
+        "title": "ConfigurationSchema",
         "type": "object"
       },
       "SeriesResponseSchema.b67cf98.DotSchema": {
@@ -21069,6 +21116,47 @@
           "group"
         ],
         "title": "RowsDimensionSchema",
+        "type": "object"
+      },
+      "SeriesResponseSchema.b67cf98.ShiftSchema": {
+        "description": "A marker of a role's configuration: where a Work Unit of the role ran\non another model or effort than the unit of the role before it, each\nunit's those of its first Call on a main thread.",
+        "properties": {
+          "at": {
+            "description": "When the unit's work began, else its first Call's moment",
+            "format": "date-time",
+            "title": "At",
+            "type": "string"
+          },
+          "before": {
+            "$ref": "#/components/schemas/SeriesResponseSchema.b67cf98.ConfigurationSchema",
+            "description": "The one the role's unit before it ran on"
+          },
+          "kind": {
+            "description": "Its kind's key",
+            "examples": [
+              "model"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "role": {
+            "description": "The role, as the labeller names it",
+            "title": "Role",
+            "type": "string"
+          },
+          "value": {
+            "$ref": "#/components/schemas/SeriesResponseSchema.b67cf98.ConfigurationSchema",
+            "description": "The configuration it ran on"
+          }
+        },
+        "required": [
+          "kind",
+          "role",
+          "value",
+          "before",
+          "at"
+        ],
+        "title": "ShiftSchema",
         "type": "object"
       },
       "SeriesResponseSchema.b67cf98.SightingSchema": {
@@ -31305,7 +31393,7 @@
             "BearerAuth": []
           }
         ],
-        "summary": "Answer a view's series, in order or over time, from the record at the query: its points along the axis, each measure's value on each, with the split by the color, as a panel draws it — its dots, its outliers and its rolling band — and the markers where a value of a marker's dimension was first seen; its time as instants, with the zone its days are in.",
+        "summary": "Answer a view's series, in order or over time, from the record at the query: its points along the axis, each measure's value on each, with the split by the color, as a panel draws it — its dots, its outliers and its rolling band, the outliers judged among the items of one role — and the markers where a value of a marker's dimension was first seen or a role's configuration changed; its time as instants, with the zone its days are in.",
         "tags": [],
         "x-required-role": "editor"
       }

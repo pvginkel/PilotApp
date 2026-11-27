@@ -177,6 +177,7 @@ class TestRatios:
                 "share",
             ),
             ("miss_share", "miss_cost.sum", "cost.sum", "share"),
+            ("rework_share", "cost.sum(rework=1)", "cost.sum", "share"),
             ("per_call", "cost.sum", "calls.count", "usd"),
         ]
 

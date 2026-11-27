@@ -18,7 +18,7 @@ source gave it, so a source that declares more adds rows and no shape.
   under an aggregate at a grain. A **grain** is any part, or a fact's own row.
 - A **ratio** is two measures, each as a view's state writes it.
 - A **marker** is a kind of line a series draws where a dimension's value
-  was first seen.
+  was first seen, or where a role's configuration changed as it ran.
 
 From the stored configuration come the custom ratios, among the ratios, and
 the quick filters, each offered where what it names reads.
@@ -248,13 +248,16 @@ class QuickFilter:
 
 @dataclass(frozen=True)
 class Marker:
-    """A kind of marker a series draws: a line where a value of `dimension`
-    was first seen, each value after the first, under the view's scope."""
+    """A kind of marker a series draws, under the view's scope: a line where
+    a value of `dimension` was first seen, each value after the first; with
+    no dimension, where a role's configuration changed as it ran (F154.4):
+    a Work Unit's model and effort, those of its first Call on a main
+    thread, other than those of the unit of the same role before it."""
 
     key: str
     label: str
     line: str
-    dimension: str
+    dimension: str | None = None
 
 
 @dataclass(frozen=True)

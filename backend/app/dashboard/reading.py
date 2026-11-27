@@ -1105,10 +1105,7 @@ class _Reader:
                     part,
                     f'"{kind}" is no kind of marker',
                     nearest(kind, offered),
-                    f"A kind of marker is {listed(offered, 'or')}"
-                    if offered
-                    else "A kind of marker is the version of a component the "
-                    "record holds, and it holds none",
+                    f"A kind of marker is {listed(offered, 'or')}",
                 )
         return tuple(sorted(set(kinds)))
 

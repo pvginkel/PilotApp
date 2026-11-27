@@ -234,6 +234,14 @@ RATIOS = (
         denominator="cost.sum",
     ),
     Ratio(
+        key="rework_share",
+        label="Rework share",
+        line="The cost of work done again, of any rework kind, over the cost of all",
+        format="share",
+        numerator="cost.sum(rework=1)",
+        denominator="cost.sum",
+    ),
+    Ratio(
         key="per_call",
         label="Cost per call",
         line="The cost over the number of Calls",

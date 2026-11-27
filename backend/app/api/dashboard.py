@@ -46,7 +46,7 @@ from app.dashboard.rows import (
     Rows,
     RowsService,
 )
-from app.dashboard.series import Series, SeriesService
+from app.dashboard.series import Series, SeriesService, Shift, Sighting
 from app.dashboard.strip import Strip, StripService
 from app.dashboard.tasks import AttributeCountsTask, QuickFilterCountsTask
 from app.schemas.common import ApiErrorResponseSchema
@@ -65,6 +65,7 @@ from app.schemas.dashboard import (
     CatalogueResponseSchema,
     ColorSchema,
     ColorValueSchema,
+    ConfigurationSchema,
     CountsStartedSchema,
     DimensionSchema,
     DotSchema,
@@ -99,6 +100,7 @@ from app.schemas.dashboard import (
     SeenKindSchema,
     SelectedSchema,
     SeriesResponseSchema,
+    ShiftSchema,
     ShownSchema,
     SightingSchema,
     SortSchema,
@@ -249,8 +251,10 @@ def get_series(
     """Answer a view's series, in order or over time, from the record at the
     query: its points along the axis, each measure's value on each, with the
     split by the color, as a panel draws it — its dots, its outliers and its
-    rolling band — and the markers where a value of a marker's dimension was
-    first seen; its time as instants, with the zone its days are in.
+    rolling band, the outliers judged among the items of one role — and the
+    markers where a value of a marker's dimension was first seen or a role's
+    configuration changed; its time as instants, with the zone its days are
+    in.
 
     Returns:
         200: The view's series, with its address, its look-only parts and a
@@ -775,15 +779,25 @@ def _series(found: Series) -> SeriesResponseSchema:
         off_axis=None
         if found.off_axis is None
         else ByRowSchema(**_by_row(found.off_axis)),
-        markers=[
-            SightingSchema(
-                kind=marker.kind,
-                value=marker.value,
-                before=marker.before,
-                at=marker.at,
-            )
-            for marker in found.markers
-        ],
+        markers=[_marker(marker) for marker in found.markers],
+    )
+
+
+def _marker(marker: Sighting | Shift) -> SightingSchema | ShiftSchema:
+    if isinstance(marker, Shift):
+        return ShiftSchema(
+            kind=marker.kind,
+            role=marker.role,
+            value=ConfigurationSchema(
+                model=marker.value.model, effort=marker.value.effort
+            ),
+            before=ConfigurationSchema(
+                model=marker.before.model, effort=marker.before.effort
+            ),
+            at=marker.at,
+        )
+    return SightingSchema(
+        kind=marker.kind, value=marker.value, before=marker.before, at=marker.at
     )
 
 

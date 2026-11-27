@@ -2,7 +2,8 @@
 record's rows give — a vocabulary's rows as a dimension's values, a version
 dimension per Component and the marker of its versions; from the labeller's
 declared rows a part per Work Unit Kind in the drill's order its nestings
-give, a figure per Unit Measure, and each value with its line and its place;
+give, each along its order by its units' start, a figure per Unit Measure,
+and each value with its line and its place;
 and from the stored configuration the custom ratios and the quick filters —
 and the process's copy of it, kept until a publication writes a
 vocabulary's row, a collector's declaration writes one of the labeller's, or
@@ -39,8 +40,10 @@ from app.dashboard.catalogue import (
     Value,
 )
 from app.dashboard.dimensions import (
+    configuration_marker,
     declared_keys,
     kind_dimension,
+    kind_order,
     own_dimensions,
     reaches,
     version_dimension,
@@ -284,15 +287,17 @@ def _own(db: Session, zone: str, sitting_gap: timedelta) -> Catalogue:
         ranges=RANGES,
         markers=tuple(
             version_marker(component, keys[component.code]) for component in components
-        ),
+        )
+        + (configuration_marker(),),
     )
 
 
 def _kinds(db: Session, taken: set[str]) -> tuple[int, tuple[Dimension, ...]]:
-    """A part per Work Unit Kind, in their places, each under a key none of
-    `taken` holds; and the most steps up from a Work Unit any of them reads.
-    A kind's row drills to the first kind by its place that sits in it, and
-    one that none sits in to the conversation."""
+    """A part per Work Unit Kind, in their places, then each kind along its
+    order, each under a key none of `taken` holds; and the most steps up from
+    a Work Unit any of them reads. A kind's row drills to the first kind by
+    its place that sits in it, and one that none sits in to the
+    conversation."""
     kinds: Sequence[WorkUnitKind] = db.scalars(
         select(WorkUnitKind).order_by(*_in_place(WorkUnitKind))
     ).all()
@@ -317,7 +322,14 @@ def _kinds(db: Session, taken: set[str]) -> tuple[int, tuple[Dimension, ...]]:
         )
         for kind in kinds
     )
-    return max(reach.values(), default=0), parts
+    orders = declared_keys(
+        [f"{keys[kind.code]}_start" for kind in kinds], taken | set(keys.values())
+    )
+    along = tuple(
+        kind_order(kind, orders[f"{part.key}_start"], part, reach.get(kind.code, 0))
+        for kind, part in zip(kinds, parts, strict=True)
+    )
+    return max(reach.values(), default=0), parts + along
 
 
 class CatalogueService:

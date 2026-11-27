@@ -118,8 +118,12 @@ class MarkerSchema(BaseModel):
     )
     label: str = Field(examples=["Claude Code version"])
     line: str = Field(description="What it marks")
-    dimension: str = Field(
-        description="The dimension a value of which, first seen, it marks"
+    dimension: str | None = Field(
+        description=(
+            "The dimension a value of which, first seen, it marks; null on "
+            "the marker of a role's configuration, which marks where the "
+            "model or the effort a role ran with changed"
+        )
     )
 
 
@@ -646,6 +650,32 @@ class SightingSchema(BaseModel):
     at: datetime = Field(description="Its first moment")
 
 
+class ConfigurationSchema(BaseModel):
+    """The model and the effort a role ran with."""
+
+    model: str = Field(examples=["claude-opus-4-5"])
+    effort: str | None = Field(
+        description="As Claude Code wrote it; null where it wrote none",
+        examples=["high"],
+    )
+
+
+class ShiftSchema(BaseModel):
+    """A marker of a role's configuration: where a Work Unit of the role ran
+    on another model or effort than the unit of the role before it, each
+    unit's those of its first Call on a main thread."""
+
+    kind: str = Field(description="Its kind's key", examples=["model"])
+    role: str = Field(description="The role, as the labeller names it")
+    value: ConfigurationSchema = Field(description="The configuration it ran on")
+    before: ConfigurationSchema = Field(
+        description="The one the role's unit before it ran on"
+    )
+    at: datetime = Field(
+        description="When the unit's work began, else its first Call's moment"
+    )
+
+
 class SeriesResponseSchema(BaseModel):
     """A view's series."""
 
@@ -681,9 +711,10 @@ class SeriesResponseSchema(BaseModel):
     off_axis: ByRowSchema | None = Field(
         description="The row with none, which is no point"
     )
-    markers: list[SightingSchema] = Field(
+    markers: list[SightingSchema | ShiftSchema] = Field(
         description=(
-            "Within the span of the axis, by kind, each in the order first seen"
+            "Within the span of the axis, by kind, each in the order first "
+            "seen: a version's sightings, then a role's configuration's changes"
         )
     )
 

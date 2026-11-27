@@ -377,7 +377,16 @@
               "joins": []
             }
           ],
-          "markers": [],
+          "markers": [
+            {
+              "kind": "model",
+              "fact": "call",
+              "joins": [
+                "unit",
+                "thread"
+              ]
+            }
+          ],
           "events": {
             "fact": "event",
             "joins": []
@@ -445,7 +454,16 @@
               ]
             }
           ],
-          "markers": [],
+          "markers": [
+            {
+              "kind": "model",
+              "fact": "call",
+              "joins": [
+                "unit",
+                "thread"
+              ]
+            }
+          ],
           "events": {
             "fact": "event",
             "joins": [
@@ -535,7 +553,16 @@
               "joins": []
             }
           ],
-          "markers": [],
+          "markers": [
+            {
+              "kind": "model",
+              "fact": "call",
+              "joins": [
+                "unit",
+                "thread"
+              ]
+            }
+          ],
           "events": {
             "fact": "event",
             "joins": []
@@ -600,7 +627,16 @@
               ]
             }
           ],
-          "markers": [],
+          "markers": [
+            {
+              "kind": "model",
+              "fact": "call",
+              "joins": [
+                "unit",
+                "thread"
+              ]
+            }
+          ],
           "events": {
             "fact": "event",
             "joins": [
@@ -944,7 +980,19 @@
               ]
             }
           ],
-          "markers": [],
+          "markers": [
+            {
+              "kind": "model",
+              "fact": "call",
+              "joins": [
+                "unit",
+                "session",
+                "thread",
+                "main",
+                "project"
+              ]
+            }
+          ],
           "events": {
             "fact": "event",
             "joins": [
@@ -1472,7 +1520,16 @@
               ]
             }
           ],
-          "markers": [],
+          "markers": [
+            {
+              "kind": "model",
+              "fact": "call",
+              "joins": [
+                "unit",
+                "thread"
+              ]
+            }
+          ],
           "events": {
             "fact": "event",
             "joins": []
@@ -1612,11 +1669,22 @@
             {
               "measure": "cost.median.conversation",
               "fact": "call",
-              "joins": [],
+              "joins": [
+                "unit"
+              ],
               "items": "conversation"
             }
           ],
-          "markers": [],
+          "markers": [
+            {
+              "kind": "model",
+              "fact": "call",
+              "joins": [
+                "unit",
+                "thread"
+              ]
+            }
+          ],
           "events": {
             "fact": "event",
             "joins": []
@@ -1775,12 +1843,22 @@
               "measure": "cost.median.conversation",
               "fact": "call",
               "joins": [
-                "session"
+                "session",
+                "unit"
               ],
               "items": "conversation"
             }
           ],
-          "markers": [],
+          "markers": [
+            {
+              "kind": "model",
+              "fact": "call",
+              "joins": [
+                "unit",
+                "thread"
+              ]
+            }
+          ],
           "events": {
             "fact": "event",
             "joins": []
@@ -2036,13 +2114,50 @@
       ]
     },
     {
-      "about": "A marker's kind is the catalogue's, a version of a component the record holds",
-      "state": "mk=model",
+      "about": "A marker's kind is the catalogue's: a version of a component the record holds, or a role's configuration",
+      "state": "mk=ccv",
       "refusal": [
         "Cannot read the view because its state has 1 fault.",
-        "- mk=model: \"model\" is no kind of marker. A kind of marker is the version of a component the record holds, and it holds none.",
+        "- mk=ccv: \"ccv\" is no kind of marker. A kind of marker is model.",
         "A list of markers reads mk=<kind>,… or mk=none, as in mk=none."
       ]
+    },
+    {
+      "about": "The marker of a role's configuration is the mockup's model",
+      "state": "mk=model",
+      "normal": "t=qw&by=project&m=cost.sum&col=none&mk=model",
+      "look": [
+        "mk=model"
+      ],
+      "query": {
+        "time": "qw",
+        "by": "project",
+        "color": null,
+        "scope": [],
+        "measures": [
+          {
+            "measure": "cost.sum",
+            "fact": "call"
+          }
+        ],
+        "statements": [
+          {
+            "fact": "call",
+            "grouping": [
+              [
+                "project"
+              ],
+              []
+            ],
+            "joins": [
+              "session",
+              "thread",
+              "main",
+              "project"
+            ]
+          }
+        ]
+      }
     },
     {
       "about": "A figure, an aggregate and grains that do not read",

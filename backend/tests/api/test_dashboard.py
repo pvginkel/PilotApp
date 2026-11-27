@@ -45,6 +45,7 @@ from tests.support import transcripts
 from tests.support.dashboard import Record, record
 from tests.support.fake_collector import ServedFakeCollector
 from tests.support.fake_sidecar import STORE_ENVIRONMENT_ID
+from tests.support.labels import work_unit
 from tests.support.transcripts import OPUS, STARTED, reference
 
 CATALOGUE = "/api/dashboard/catalogue"
@@ -226,7 +227,13 @@ class TestGetCatalogue:
     def test_a_components_version_is_a_kind_of_marker(
         self, client: FlaskClient, session: DbSession, container: ServiceContainer
     ) -> None:
-        assert _part(client, "dimensions")["markers"] == []
+        configuration = {
+            "key": "model",
+            "label": "Model and effort",
+            "line": "Where the model or the effort a role ran with changed",
+            "dimension": None,
+        }
+        assert _part(client, "dimensions")["markers"] == [configuration]
         session.add(Component(code="claude-code", name="Claude Code"))
         session.flush()
         container.catalogue_service().drop()
@@ -237,7 +244,8 @@ class TestGetCatalogue:
                 "label": "Claude Code version",
                 "line": "Where a version of Claude Code was first seen",
                 "dimension": "claude_code_version",
-            }
+            },
+            configuration,
         ]
 
     def test_the_measures(self, client: FlaskClient) -> None:
@@ -321,6 +329,18 @@ class TestGetCatalogue:
                 "line": "The cost of the cache misses over the cost of all",
                 "format": "share",
                 "numerator": "miss_cost.sum",
+                "denominator": "cost.sum",
+                "origin": None,
+            },
+            {
+                "key": "rework_share",
+                "label": "Rework share",
+                "line": (
+                    "The cost of work done again, of any rework kind, over the "
+                    "cost of all"
+                ),
+                "format": "share",
+                "numerator": "cost.sum(rework=1)",
                 "denominator": "cost.sum",
                 "origin": None,
             },
@@ -854,6 +874,41 @@ class TestGetSeries:
                 "kind": "claude_code_version",
                 "value": "2.1.318",
                 "before": "2.1.317",
+                "at": "2026-11-13T09:30:00Z",
+            }
+        ]
+
+    def test_a_roles_configuration_marker_carries_its_role_and_both_configurations(
+        self, client: FlaskClient, session: DbSession, worked: Record
+    ) -> None:
+        # The work item's Launch carried out a cook's course on Opus at high,
+        # and the loose thread's a cook's next course, a day later, on Opus
+        # with no effort.
+        first = work_unit(session, "kitchen|Soup", role="cook")
+        second = work_unit(
+            session,
+            "kitchen|Fish",
+            role="cook",
+            started_at=STARTED + timedelta(days=1),
+        )
+        launch = session.get_one(models.Launch, worked.calls[0].launch_id)
+        launch.work_unit_id = first.id
+        worked.calls[4].launch_id = transcripts.launch(
+            session,
+            worked.loose,
+            started_at=STARTED + timedelta(days=1),
+            work_unit_id=second.id,
+        ).id
+        session.flush()
+
+        body = client.get(SERIES, query_string={"state": "t=all&p=time,day"}).get_json()
+
+        assert body["markers"] == [
+            {
+                "kind": "model",
+                "role": "cook",
+                "value": {"model": OPUS, "effort": None},
+                "before": {"model": OPUS, "effort": "high"},
                 "at": "2026-11-13T09:30:00Z",
             }
         ]

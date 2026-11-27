@@ -9,6 +9,13 @@ the nearest one it sits in. The nesting is the drill's order: from a kind's
 row to the first kind by its place that sits in it, from one that none sits
 in to the conversation, and from a row with none to the Work Unit itself.
 
+Where the prototype coded the workflow, one rule serves every kind and names
+none (F154.4): each kind lies along an order, its units by their start, so
+that the units of one parent stand in the order of their start; a row is
+work done again where its Work Unit has a rework kind, any; and the role a
+series' outliers are judged among and whose configuration a marker follows
+is the Work Unit's `role`.
+
 A dimension's key is the mockup's where the mockup has the dimension
 (`design/mockup/dashboard/state.js`), so that a state written there reads
 here. The local time's three are derived in the zone given, and a sitting
@@ -76,6 +83,14 @@ WORK_TYPES = (
 )
 
 _WEEKDAYS = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
+
+ROLE = "role"
+"""The dimension of the role a Work Unit was carried out in: a series'
+outliers are judged among the items of one value of it, and the marker of a
+role's configuration follows each value's."""
+
+CONFIGURATION = "model"
+"""The key of the marker of a role's configuration, the mockup's."""
 
 
 def _flag(path: Path) -> Path:
@@ -515,6 +530,14 @@ def own_dimensions(zone: str) -> tuple[Dimension, ...]:
             path=lambda row: row.to("unit").c.rework_kind_code,
             null="(Not rework)",
         ),
+        Dimension(
+            key="rework",
+            label="Rework",
+            group="attribute",
+            line="Whether the Work Unit is work done again, of any rework kind",
+            path=_flag(lambda row: row.to("unit").c.rework_kind_code.is_not(None)),
+            values=_two("Rework", "Not rework"),
+        ),
         # Time, the local ones in the zone.
         Dimension(
             key="qweek",
@@ -623,6 +646,16 @@ def version_marker(component: Component, key: str) -> Marker:
     )
 
 
+def configuration_marker() -> Marker:
+    """Where a role's configuration changed as it ran: its model or its
+    effort (F154.4)."""
+    return Marker(
+        key=CONFIGURATION,
+        label="Model and effort",
+        line="Where the model or the effort a role ran with changed",
+    )
+
+
 def declared_keys(codes: Sequence[str], taken: Collection[str]) -> dict[str, str]:
     """The key of each of the labeller's codes in a catalogue's namespace,
     by its code: the code in the letters a state's part takes, and a number
@@ -682,6 +715,25 @@ def kind_dimension(kind: WorkUnitKind, key: str, below: str, hops: int) -> Dimen
         next_null="work_unit",
         figures=_ITEM_FIGURES,
         focus=True,
+    )
+
+
+def kind_order(kind: WorkUnitKind, key: str, part: Dimension, hops: int) -> Dimension:
+    """The Work Unit Kind `kind`'s part `part` along its order, under `key`:
+    each unit by when its work began, else by its first row's moment, so
+    that the units of one parent stand in the order of their start."""
+    started = _level(kind.code, hops, "started_at")
+    return Dimension(
+        key=key,
+        label=f"{kind.name}, in the order started",
+        group="order",
+        line=f"Each {kind.name} by when its work began, else by its first moment",
+        path=part.path,
+        name=part.name,
+        null=part.null,
+        base=part.key,
+        axis=lambda row: func.coalesce(started(row), row["at"]),
+        next=part.next,
     )
 
 

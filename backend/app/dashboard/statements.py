@@ -20,9 +20,11 @@ and what the process does"), built from a plan.
 A series reads more, each a statement of one fact (`Read`):
 
 - **a bucket's items**, for a measure drawn as its items' dots: by the By
-  and the item, each item's figure there, its first moment and its name, in
-  the order of the By's values on their axis, then of the items' first
-  moments;
+  and the item, each item's figure there, its first moment, its name and
+  the role its rows share, where they share one, in the order of the By's
+  values on their axis, then of the items' first moments;
+- **the points' roles**: by the By, the role its rows share, where they
+  share one;
 - **the members before the range**, in order: the last of the By's values
   whose place on the axis is before the window, under the scope over all
   time; and **the items before the range** of a measure drawn as its items'
@@ -30,6 +32,11 @@ A series reads more, each a statement of one fact (`Read`):
   its rows;
 - **the first sightings** of a marker's dimension: each value's first
   moment, under the scope over all time;
+- **a role's configuration's changes**, on the Calls under the scope over
+  all time: each Work Unit with a role, at its start, else its first
+  Call's, its model and effort those of its first Call on a main thread,
+  where they differ from those of the unit of the same role before it, by a
+  window's lag;
 - **the events by bucket**: by the By and the event's kind, their count and
   whether the kind counts as an error.
 
@@ -98,7 +105,8 @@ from sqlalchemy.dialects.postgresql import ARRAY
 
 from app.dashboard.assembly import EVENT_KIND
 from app.dashboard.catalogue import COUNT, Catalogue, Dimension, Figure, Row
-from app.dashboard.facts import DETAIL
+from app.dashboard.dimensions import ROLE
+from app.dashboard.facts import CALL, DETAIL
 from app.dashboard.planner import (
     Kept,
     Plan,
@@ -696,6 +704,8 @@ class _Builder:
         ]
         if part.name is not None:
             columns.append(part.name(self.row).label("name"))
+        if self.row.fact.key in self.catalogue.offered(ROLE):
+            columns.append(self.catalogue.dimension(ROLE).path(self.row).label("role"))
         rows = (
             select(*columns)
             .select_from(self.row.source())
@@ -712,6 +722,8 @@ class _Builder:
         ]
         if "name" in rows.c:
             grouped.append(func.max(rows.c.name).label("name"))
+        if "role" in rows.c:
+            grouped.append(_shared(rows.c.role).label("role"))
         items = (
             select(*grouped)
             .group_by(rows.c.b, rows.c.item)
@@ -772,6 +784,92 @@ class _Builder:
             .having(and_(first < start, value.is_not(None)))
             .order_by(first.desc(), rows.c.item)
             .limit(most)
+        )
+
+    def roles(self) -> Read:
+        b = self.by().path(self.row)
+        role = self.catalogue.dimension(ROLE).path(self.row)
+        where = [*self.scoped(), b.is_not(None)]
+        rows = (
+            select(b.label("b"), role.label("role"))
+            .select_from(self.row.source())
+            .where(*where)
+            .subquery("r")
+        )
+        return self.read(
+            select(rows.c.b, _shared(rows.c.role).label("role")).group_by(rows.c.b)
+        )
+
+    def shifts(self) -> Read:
+        role = self.catalogue.dimension(ROLE).path(self.row)
+        model = self.row["model_code"]
+        where = [
+            *self.scoped(),
+            role.is_not(None),
+            model.is_not(None),
+            self.row.to("thread").c.agent_id.is_(None),
+        ]
+        calls = (
+            select(
+                self.row["work_unit_id"].label("unit"),
+                self.row.to("unit").c.started_at.label("started"),
+                role.label("role"),
+                model.label("model"),
+                self.row["effort"].label("effort"),
+                self.row["at"].label("at"),
+            )
+            .select_from(self.row.source())
+            .where(*where)
+            .subquery("r")
+        )
+        grouped = (calls.c.unit, calls.c.role, calls.c.model, calls.c.effort)
+        runs = (
+            select(
+                *grouped,
+                func.coalesce(func.max(calls.c.started), func.min(calls.c.at)).label(
+                    "at"
+                ),
+                func.min(calls.c.at).label("first"),
+            )
+            .group_by(*grouped)
+            .subquery("g")
+        )
+        ranked = select(
+            *runs.c,
+            func.row_number()
+            .over(
+                partition_by=runs.c.unit,
+                order_by=(runs.c.first, runs.c.model, runs.c.effort),
+            )
+            .label("n"),
+        ).subquery("f")
+        order = (ranked.c.at, ranked.c.unit)
+        followed = (
+            select(
+                ranked.c.role,
+                ranked.c.model,
+                ranked.c.effort,
+                ranked.c.at,
+                func.lag(ranked.c.model)
+                .over(partition_by=ranked.c.role, order_by=order)
+                .label("model_before"),
+                func.lag(ranked.c.effort)
+                .over(partition_by=ranked.c.role, order_by=order)
+                .label("effort_before"),
+            )
+            .where(ranked.c.n == 1)
+            .subquery("c")
+        )
+        return self.read(
+            select(*followed.c)
+            .where(
+                followed.c.model_before.is_not(None),
+                or_(
+                    followed.c.model.is_distinct_from(followed.c.model_before),
+                    followed.c.effort.is_distinct_from(followed.c.effort_before),
+                ),
+            )
+            .order_by(followed.c.at, followed.c.role)
         )
 
     def sightings(self, dimension: Dimension) -> Read:
@@ -1308,6 +1406,21 @@ def items_before(
     )
 
 
+def roles(found: Plan, catalogue: Catalogue, fact: str) -> Read:
+    """Each of the By's values the plan reads with the role its rows of
+    `fact` share, none where they share none."""
+    return _Builder(found, catalogue, fact).roles()
+
+
+def shifts(found: Plan, catalogue: Catalogue) -> Read:
+    """Each change in a role's configuration as it ran, under the plan's
+    scope over all time, in the order of its moment, its unit's start, else
+    its first Call's: a Work Unit with a role whose model or effort, those
+    of its first Call on a main thread, differ from those of the unit of the
+    same role before it, with those."""
+    return _Builder(_all_time(found), catalogue, CALL.key).shifts()
+
+
 def sightings(found: Plan, catalogue: Catalogue, dimension: str) -> Read:
     """Each value of the dimension with its first moment, on the first fact
     that offers it, under the plan's scope over all time."""
@@ -1374,6 +1487,12 @@ def ordered(catalogue: Catalogue, by: Dimension) -> Dimension | None:
         ),
         None,
     )
+
+
+def _shared(value: ColumnElement[Any]) -> ColumnElement[Any]:
+    """The one value a group's rows with one share, none where they share
+    none."""
+    return case((func.min(value) == func.max(value), func.min(value)))
 
 
 def _within(figure: Figure, value: ColumnElement[Any]) -> ColumnElement[Any]:
