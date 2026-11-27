@@ -236,6 +236,37 @@ test.describe('A measure’s heading', () => {
     expect(stateOf(page)).toBe(before);
   });
 
+  test('dragged as the walk’s event lands still finds its drop on the next move, the chart and its headings kept under the drag (V07)', async ({
+    page,
+    people,
+    projects,
+    collection,
+    shell,
+    dashboard,
+    deploymentSse,
+  }) => {
+    const { recipeBox, beside } = await tally(people, projects, collection);
+    const others = await beside();
+    await shell.open(`${projectAddress(recipeBox)}${dashboardAddress(`t=all&by=project&m=cost.sum&m=calls.count&m=turns.count&${others.chip}&col=none`)}`);
+    await deploymentSse.ensureConnected();
+    await expect(dashboard.measureHeadings).toHaveText(['Cost', 'Calls', 'Pilot turns']);
+    await expect(dashboard.rows).toHaveCount(2);
+    await dragOver(page, dashboard.measure('Pilot turns').sort, dashboard.measure('Cost').head);
+    await expect(dashboard.dropMark).toBeVisible();
+    await others.load();
+    expect((await collection.walk()).announced).toBe(true);
+    await expect(dashboard.rows).toHaveCount(4);
+
+    // A move after the re-read, over the Calls heading's left edge.
+    const calls = (await dashboard.measure('Calls').head.boundingBox())!;
+    await page.mouse.move(calls.x + 2, calls.y + calls.height / 2, { steps: 5 });
+
+    await expect(dashboard.dragGhost).toHaveText('Pilot turns');
+    await expect(dashboard.dropMark).toBeVisible();
+    await page.mouse.up();
+    await expect(dashboard.measureHeadings).toHaveText(['Cost', 'Pilot turns', 'Calls']);
+  });
+
   test('stays in sight while the rows scroll', async ({ page, people, shell, dashboard }) => {
     await page.setViewportSize({ width: 1280, height: 560 });
     await people.signIn();
