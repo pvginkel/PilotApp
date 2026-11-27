@@ -3,7 +3,7 @@ two seconds, on the line through its times at two sizes."""
 
 import pytest
 
-from tools.timing.report import parts, passes
+from tools.timing.report import burst, parts, passes
 
 
 @pytest.mark.parametrize(
@@ -54,3 +54,9 @@ def test_a_refused_part_reads_refused_in_every_cell_it_has_no_figure_for() -> No
     assert parts(small, large)[2] == (
         "| By's counts | all | 19,472 | refused |  | refused | refused |"
     )
+
+
+def test_a_timing_of_some_parts_alone_has_no_burst_table() -> None:
+    timed = {"record": {"rows": {"calls": 630_000}}, "parts": [], "burst": []}
+
+    assert burst([timed, timed]) == []

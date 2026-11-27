@@ -5,7 +5,8 @@
 Each part's time at both sizes, over all time and over a quota week, the
 size at which it passes two seconds, and the statements that went to disk;
 the record's size on disk at both against production's 10 Gi volume; and
-the burst. A part passes two seconds where the line through its two times,
+the burst, where the timing read one (a timing of some parts alone,
+`--only`, reads none). A part passes two seconds where the line through its two times,
 taken as growing in step with the Calls, reaches it: "beyond" where it
 grows by less than it would need to within ten times the larger size, "—"
 where it does not grow.
@@ -122,6 +123,8 @@ def parts(small: dict[str, Any], large: dict[str, Any]) -> list[str]:
 
 
 def burst(results: Sequence[dict[str, Any]]) -> list[str]:
+    if not results[0]["burst"]:
+        return []
     lines = [
         "| At once | " + " | ".join(f"{_calls(r):,} calls, ms" for r in results) + " |"
     ]
@@ -145,7 +148,8 @@ def main(argv: Sequence[str] | None = None) -> None:
     small = json.loads(args.small.read_text())
     large = json.loads(args.large.read_text())
     for table in (record([small, large]), parts(small, large), burst([small, large])):
-        print("\n".join(table), end="\n\n")
+        if table:
+            print("\n".join(table), end="\n\n")
 
 
 if __name__ == "__main__":

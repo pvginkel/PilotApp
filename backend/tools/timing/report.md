@@ -11,6 +11,10 @@ all time are refused at the database's limit on temporary files.
 The engine's timeout and its statements at once take their defaults from it: 45 s for a whole
 read and 2 statements at once (below).
 
+The labeller's part of the engine, a kind of work's parts, the four rules over work units and
+the lanes' runs, was timed later with Pilot's inventory, on two histories of its own whose every
+conversation carries labels ([The labeller's part](#the-labellers-part)).
+
 ## How it was timed
 
 - **The database**: PostgreSQL 18.3 on production's image, `shared_buffers` 256MB, `work_mem`
@@ -158,3 +162,115 @@ plans of the slowest statements show at three million:
 - **By's counts over all time need more than the 2 GB of temporary files the database allows a
   statement at three million.** Over a quota week the same statements already sort to disk and
   hash in 32 batches at `work_mem` 4MB.
+
+## The labeller's part
+
+The parts the labeller's labels give the engine, and Pilot's inventory with what it hands the
+labeller, were timed on two histories whose every conversation the stub labeller labelled, at
+the same settings on an instance of the same kind. Over a quota week, the rows by a kind of
+work, colored by one and by a unit's role answer in under half a second at both sizes; a kind's
+order, its conversations as dots and every lanes part take 2.6 to 4.7 s at 630,000 Calls and 13
+to 18 s at three million. Over all time every part passes two seconds below three million Calls
+but the inventory, which passes it near 3.3 million.
+
+The lanes by project over all time take 27 s at 630,000 Calls and 156 s at three million,
+against 8.6 s and 45 s above, before the lanes carried runs. At three million they are past the
+engine's 45 s timeout, so they would be refused. Most of what the runs add is their merge in the
+process (below). By's counts over all time already pass that timeout at 630,000 Calls.
+
+### How it was timed
+
+- **The database and its storage** as above: a new instance at the same settings, on Ceph RBD,
+  removed after the timing.
+- **The histories**: written by `history.py` as above, each conversation labelled by the stub
+  labeller in process, its vocabularies declared each day: 629,283 Calls over 70 days and
+  2,982,086 over 329 days. Each work session of Pilot's carries out a leg of its project's errand
+  of the day in one of three roles, under six kinds of work nested as the workflow's labeller
+  nests its own, an errand three steps above a leg. A role's configuration changes between its
+  units, and a later round is now and then work done again.
+- **Not the histories above.** They hold about three times the events, the labelled ones among
+  them, so the lanes and By's counts timed again here compare with their figures above with that
+  in mind.
+- **The parts**: read as above, with no burst.
+
+Regenerate the tables with
+`uv run python -m tools.timing.report tools/timing/results/labeller/630000.json tools/timing/results/labeller/3000000.json`.
+
+### Its record on disk
+
+| | 629,283 calls | 2,982,086 calls |
+|---|---:|---:|
+| calls | 629,283 | 2,982,086 |
+| transcripts | 22,660 | 107,174 |
+| launches | 16,490 | 78,290 |
+| tool_calls | 642,622 | 3,043,541 |
+| events | 6,868 | 32,667 |
+| compactions | 5,774 | 27,245 |
+| sessions | 6,026 | 28,447 |
+| turns | 7,930 | 37,454 |
+| work_units | 5,710 | 26,675 |
+| segments | 378,119 | 1,790,826 |
+| On disk | 0.65 GiB, 7% of 10 Gi | 2.91 GiB, 29% of 10 Gi |
+| Calls from | 2026-09-17 | 2026-01-01 |
+
+### Its parts
+
+"Passes 2 s at" is read as above.
+
+| Part | Range | 629,283, ms | 2,982,086, ms | Passes 2 s at | Slowest statement at 2,982,086, ms | Gone to disk at 2,982,086 |
+|---|---|---:|---:|---|---:|---|
+| The attributes' counts (By's panel), a task | all | 61,348 | refused |  | refused | refused |
+| The attributes' counts (By's panel), a task | lqw | 4,981 | 17,852 | below 629,283 | 15,408 | Hash in 16 batches; Hash in 2 batches; Hash in 32 batches; Sort to disk |
+| The lanes by project | all | 26,599 | 155,660 | below 629,283 | 29,260 | Hash in 16 batches; Hash in 32 batches; Sort to disk |
+| The lanes by project | lqw | 4,688 | 18,397 | below 629,283 | 15,516 | Hash in 32 batches; Sort to disk |
+| The lanes by conversation | all | 5,451 | 30,011 | below 629,283 | 17,916 | Aggregate (Hashed) to disk; Aggregate (Mixed) to disk; Hash in 16 batches |
+| The lanes by conversation | lqw | 3,433 | 15,595 | below 629,283 | 14,201 | Hash in 16 batches |
+| Rows by the widest kind of work: its units, their measure and the cost | all | 988 | 5,252 | 1,190,000 | 7,299 | Sort to disk |
+| Rows by the widest kind of work: its units, their measure and the cost | lqw | 177 | 376 | 22,200,000 | 517 | Sort to disk |
+| Rows by project, colored by the widest kind of work | all | 1,471 | 7,650 | 830,000 | 11,028 | Sort to disk |
+| Rows by project, colored by the widest kind of work | lqw | 230 | 454 | 19,200,000 | 577 | Sort to disk |
+| Rows by a unit's role, with the share of work done again | all | 603 | 3,079 | 1,960,000 | 4,382 | none |
+| Rows by a unit's role, with the share of work done again | lqw | 134 | 366 | 19,600,000 | 312 | none |
+| In order: each leg by its start, its outliers judged among its role, with the marker of a role's configuration | all | 2,614 | 14,162 | below 629,283 | 5,345 | Hash in 2 batches; Sort to disk |
+| In order: each leg by its start, its outliers judged among its role, with the marker of a role's configuration | lqw | 2,644 | 13,224 | below 629,283 | 4,475 | Hash in 2 batches; Sort to disk |
+| In order: each errand by its start, its conversations as dots, each with its role | all | 4,845 | 26,242 | below 629,283 | 7,057 | Hash in 2 batches; Sort to disk |
+| In order: each errand by its start, its conversations as dots, each with its role | lqw | 2,768 | 13,438 | below 629,283 | 5,013 | Aggregate (Hashed) to disk; Hash in 2 batches; Sort to disk |
+| The lanes by conversation, their runs colored by model | all | 5,857 | 29,920 | below 629,283 | 18,003 | Aggregate (Hashed) to disk; Hash in 16 batches; Sort to disk |
+| The lanes by conversation, their runs colored by model | lqw | 3,277 | 14,861 | below 629,283 | 14,280 | Hash in 16 batches |
+| Pilot's inventory with what it hands the labeller, a collector's call | all | 402 | 1,794 | 3,300,000 | 175 | Sort to disk |
+
+### Its parts past two seconds
+
+Every part here but the inventory passes two seconds below three million Calls, and every lever
+but the two counts' is the operator's to rule. What the plans of the slowest statements, and a
+profile of the slowest read, show at three million:
+
+- **The lanes' runs are merged in the process, and a wait keeps them apart.** By project over
+  all time, the runs' statement handed the process 2,196,273 runs for 11 lanes. Two runs merge
+  only where one ends as the next begins, and a run before a wait ends at its own last Call. So
+  the merge doubled its resolution 13 times, each time over every run again, up to the whole
+  span, and still answered 126,108 runs, ten times its bound, in 20 MB. Merged from each
+  resolution's output instead, two runs merging where less than the resolution lies between
+  them, it stopped at the fifth resolution with 894 runs in 1.7 MB, and the read took 79 s, not
+  139 s. That was measured on the instance with the merge patched outside the code, which is
+  unchanged.
+- **The runs' statement reads every Call of the lanes through two windows**: 29 s by project
+  over all time, its sort 179 MB on disk; 1.3 s over a quota week.
+- **The lanes' events are the Event fact's union** above: 14 to 24 s over either range.
+- **A kind's order reads over all time whatever its range.** Over a quota week a leg's own rows
+  take 0.4 s and its order 13 s in all: two Components' first sightings, 4.5 s and 3.2 s; the
+  configuration's marker, a statement over every Call, 3.5 s; and the band's members before the
+  range, 3.2 s to find them and 3.5 s for their figures. An errand's dots add the conversations
+  before the range, 5.0 s, their grouping 156 MB on disk.
+- **A kind's rows, as a color and by role read every Call over all time**, as every view does.
+  The widest kind By takes 5.3 s, against 9.1 s for the rows by project above: the joins up a
+  unit's chain add no cause of their own.
+- **By's counts over all time pass the engine's timeout at 630,000 Calls.** They took 61 s, three
+  times the 19.5 s above, about 57 s of it the Calls' read; each fact's count is a read of its
+  own under the 45 s timeout, so that read would be refused. The labeller's attributes and kinds
+  add grouping sets to each fact's statement. The read wrote 2.1 GB of temporary files, against
+  0.46 GB above; the database's 2 GB limit is on what a statement holds at once, which the timing
+  does not measure. At three million they are refused for temporary disk, as above.
+- **The inventory** reads in 0.4 s at 630,000 Calls and 1.8 s at three million, its transcripts'
+  statement 175 ms; the rest is the route's work on 107,174 transcripts. The histories hold
+  no Holds and no Documents, so its two reads of them ran over empty tables.
