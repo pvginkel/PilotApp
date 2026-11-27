@@ -334,6 +334,13 @@ function ValuePane({ dimension, chip, scope, label, onDone, onClose, onRemove, f
         autoComplete="off"
         spellCheck={false}
         onChange={(event) => setTyped(event.target.value)}
+        onKeyDown={(event) => {
+          // The shell's keys pass over Esc in a text field: what is typed is cleared, then the pane closes.
+          if (event.key !== 'Escape') return;
+          event.preventDefault();
+          if (typed === '') onClose();
+          else setTyped('');
+        }}
         data-testid="dashboard.pane.search"
       />
       <div className={cn('dash-values', values.isPlaceholderData && 'changing')} data-testid="dashboard.pane.values">

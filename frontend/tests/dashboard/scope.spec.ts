@@ -220,4 +220,29 @@ test.describe('A filter’s chip', () => {
     await expect(dashboard.chipWords(dashboard.chips.last())).toHaveText('Pilot session: #2 Sort the spices');
     expect(await historyLength(page)).toBe(entries + 1);
   });
+
+  test('Esc in a dimension’s pane, its search focused as it opens, clears what is typed, then closes the pane, a chip’s pane too', async ({ people, projects, collection, shell, dashboard }) => {
+    const { recipeBox, chip } = await tally(people, projects, collection);
+    await shell.open(`${projectAddress(recipeBox)}${dashboardAddress(`t=all&by=project&m=cost.sum&${chip}`)}`);
+    await expect(dashboard.rows).toHaveCount(2);
+    await dashboard.addFilter.click();
+    await dashboard.filterGroup('Parts').getByText('Pilot session', { exact: true }).click();
+    await expect(dashboard.paneSearch).toBeFocused();
+    await dashboard.paneSearch.fill('spices');
+    await expect(dashboard.paneLabels).toHaveText(['#2 Sort the spices']);
+
+    await dashboard.paneSearch.press('Escape');
+
+    await expect(dashboard.paneSearch).toHaveValue('');
+    await expect(dashboard.paneLabels).toHaveCount(3);
+    await dashboard.paneSearch.press('Escape');
+    await expect(dashboard.pane).toHaveCount(0);
+
+    await dashboard.chipWords(dashboard.chips.first()).click();
+    await expect(dashboard.paneSearch).toBeFocused();
+    await dashboard.paneSearch.press('Escape');
+    await expect(dashboard.pane).toHaveCount(0);
+    await expect(dashboard.chips).toHaveCount(1);
+  });
 });
+
