@@ -260,4 +260,35 @@ test.describe('The dashboard’s banner', () => {
     await expect(dashboard.labels).toHaveText(['#2 Tidy the ride notes', '#2 Sort the spices', 'Project chat']);
     await expect(dashboard.banner).toHaveCount(0);
   });
+
+  test('one Retry asks again every value’s lookup refused, a link opened cold naming two values the page has no label for', async ({
+    page,
+    people,
+    projects,
+    collection,
+    shell,
+    dashboard,
+    dashboardBounds,
+  }) => {
+    const { first, chip } = await tally(people, projects, collection);
+    await declareRefusals(page);
+    await dashboardBounds.set({ timeout_seconds: NONE_LEFT });
+    // Each lookup by the value it searches for.
+    const lookups: string[] = [];
+    page.on('request', (request) => {
+      const url = new URL(request.url());
+      if (url.pathname === '/api/dashboard/values') lookups.push(url.searchParams.get('search') ?? '');
+    });
+    await shell.open(`${projectAddress(first)}${dashboardAddress(`t=all&by=project&m=cost.sum&${chip}`)}`);
+    await expect(dashboard.bannerText).toContainText(TIMED_OUT);
+    await expect.poll(() => new Set(lookups).size).toBe(2);
+    const asked = lookups.length;
+
+    await dashboardBounds.set({});
+    await dashboard.retry.click();
+
+    await labelled(dashboard);
+    await expect(dashboard.banner).toHaveCount(0);
+    expect(new Set(lookups.slice(asked)).size).toBe(2);
+  });
 });
