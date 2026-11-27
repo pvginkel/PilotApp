@@ -379,6 +379,13 @@ class TestTheScenario:
             for asked in call.get("tool_calls", [])
         ]
         assert {asked["tool"] for asked in tool_calls} >= {"Bash", "Edit", "Agent"}
+        assert {asked["tool"] for asked in tool_calls if "file_edits" in asked} == {
+            "Edit",
+            "Write",
+        }
+        assert [
+            made["sha"] for asked in tool_calls for made in asked.get("commits", [])
+        ] == ["4be1d2c"]
         assert any("mcp_server" in asked for asked in tool_calls)
         assert any(asked.get("exit_code") for asked in tool_calls)
         assert any(asked["interrupted"] for asked in tool_calls)
@@ -3251,7 +3258,12 @@ class TestInjectedParts:
     ) -> None:
         asked = requesting(4, "toolu_01", "Skill", {"skill": "loom:weave"})
         asked["message"]["content"].append(
-            {"type": "tool_use", "id": "toolu_02", "name": "Bash", "input": {}}
+            {
+                "type": "tool_use",
+                "id": "toolu_02",
+                "name": "Bash",
+                "input": {"command": "ls looms"},
+            }
         )
         publication = _read(
             tmp_path,
@@ -3827,6 +3839,499 @@ class TestDenials:
         publication = read(filed(tmp_path, lines, AGENT), SETTINGS).publication
 
         assert [asked.denial_kind for asked in _tool_calls(publication)] == ["hook"]
+
+
+PATCH = [
+    {
+        "oldStart": 3,
+        "oldLines": 4,
+        "newStart": 3,
+        "newLines": 5,
+        "lines": [" warp", "-weft", "-twill", "+satin", "+twill", "+heddle", " shed"],
+    },
+    {"oldStart": 20, "oldLines": 1, "newStart": 21, "newLines": 0, "lines": ["-hem"]},
+]
+"""A patch Claude Code records of an edit: three lines added, three removed,
+between lines it changed none of."""
+
+TWILL = "/work/Loom/patterns/twill.md"
+
+
+def _edits(
+    projects: Path,
+    tool: str,
+    given: dict[str, Any],
+    record: Any = None,
+    error: bool | None = None,
+    directory: str = DIRECTORY,
+) -> list[tuple[str, str, int, int]]:
+    """The file edits of a main thread's one call of `tool`, its line naming
+    `directory` and its result `record`: each its repository, its path and
+    the lines it added and removed."""
+    asked = _tool_call(
+        projects,
+        requesting(4, tool=tool, given=given) | {"cwd": directory},
+        result(6, said="Done.", error=error, record=record),
+    )
+    return [
+        (edit.repository, edit.path, edit.lines_added, edit.lines_removed)
+        for edit in asked.file_edits
+    ]
+
+
+class TestFileEdits:
+    def test_an_edit_whose_result_carries_the_patch_counts_its_lines(
+        self, tmp_path: Path
+    ) -> None:
+        given = {"file_path": TWILL, "old_string": "weft", "new_string": "satin"}
+        record = {"filePath": TWILL, "structuredPatch": PATCH, "originalFile": "warp"}
+
+        assert _edits(tmp_path, "Edit", given, record) == [
+            ("Loom", "patterns/twill.md", 3, 3)
+        ]
+
+    def test_an_edit_with_no_result_object_counts_a_line_diff_of_its_texts(
+        self, tmp_path: Path
+    ) -> None:
+        given = {
+            "file_path": TWILL,
+            "old_string": "warp\nweft\ntwill\n",
+            "new_string": "warp\nsatin\ntwill\nheddle",
+        }
+
+        assert _edits(tmp_path, "Edit", given) == [("Loom", "patterns/twill.md", 2, 1)]
+
+    def test_a_write_of_a_new_file_counts_its_contents_lines_as_added(
+        self, tmp_path: Path
+    ) -> None:
+        content = "warp\nweft\ntwill"
+        given = {"file_path": TWILL, "content": content}
+        record: dict[str, Any] = {
+            "type": "create",
+            "filePath": TWILL,
+            "content": content,
+            "structuredPatch": [],
+            "originalFile": None,
+        }
+
+        assert _edits(tmp_path, "Write", given, record) == [
+            ("Loom", "patterns/twill.md", 3, 0)
+        ]
+
+    def test_a_write_over_a_file_counts_the_patchs_lines(self, tmp_path: Path) -> None:
+        given = {"file_path": TWILL, "content": "warp\nsatin\n"}
+        record = {
+            "type": "update",
+            "filePath": TWILL,
+            "content": "warp\nsatin\n",
+            "structuredPatch": PATCH,
+            "originalFile": "warp\nweft\n",
+        }
+
+        assert _edits(tmp_path, "Write", given, record) == [
+            ("Loom", "patterns/twill.md", 3, 3)
+        ]
+
+    def test_a_write_with_no_result_object_counts_its_content_as_added_alone(
+        self, tmp_path: Path
+    ) -> None:
+        """What the file held before is not in the transcript."""
+        given = {"file_path": TWILL, "content": "warp\nsatin\n"}
+
+        assert _edits(tmp_path, "Write", given) == [("Loom", "patterns/twill.md", 2, 0)]
+
+    @pytest.mark.parametrize(
+        ("path", "directory", "edited"),
+        [
+            (TWILL, "/work/Shuttle", ("Loom", "patterns/twill.md")),
+            ("patterns/twill.md", "/work/Loom/src", ("Loom", "src/patterns/twill.md")),
+            ("../Shuttle/bobbin.md", "/work/Loom", ("Shuttle", "bobbin.md")),
+            (
+                "/work/Loom/.claude/worktrees/agent-a1/patterns/twill.md",
+                DIRECTORY,
+                ("Loom", "patterns/twill.md"),
+            ),
+            ("/work/scratch/Loom/twill.md", DIRECTORY, None),
+            ("/tmp/twill.md", DIRECTORY, None),
+            ("/home/ubuntu/.claude/memory/twill.md", DIRECTORY, None),
+        ],
+        ids=[
+            "an absolute path",
+            "a path from the line's own directory",
+            "a path from it into another checkout",
+            "a worktree's, the checkout's own",
+            "the scratch folder's",
+            "a path under no checkout",
+            "a memory note",
+        ],
+    )
+    def test_its_file_is_the_one_a_checkout_holds_at_its_path(
+        self,
+        path: str,
+        directory: str,
+        edited: tuple[str, str] | None,
+        tmp_path: Path,
+    ) -> None:
+        given = {"file_path": path, "content": "warp\n"}
+
+        assert _edits(tmp_path, "Write", given, directory=directory) == (
+            [] if edited is None else [(*edited, 1, 0)]
+        )
+
+    def test_a_failed_call_edits_no_file(self, tmp_path: Path) -> None:
+        given = {"file_path": TWILL, "old_string": "weft", "new_string": "satin"}
+
+        assert _edits(tmp_path, "Edit", given, "Error: no weft", error=True) == []
+
+    def test_a_call_whose_result_never_came_edits_no_file(self, tmp_path: Path) -> None:
+        given = {"file_path": TWILL, "content": "warp\n"}
+        (asked,) = _tool_calls(
+            _read(tmp_path, [typed(0), requesting(4, tool="Write", given=given)])
+        )
+
+        assert asked.file_edits == []
+
+    @pytest.mark.parametrize("tool", ["MultiEdit", "NotebookEdit", "Read"])
+    def test_another_tool_edits_no_file(self, tool: str, tmp_path: Path) -> None:
+        given = {"file_path": TWILL, "old_string": "weft", "new_string": "satin"}
+
+        assert _edits(tmp_path, tool, given, {"structuredPatch": PATCH}) == []
+
+
+def _commits(
+    projects: Path,
+    command: str,
+    said: str = "",
+    record: Any = None,
+    error: bool = False,
+    directory: str = DIRECTORY,
+) -> list[tuple[str, str, str | None]]:
+    """The commits of a main thread's one Bash call of `command`, its line
+    naming `directory`, its result saying `said` with `record`: each its
+    repository, its subject and its hash."""
+    asked = _tool_call(
+        projects,
+        requesting(4, given={"command": command}) | {"cwd": directory},
+        result(6, said=said, error=error, record=record),
+    )
+    return [(made.repository, made.subject, made.sha) for made in asked.commits]
+
+
+def _committing(*commands: tuple[str, str], directory: str = DIRECTORY) -> list[Line]:
+    """A prompt and a Call a Bash call each, of each command and what it
+    said, in order."""
+    lines: list[Line] = [typed(0)]
+    for place, (command, said) in enumerate(commands, start=1):
+        asked = requesting(
+            2 * place,
+            f"toolu_0{place}",
+            given={"command": command},
+            message_id=f"msg_0{place}",
+        )
+        lines += [
+            asked | {"cwd": directory},
+            result(2 * place + 1, f"toolu_0{place}", said, error=False),
+        ]
+    return lines
+
+
+def _made(publication: PublicationSchema) -> list[list[tuple[str, str, str | None]]]:
+    """Each tool call's commits: its repository, its subject and its hash."""
+    return [
+        [(made.repository, made.subject, made.sha) for made in asked.commits]
+        for asked in _tool_calls(publication)
+    ]
+
+
+WEAVE = 'git commit -q -m "Weave the warp"'
+"""A commit run quiet: its output shows none of it."""
+
+
+class TestCommits:
+    def test_one_is_its_repository_its_subject_and_the_hash_its_line_shows(
+        self, tmp_path: Path
+    ) -> None:
+        said = "[main 1a2b3c4] Weave the warp\n 1 file changed, 2 insertions(+)\n"
+
+        assert _commits(
+            tmp_path, 'git add . && git commit -m "Weave the warp"', said
+        ) == [("Loom", "Weave the warp", "1a2b3c4")]
+
+    @pytest.mark.parametrize(
+        ("command", "directory", "repository"),
+        [
+            ("cd /work/Shuttle && git commit -qm Wind", DIRECTORY, "Shuttle"),
+            ("git -C /work/Shuttle commit -qm Wind", DIRECTORY, "Shuttle"),
+            ("git -C ../../Shuttle commit -qm Wind", "/work/Loom/src", "Shuttle"),
+            (
+                "cd /work/Shuttle && cd ../Loom && git commit -qm Wind",
+                DIRECTORY,
+                "Loom",
+            ),
+            ("git commit -qm Wind && cd /work/Shuttle", DIRECTORY, "Loom"),
+            ("git commit -qm Wind", "/work/Shuttle/src", "Shuttle"),
+            ("cd $LOOM && git commit -qm Wind", DIRECTORY, None),
+            ("cd && git commit -qm Wind", DIRECTORY, None),
+            ("cd /tmp/looms && git commit -qm Wind", DIRECTORY, None),
+            ("git commit -qm Wind", "/work/scratch/Loom", None),
+        ],
+        ids=[
+            "a cd before it",
+            "a -C of its git",
+            "a -C from the call's directory",
+            "the last cd before it, from the one before",
+            "the call's directory, a cd after it aside",
+            "the call's directory, its line's own",
+            "a cd to a word the collector does not know",
+            "a cd home",
+            "a directory under no checkout",
+            "the scratch folder",
+        ],
+    )
+    def test_its_repository_is_the_checkout_its_directory_lies_under(
+        self, command: str, directory: str, repository: str | None, tmp_path: Path
+    ) -> None:
+        assert _commits(tmp_path, command, directory=directory) == (
+            [] if repository is None else [(repository, "Wind", None)]
+        )
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            'git commit -m "Weave the warp"',
+            "git commit -m 'Weave the warp'",
+            'git commit -qam "Weave the warp"',
+            'git commit -m"Weave the warp"',
+            'git commit --message="Weave the warp"',
+            "git commit --message 'Weave the warp'",
+            'git commit -m "Weave the warp" -m "The weft follows."',
+            'git commit -m "Weave the\nwarp\n\nThe weft follows."',
+            "git commit -q -F - <<'EOF'\n\nWeave the warp  \n\nThe weft follows.\nEOF",
+            "git commit -F - <<EOF\nWeave the warp\nEOF",
+            "git commit -m \"$(cat <<'EOF'\nWeave the warp\n\n(The weft) follows.\nEOF\n)\"",
+            "git add . &&\\\n  git commit -m 'Weave the warp' # the first row",
+            'GIT_AUTHOR_NAME=Ada git commit -m "Weave the warp" 2>&1 | tail -1',
+            'if git commit -m "Weave the warp"; then git push; fi',
+            'git commit -m "$(cat <<EOF\nWeave the warp\nEOF\n)"',
+        ],
+        ids=[
+            "a double-quoted -m",
+            "a single-quoted -m",
+            "an -m among short options",
+            "an -m its message follows in its word",
+            "a --message with its value",
+            "a --message its value follows",
+            "the first of two -m",
+            "a first paragraph of two lines",
+            "a here-document's, its blank opening line and trailing spaces cut",
+            "a here-document its delimiter does not quote, with no expansion",
+            "a here-document's cat in a substitution",
+            "past a continued line and before a comment",
+            "past a variable it sets and before a redirection and a pipe",
+            "in an if",
+            "a here-document's cat its delimiter does not quote, with no expansion",
+        ],
+    )
+    def test_its_subject_is_its_messages_as_git_gives_it(
+        self, command: str, tmp_path: Path
+    ) -> None:
+        assert _commits(tmp_path, command) == [("Loom", "Weave the warp", None)]
+
+    def test_a_double_quoted_messages_escapes_are_taken(self, tmp_path: Path) -> None:
+        command = 'git commit -m "Weave the \\"warp\\" for \\$5"'
+
+        assert _commits(tmp_path, command) == [
+            ("Loom", 'Weave the "warp" for $5', None)
+        ]
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            'git commit -m "$ROW"',
+            'git commit -m "Weave row $ROW"',
+            "git commit -F message.txt",
+            "git commit --amend --no-edit",
+            "git commit -C HEAD~1",
+            "git commit -F - <<EOF\nWeave row $ROW\nEOF",
+            'git commit -m "$(git log -1 --format=%s)"',
+            'git commit -m "$(cat <<EOF\nWeave row $ROW\nEOF\n)"',
+            "echo Weave | git commit -F -",
+        ],
+        ids=[
+            "a variable",
+            "a variable among its words",
+            "a file's",
+            "an amend's, the commit's own",
+            "another commit's",
+            "a here-document the shell expands",
+            "a command's output",
+            "a here-document's cat the shell expands",
+            "a pipe's",
+        ],
+    )
+    def test_one_whose_message_the_collector_does_not_know_and_no_line_shows_is_none(
+        self, command: str, tmp_path: Path
+    ) -> None:
+        assert _commits(tmp_path, command) == []
+
+    def test_one_whose_message_the_command_does_not_give_takes_its_lines_subject(
+        self, tmp_path: Path
+    ) -> None:
+        said = "[main 5e6f7a8] Weave the warp\n Date: Thu Nov 12 09:00:00 2026\n"
+
+        assert _commits(tmp_path, "git commit --amend --no-edit", said) == [
+            ("Loom", "Weave the warp", "5e6f7a8")
+        ]
+
+    @pytest.mark.parametrize(
+        ("command", "said", "record", "sha"),
+        [
+            (WEAVE, "[main (root-commit) 1a2b3c4] Weave the warp", None, "1a2b3c4"),
+            (WEAVE, "[detached HEAD 1a2b3c4] Weave the warp", None, "1a2b3c4"),
+            (WEAVE, "[phase/052-P10 1a2b3c4] Weave the warp", None, "1a2b3c4"),
+            (
+                f"{WEAVE} && git log --oneline -1",
+                "1a2b3c4 Weave the warp",
+                None,
+                "1a2b3c4",
+            ),
+            (
+                f"{WEAVE} && git log --oneline --decorate -1",
+                "1a2b3c4 (HEAD -> main, origin/main) Weave the warp",
+                None,
+                "1a2b3c4",
+            ),
+            (f"{WEAVE} && git log --oneline -1", "1a2b3c4 Wind the bobbin", None, None),
+            (f"git log --oneline -1 && {WEAVE}", "1a2b3c4 Weave the warp", None, None),
+            (
+                f"{WEAVE} && git -C /work/Shuttle log --oneline -1",
+                "1a2b3c4 Weave the warp",
+                None,
+                None,
+            ),
+            (
+                f"{WEAVE} && echo 1a2b3c4 Weave the warp",
+                "1a2b3c4 Weave the warp",
+                None,
+                None,
+            ),
+            (
+                f"{WEAVE} && git rev-parse --short HEAD",
+                "9f8e7d6\n",
+                None,
+                "9f8e7d6",
+            ),
+            (f"git rev-parse HEAD && {WEAVE}", "9f8e7d6\n", None, None),
+            (
+                WEAVE,
+                "",
+                {"stdout": "", "gitOperation": {"commit": {"sha": "1a2b3c4"}}},
+                "1a2b3c4",
+            ),
+            (WEAVE, "", {"stdout": "", "gitOperation": {"commit": {"sha": "2"}}}, None),
+            (
+                WEAVE,
+                "",
+                {"stdout": "", "gitOperation": {"push": {"branch": "main"}}},
+                None,
+            ),
+            (WEAVE, "", None, None),
+        ],
+        ids=[
+            "its line, a first commit's",
+            "its line, on no branch",
+            "its line, on a branch of slashes",
+            "a git log that follows it",
+            "a decorated git log that follows it",
+            "a git log of another subject",
+            "a git log before it",
+            "a git log in another repository",
+            "a line no git log printed",
+            "a git rev-parse that follows it",
+            "a git rev-parse before it",
+            "Claude Code's record of it",
+            "Claude Code's record, where it is no hash",
+            "Claude Code's record of another operation",
+            "nothing that shows it",
+        ],
+    )
+    def test_its_hash_is_the_first_that_shows(
+        self, command: str, said: str, record: Any, sha: str | None, tmp_path: Path
+    ) -> None:
+        assert _commits(tmp_path, command, said, record) == [
+            ("Loom", "Weave the warp", sha)
+        ]
+
+    def test_each_of_a_commands_commits_takes_its_own_line(
+        self, tmp_path: Path
+    ) -> None:
+        command = (
+            f"{WEAVE} && cd /work/Shuttle && git commit -m 'Wind the bobbin'"
+            " && git commit --amend --no-edit"
+        )
+        said = "[main 9f8e7d6] Wind the bobbin\n[main 0a0b0c0] Wind the bobbin, again\n"
+
+        assert _commits(tmp_path, command, said) == [
+            ("Loom", "Weave the warp", None),
+            ("Shuttle", "Wind the bobbin", "9f8e7d6"),
+            ("Shuttle", "Wind the bobbin, again", "0a0b0c0"),
+        ]
+
+    def test_a_later_calls_git_log_shows_the_latest_commits_hash_first(
+        self, tmp_path: Path
+    ) -> None:
+        """A log prints the newest first: the latest commit of its subject
+        that showed no hash takes the first line that names it."""
+        said = "bbbbbbb Weave the warp\naaaaaaa Weave the warp\n"
+
+        assert _made(
+            _read(
+                tmp_path,
+                _committing((WEAVE, ""), (WEAVE, ""), ("git log --oneline -2", said)),
+            )
+        ) == [
+            [("Loom", "Weave the warp", "aaaaaaa")],
+            [("Loom", "Weave the warp", "bbbbbbb")],
+            [],
+        ]
+
+    @pytest.mark.parametrize(
+        "log",
+        ["git -C /work/Shuttle log --oneline -1", "echo 1a2b3c4 Weave the warp"],
+        ids=["another repository's git log", "no git log"],
+    )
+    def test_a_later_call_shows_no_hash_but_by_a_git_log_in_its_repository(
+        self, log: str, tmp_path: Path
+    ) -> None:
+        commands = _committing((WEAVE, ""), (log, "1a2b3c4 Weave the warp"))
+
+        assert _made(_read(tmp_path, commands)) == [
+            [("Loom", "Weave the warp", None)],
+            [],
+        ]
+
+    def test_a_failed_call_makes_no_commit(self, tmp_path: Path) -> None:
+        said = "[main 1a2b3c4] Weave the warp\nerror: failed to push some refs"
+
+        assert _commits(tmp_path, f"{WEAVE} && git push", said, error=True) == []
+
+    def test_a_hash_held_as_another_commits_is_not_held_again(
+        self, tmp_path: Path
+    ) -> None:
+        line = "[main 1a2b3c4] Weave the warp"
+        commands = _committing(
+            ('git commit -m "Weave the warp"', line),
+            ('git commit -m "Weave the warp"', line),
+            (WEAVE, ""),
+            ("git log --oneline -1", "1a2b3c4 Weave the warp"),
+        )
+
+        assert _made(_read(tmp_path, commands)) == [
+            [("Loom", "Weave the warp", "1a2b3c4")],
+            [],
+            [("Loom", "Weave the warp", None)],
+            [],
+        ]
 
 
 class TestHookRuns:

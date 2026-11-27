@@ -4,7 +4,8 @@ and `ben`, the projects `recipe-box` and `bike-log`.
 Pilot is sent to halve the stew in the recipe box, an errand's first leg. Its
 session reads the recipe, has a sub-agent count the servings while it loads
 the pantry's scaling skill, meets a failing command and an API error its
-request is sent again after, and carries on past a compaction, missing the
+request is sent again after, halves the recipe, writes the shopping list and
+commits both, and carries on past a compaction, missing the
 cache, a Stop hook tidying up at its end; two of its tools' outputs are too
 large and are saved to disk. The sub-agent asks for Opus once and Haiku
 answers in its place, while a hook keeps it from the pantry's token and a
@@ -22,6 +23,7 @@ The model names are the public ones. Everything else is invented.
 from pilot_scenario.script import (
     Call,
     Carried,
+    Committed,
     Compaction,
     Group,
     HookRun,
@@ -223,7 +225,27 @@ HALVING = Session(
                             ),
                             tools=(
                                 ToolUse(
-                                    "Edit", "recipes/stew.md", took=1, characters=96
+                                    "Edit",
+                                    "recipes/stew.md",
+                                    took=1,
+                                    characters=96,
+                                    added=4,
+                                    removed=4,
+                                ),
+                                ToolUse(
+                                    "Write",
+                                    "/work/RecipeBox/recipes/shopping.md",
+                                    took=2,
+                                    characters=88,
+                                    added=6,
+                                    created=True,
+                                ),
+                                ToolUse(
+                                    "Bash",
+                                    'git add recipes && git commit -m "Halve the stew"',
+                                    took=3,
+                                    characters=120,
+                                    commits=(Committed("Halve the stew", "4be1d2c"),),
                                 ),
                             ),
                         ),

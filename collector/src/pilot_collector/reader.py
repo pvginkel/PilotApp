@@ -7,9 +7,10 @@ its newline is written. The facts are read off the lines in the file's order:
 - **The collection record.** The file's size and time are the open file's
   own, the time cut to the microsecond Pilot holds one at, and the bytes read
   are those the size counts.
-- **The place.** The working directory is the first line's that carries one.
-  The repository is the checkout that holds it: the first folder under a
-  checkout root, the roots' `scratch` folder aside. The environment is a main
+- **The place.** The working directory is the first line's that carries one,
+  and a tool call's the one its line names. The repository is the checkout
+  that holds it: the first folder under a checkout root, the roots' `scratch`
+  folder aside. The environment is a main
   thread's alone: the id the managed instruction file opens with, in the
   `instructions` attachment that lists the files a process loaded, the first
   where the file names two.
@@ -149,6 +150,18 @@ its newline is written. The facts are read off the lines in the file's order:
     for `user-rejected`, and any other in Claude Code's own word. A
     `toolDenialKind` of `interrupted` is no denial: the person interrupted
     the call.
+  - A successful Edit or Write edited the file its input names, from its
+    working directory, where a checkout holds it: a File Edit of the
+    checkout's Repository and the path within it, a worktree under the
+    checkout's `.claude/worktrees` the checkout's own, its lines by
+    `changes.py`'s rule.
+  - A successful Bash call made the commits its command makes
+    (`changes.py`) in a directory a checkout holds, each with its subject
+    and the hash its output shows, or a `git log` that follows it in that
+    Repository, none where none does; a commit whose hash the reading holds
+    as another's is not held again. A later call's `git log` in a Repository
+    shows the hash of the latest commit made there under its line's subject
+    that showed none. A failed call made none.
 - **A Hook Run** is a hook command a Stop hook's summary names, a main
   thread's `system` line of subtype `stop_hook_summary` (2.1.250 on), on
   the latest Prompt before it, with the command's duration. It failed where
@@ -208,8 +221,8 @@ it, published again with its Hook Runs, and the boundary names its place.
 Such a reading holds no line before the boundary's byte but the one the
 carry names, with where the chain leads from it as the lines before that
 byte stand and what the Call it leads to left the next, the request lines
-before it written since the last one a Call named, the Events before it
-where no Call is, the latest Prompt before it where the Launch open there
+before it written since the last one a Call named, the commits made before
+it that showed no hash, the Events before it where no Call is, the latest Prompt before it where the Launch open there
 received it, with its Hook Runs, what the lines before it record of the
 Context Parts of the boundary's Call where it is its Launch's first, the
 Context Parts injected before that Call, and on a fork's thread the call
@@ -237,11 +250,14 @@ where:
   with, or the thread is no fork's where the carry was read as one, or one
   where it was not;
 - a fork's line from the boundary's byte on holds the call that started it,
-  where the carry was read with no line of it.
+  where the carry was read with no line of it;
+- a `git log` from the boundary's byte on shows the hash of a commit made
+  before it, which no line before it showed.
 """
 
 import json
 import os
+import posixpath
 import re
 from dataclasses import asdict, dataclass, field, replace
 from datetime import datetime, timedelta
@@ -251,7 +267,7 @@ from typing import Any
 from pilot_collection.publication import CallTokenKind, PublicationSchema
 from pydantic import ValidationError
 
-from pilot_collector import VERSION
+from pilot_collector import VERSION, changes
 from pilot_collector.carry import (
     ROOT,
     Carry,
@@ -268,6 +284,7 @@ from pilot_collector.carry import (
     Requested,
     Shape,
     Standing,
+    Unhashed,
     digest,
 )
 from pilot_collector.home import Transcript, modified_at, record_of, saved_output
@@ -388,8 +405,15 @@ _SCRATCH = "scratch"
 """The folder of a checkout root that holds clones that are no repository of
 the environment's."""
 
+_WORKTREES = (".claude", "worktrees")
+"""Where a checkout holds the worktrees Claude Code makes of it, a folder
+each."""
+
 _BASH = "Bash"
 """The tool whose result says how its command exited."""
+
+_CHANGING = frozenset({changes.EDIT, changes.WRITE, _BASH})
+"""The tools whose successful call can change a Repository."""
 
 _MCP = "mcp"
 """What the name of an MCP server's tool opens with, before the server."""
@@ -553,6 +577,13 @@ class _ToolCall:
     denial_kind: str | None = None
     skill: str | None = None
     """The skill a `Skill` call asked for."""
+    directory: str | None = None
+    """The working directory its line names."""
+    given: dict[str, Any] | None = None
+    """Its input, where it can change a Repository: an Edit's, a Write's, a
+    Bash command's."""
+    commits: list[dict[str, Any]] = field(default_factory=list)
+    edits: list[dict[str, Any]] = field(default_factory=list)
 
 
 @dataclass(slots=True)
@@ -965,6 +996,14 @@ class _Thread:
         self._shapes: dict[str, Shape] = {}
         """What each request shape's line taken records, by its
         `shapeHash`."""
+        self.unhashed: list[tuple[Unhashed, dict[str, Any] | None]] = [
+            (made, None) for made in before.unhashed
+        ]
+        """The commits made whose hash no line showed, in the order they
+        were made, each with its publication, none for one made before the
+        reading's first line."""
+        self._shas: set[tuple[str, str]] = set()
+        """The Repository and the hash of each commit held."""
         self._agents: dict[str, list[tuple[str, str]]] = {}
         """The plugins and versions each request shape's system prompt
         names under the cache, by its `shapeHash`: a plugin's agent's, where
@@ -1165,6 +1204,7 @@ class _Thread:
             queue=self._queue,
             removed=self._removed,
             fork=self._fork,
+            unhashed=tuple(made for made, _ in self.unhashed),
         )
 
     def _placed(self, message_id: str) -> int:
@@ -1438,7 +1478,14 @@ class _Thread:
             elif block["type"] == "tool_use" and block["id"] not in self._requested:
                 argument = _argument(block["name"], block["input"])
                 skill = _skill(block["name"], block["input"])
-                asked = _ToolCall(block["name"], argument, at, skill=skill)
+                asked = _ToolCall(
+                    block["name"],
+                    argument,
+                    at,
+                    skill=skill,
+                    directory=line.get("cwd"),
+                    given=block["input"] if block["name"] in _CHANGING else None,
+                )
                 self._requested[block["id"]] = call.tool_calls[block["id"]] = asked
 
     def _fell_back(self, line: dict[str, Any]) -> None:
@@ -1537,19 +1584,157 @@ class _Thread:
             )
             if asked.failed:
                 asked.denial_kind = _denial(asked.tool, said, denied)
+            elif asked.given is not None:
+                self._changed(block["tool_use_id"], asked, asked.given, record, said)
+
+    def _changed(
+        self,
+        made_by: str,
+        asked: _ToolCall,
+        given: dict[str, Any],
+        record: Any,
+        said: str,
+    ) -> None:
+        """What a successful call of that id, `given` its input, changed of a
+        Repository, its result saying `said` and `record` the tool's own
+        record of it."""
+        if asked.tool != _BASH:
+            kept = _kept(asked.directory, given["file_path"], self._settings)
+            if kept is not None:
+                added, removed = changes.edited(asked.tool, given, record)
+                asked.edits.append(
+                    {
+                        "repository": kept[0],
+                        "path": kept[1],
+                        "lines_added": added,
+                        "lines_removed": removed,
+                    }
+                )
+        elif "git" in given["command"]:
+            command = changes.command(given["command"], asked.directory)
+            self._committed(made_by, asked, command, said, record)
+
+    def _committed(
+        self,
+        made_by: str,
+        asked: _ToolCall,
+        command: changes.Command,
+        said: str,
+        record: Any,
+    ) -> None:
+        """The commits the Bash call of that id made, and the hashes its
+        `git log`s show of commits earlier calls made."""
+        logs = [
+            (place, _repository(directory, self._settings))
+            for place, directory in command.logs
+            if directory is not None
+        ]
+        logged = changes.logged(said) if logs else []
+        for made in changes.made(command, said, record):
+            repository = _repository(made.directory, self._settings)
+            if repository is None:
+                continue
+            sha = made.sha
+            if sha is None and any(
+                place > made.place and logged_in == repository
+                for place, logged_in in logs
+            ):
+                sha = next(
+                    (
+                        hashed
+                        for hashed, line in logged
+                        if changes.names(line, made.subject)
+                        and (repository, hashed) not in self._shas
+                    ),
+                    None,
+                )
+            if sha is not None and (repository, sha) in self._shas:
+                continue
+            commit = {"repository": repository, "subject": made.subject, "sha": sha}
+            asked.commits.append(commit)
+            if sha is None:
+                self.unhashed.append(
+                    (Unhashed(made_by, repository, made.subject), commit)
+                )
+            else:
+                self._shas.add((repository, sha))
+        repositories = {repository for _, repository in logs if repository is not None}
+        for hashed, line in logged:
+            self._shown(made_by, repositories, hashed, line)
+
+    def _shown(self, made_by: str, repositories: set[str], sha: str, line: str) -> None:
+        """A line of a `git log` the call of that id ran in `repositories`:
+        the hash of the latest commit another call made in one of them under
+        the line's subject that showed none. A reading from a boundary on
+        stops at one made before it, which it holds no publication of."""
+        for place in range(len(self.unhashed) - 1, -1, -1):
+            made, commit = self.unhashed[place]
+            if (
+                made.made_by == made_by
+                or made.repository not in repositories
+                or not changes.names(line, made.subject)
+            ):
+                continue
+            if (made.repository, sha) in self._shas:
+                return
+            if commit is None:
+                raise NotContinuedError(
+                    "a call shows the hash of a commit made before its boundary"
+                )
+            commit["sha"] = sha
+            self._shas.add((made.repository, sha))
+            del self.unhashed[place]
+            return
+
+
+def _checkout(
+    path: PurePosixPath, settings: Settings
+) -> tuple[str, tuple[str, ...]] | None:
+    """The checkout that holds a path, by its name, and the path's parts
+    within it; none for a path under no checkout."""
+    for root in settings.COLLECTOR_CHECKOUT_ROOTS:
+        if path.is_relative_to(root):
+            under = path.relative_to(root).parts
+            if under and under[0] != _SCRATCH:
+                return under[0], under[1:]
+            return None
+    return None
 
 
 def _repository(directory: str, settings: Settings) -> str | None:
     """The checkout that holds the working directory, by its name; none for
     a directory under no checkout."""
-    path = PurePosixPath(directory)
-    for root in settings.COLLECTOR_CHECKOUT_ROOTS:
-        if path.is_relative_to(root):
-            under = path.relative_to(root).parts
-            if under and under[0] != _SCRATCH:
-                return under[0]
+    held = _checkout(PurePosixPath(directory), settings)
+    return None if held is None else held[0]
+
+
+def _kept(
+    directory: str | None, path: str, settings: Settings
+) -> tuple[str, str] | None:
+    """The checkout that holds the file a call names by `path`, from its
+    working directory `directory`, by its name, and the file's path within
+    it, a worktree's of the checkout as the checkout's own; none for a file
+    under no checkout."""
+    if not posixpath.isabs(path):
+        if directory is None:
             return None
-    return None
+        path = posixpath.join(directory, path)
+    held = _checkout(PurePosixPath(posixpath.normpath(path)), settings)
+    if held is None:
+        return None
+    name, within = held
+    if within[:2] == _WORKTREES:
+        within = within[3:]
+    return (name, "/".join(within)) if within else None
+
+
+def _resolved(standing: Standing, unhashed: set[Unhashed]) -> Standing:
+    """Where a reading stood, with no commit made before it whose hash a
+    line the reading took later showed."""
+    if all(made in unhashed for made in standing.unhashed):
+        return standing
+    kept = tuple(made for made in standing.unhashed if made in unhashed)
+    return replace(standing, unhashed=kept)
 
 
 def _changed(was: str | None, now: str | None) -> bool:
@@ -1671,6 +1856,8 @@ def _calls(thread: _Thread) -> list[dict[str, Any]]:
                     "denial_kind": asked.denial_kind,
                     "result_characters": asked.result_characters,
                     "saved_characters": asked.saved_characters,
+                    "commits": asked.commits,
+                    "file_edits": asked.edits,
                 }
                 for tool_use_id, asked in call.tool_calls.items()
             ],
@@ -1857,7 +2044,8 @@ def read(
         publication = PublicationSchema.model_validate(facts)
     except ValidationError as error:
         raise UnreadableError(f"its facts are no publication: {error}") from error
-    stands = thread.stands
+    unhashed = {made for made, _ in thread.unhashed}
+    stands = _resolved(thread.stands, unhashed)
     return Read(
         publication,
         Carry(
@@ -1868,7 +2056,10 @@ def read(
             end=digest(content[stands.byte - before.byte :]),
         ),
         tuple(called),
-        thread.stood,
+        {
+            message_id: _resolved(standing, unhashed)
+            for message_id, standing in thread.stood.items()
+        },
         content,
         before.byte,
         None if carry is None else carry.checkpoint,

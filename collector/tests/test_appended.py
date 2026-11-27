@@ -28,6 +28,7 @@ from pilot_collector.carry import (
     Requested,
     Shape,
     Standing,
+    Unhashed,
     digest,
 )
 from pilot_collector.home import Transcript, transcript
@@ -76,7 +77,10 @@ from tests.test_reader import (
     SCHEMAS,
     SPAWNING,
     UNTIL,
+    WEAVE,
+    _committing,
     _forked,
+    _made,
     _resumed,
 )
 
@@ -764,7 +768,7 @@ class TestAFileThatGrew:
 
     @pytest.mark.parametrize(
         ("scenario", "read_whole", "read_on"),
-        [(SCENARIO, 3, 81), (_resumed(), 0, 11)],
+        [(SCENARIO, 3, 85), (_resumed(), 0, 11)],
         ids=["the scenario", "a resumed thread"],
     )
     def test_a_scenarios_file_grown_a_line_at_a_time_reads_as_its_whole(
@@ -1879,7 +1883,7 @@ class TestFromTheLabellersBoundary:
 
     @pytest.mark.parametrize(
         ("scenario", "read_whole", "read_on"),
-        [(SCENARIO, 10, 180), (_resumed(), 0, 22)],
+        [(SCENARIO, 10, 196), (_resumed(), 0, 22)],
         ids=["the scenario", "a resumed thread"],
     )
     def test_read_on_from_any_call_a_reading_took_a_file_reads_as_its_whole(
@@ -1925,6 +1929,91 @@ class TestFromTheLabellersBoundary:
                         appended += 1
                 held = whole
         assert (whole_instead, appended) == (read_whole, read_on)
+
+
+def _logged(at: float, place: int, said: str) -> list[Line]:
+    """A Call whose Bash call runs a `git log` in the file's checkout, which
+    says `said`."""
+    return [
+        requesting(
+            at,
+            f"toolu_0{place}",
+            given={"command": "git log --oneline -1"},
+            message_id=f"msg_0{place}",
+        ),
+        result(at + 1, f"toolu_0{place}", said, error=False),
+    ]
+
+
+class TestACommitsHashALaterCallShows:
+    """A commit whose hash only a later call shows (P-349): the carry holds
+    the commits made before its boundary that showed none."""
+
+    def test_the_carry_holds_each_one_made_before_the_boundary(
+        self, tmp_path: Path
+    ) -> None:
+        taken = read(
+            filed(tmp_path, _committing((WEAVE, ""), ("ls looms", "warp"))), SETTINGS
+        )
+
+        assert taken.carry.stands.unhashed == (
+            Unhashed("toolu_01", "Loom", "Weave the warp"),
+        )
+        assert taken.stood["msg_01"].unhashed == ()
+
+    def test_a_git_log_from_the_boundary_on_that_shows_one_reads_the_file_whole(
+        self, tmp_path: Path
+    ) -> None:
+        """The appended publication holds no Call before the boundary to
+        give the hash to."""
+        named = filed(tmp_path, _committing((WEAVE, ""), ("ls looms", "warp")))
+        before = read(named, SETTINGS)
+        _added(named, _logged(8, 3, "1a2b3c4 Weave the warp"))
+
+        with pytest.raises(
+            NotContinuedError,
+            match="a call shows the hash of a commit made before its boundary",
+        ):
+            read(named, SETTINGS, before.carry)
+        assert _made(read(named, SETTINGS).publication)[0] == [
+            ("Loom", "Weave the warp", "1a2b3c4")
+        ]
+
+    def test_one_made_from_the_boundary_on_takes_the_hash_a_later_call_shows(
+        self, tmp_path: Path
+    ) -> None:
+        named = filed(tmp_path, _committing(("ls looms", "warp"), (WEAVE, "")))
+        before = read(named, SETTINGS)
+        _added(named, _logged(8, 3, "1a2b3c4 Weave the warp"))
+
+        grown = read(named, SETTINGS, before.carry)
+
+        assert _made(grown.publication) == [
+            [("Loom", "Weave the warp", "1a2b3c4")],
+            [],
+        ]
+        assert grown.carry.stands.unhashed == ()
+
+    def test_one_a_later_call_the_reading_took_showed_is_held_nowhere_before_it(
+        self, tmp_path: Path
+    ) -> None:
+        """Pilot holds the hash the reading gave it: one read on from a Call
+        between the two, the labeller's boundary, goes on past the log."""
+        named = filed(
+            tmp_path,
+            _committing(
+                (WEAVE, ""),
+                ("ls looms", "warp"),
+                ("git log --oneline -1", "1a2b3c4 Weave the warp"),
+            ),
+        )
+        taken = read(named, SETTINGS)
+        _added(named, [assistant(10, "msg_04")])
+
+        grown = read(named, SETTINGS, taken.carried(_at("msg_02")))
+
+        assert taken.stood["msg_02"].unhashed == ()
+        assert _made(grown.publication) == [[], []]
 
 
 def filed_again(projects: Path, agent: str | None = None) -> Transcript:

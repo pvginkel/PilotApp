@@ -409,6 +409,51 @@ class TestAMainThread:
             }
         ]
 
+    def test_a_calls_commits_and_edits_are_the_scripts_in_its_repository(
+        self,
+    ) -> None:
+        edit, write, commit = _built()["halving"]["calls"][3]["tool_calls"]
+
+        assert (edit["tool"], write["tool"], commit["tool"]) == (
+            "Edit",
+            "Write",
+            "Bash",
+        )
+        assert edit["file_edits"] == [
+            {
+                "repository": "RecipeBox",
+                "path": "recipes/stew.md",
+                "lines_added": 4,
+                "lines_removed": 4,
+            }
+        ]
+        assert write["file_edits"] == [
+            {
+                "repository": "RecipeBox",
+                "path": "recipes/shopping.md",
+                "lines_added": 6,
+                "lines_removed": 0,
+            }
+        ]
+        assert commit["commits"] == [
+            {"repository": "RecipeBox", "subject": "Halve the stew", "sha": "4be1d2c"}
+        ]
+        assert "commits" not in edit and "file_edits" not in commit
+
+    def test_a_session_no_checkout_holds_changed_no_repository(self) -> None:
+        halving, gears = SCENARIO.sessions
+        elsewhere = replace(
+            SCENARIO, sessions=(replace(halving, repository=None), gears)
+        )
+        (main, *_) = Builder(elsewhere, UNTIL).publications()
+
+        assert not [
+            asked
+            for call in main["calls"]
+            for asked in call.get("tool_calls", [])
+            if "commits" in asked or "file_edits" in asked
+        ]
+
     def test_a_denied_call_names_its_denial_and_failed(self) -> None:
         built = _built()
 
@@ -419,8 +464,8 @@ class TestAMainThread:
             for asked in call.get("tool_calls", [])
             if "denial_kind" in asked
         ] == [
-            ("toolu_0010", "hook", True),
-            ("toolu_0011", "rule", True),
+            ("toolu_0012", "hook", True),
+            ("toolu_0013", "rule", True),
             ("toolu_0003", "person", True),
         ]
 

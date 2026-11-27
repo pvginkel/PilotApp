@@ -13,7 +13,8 @@ A publication is what its thread's file says: the file's size and time, and
 each fact as the lines carry it. The files hold the lines these facts are
 read off: a thread's ids and where it ran, its Launches, each to its last
 line with a time and with the plugins whose skills it loaded, its Prompts,
-Calls and Tool Calls, a denied call's denial among them, its Compactions, each Call's
+Calls and Tool Calls, a denied call's denial among them, the commits a
+command made and a file's lines an edit changed, its Compactions, each Call's
 place on the chain, the request it answered and those that failed before
 it, what Claude Code records of its choices, the Events, the Stop hooks
 run at a Prompt's end, and each Call's context parts: on a Launch's first
@@ -35,6 +36,7 @@ written to, the scenario's times laid back from there.
 
 import json
 import os
+import posixpath
 import uuid
 from collections import Counter
 from collections.abc import Iterator, Mapping, Sequence
@@ -260,11 +262,13 @@ class _Thread:
     them, and its file's lines as they are written; its ids counted on with
     `ids`, the conversation's. `agents` are the session's sub-agents as a
     tool call names the one it started, by name; `agent` is the thread's own
-    sub-agent's id, none for the main thread, at its `depth`."""
+    sub-agent's id, none for the main thread, at its `depth`. Its `session`'s
+    directory is its checkout's own, where a checkout holds it."""
 
     def __init__(
         self,
         builder: "Builder",
+        session: Session,
         ids: _Ids,
         lines: Lines,
         agents: Mapping[str, Spawned],
@@ -278,6 +282,7 @@ class _Thread:
         name."""
         self.lines = lines
         self._builder = builder
+        self._session = session
         self.ids = ids
         self._agents = agents
         self._agent = agent
@@ -426,6 +431,7 @@ class _Thread:
             denial_kind=use.denied,
             result_characters=use.characters,
             saved_characters=use.saved,
+            **self._changed(use),
         )
         if use.spawns is not None:
             self.spawned[use.spawns] = _Spawning(
@@ -439,6 +445,30 @@ class _Thread:
         if use.tool == "Skill" and use.argument is not None:
             self._skills[use.argument] = tool_call["tool_use_id"]
         return tool_call
+
+    def _changed(self, use: ToolUse) -> dict[str, Any]:
+        """What a call changed of its session's Repository, as a collector
+        publishes it: a successful Bash call's commits, and a successful
+        Edit's or Write's lines of the file its argument names from the
+        session's directory; none where no checkout holds that directory."""
+        repository = self._session.repository
+        if repository is None or use.took is None or use.failed:
+            return {}
+        commits = [
+            {"repository": repository, "subject": made.subject, "sha": made.sha}
+            for made in use.commits
+        ]
+        if use.tool not in ("Edit", "Write") or use.argument is None:
+            return _given(commits=commits)
+        directory = self._session.directory
+        path = posixpath.relpath(posixpath.join(directory, use.argument), directory)
+        edited = {
+            "repository": repository,
+            "path": path,
+            "lines_added": use.added,
+            "lines_removed": use.removed,
+        }
+        return {"file_edits": [edited]}
 
     def _write(
         self,
@@ -748,7 +778,7 @@ class Builder:
 
     def _main(self, session: Session) -> tuple[_Built, _Thread]:
         lines = self._lines(session)
-        thread = _Thread(self, _Ids(), lines, self._agents(session))
+        thread = _Thread(self, session, _Ids(), lines, self._agents(session))
         launches: list[dict[str, Any]] = []
         ends: list[int] = []
         """The count of the thread's Calls by each Launch's end."""
@@ -897,7 +927,7 @@ class Builder:
         )
         named = self.agent(session, agent)
         thread = _Thread(
-            self, ids, lines, self._agents(session), named, spawning.depth + 1
+            self, session, ids, lines, self._agents(session), named, spawning.depth + 1
         )
         thread.opening = [len(_TASK)]
         for taken, step in enumerate(agent.steps, start=1):

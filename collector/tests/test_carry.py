@@ -21,6 +21,7 @@ from pilot_collector.carry import (
     Requested,
     Shape,
     Standing,
+    Unhashed,
     digest,
 )
 
@@ -40,6 +41,7 @@ def _carry(
     plugged: int = 0,
     prompted: int = 1,
     checkpointed: int | None = None,
+    unhashed: int = 0,
 ) -> Carry:
     """A carry no other shares a word or a time with, with a labeller's
     checkpoint of `checkpointed` characters where that is not none."""
@@ -153,6 +155,14 @@ def _carry(
                 f"msg_01{place:022}",
                 STOOD + timedelta(hours=place, seconds=9),
             ),
+            unhashed=tuple(
+                Unhashed(
+                    f"toolu_01{place:018}{made:04}",
+                    f"Loom{place}",
+                    f"Weave row {made} of the warp {place}",
+                )
+                for made in range(unhashed)
+            ),
         ),
         end=digest(str(place).encode()),
         checkpoint=None
@@ -186,19 +196,21 @@ class TestACarrysSize:
             plugged,
             prompted,
             checkpointed,
+            unhashed,
         ) in (
-            (0, 0, 0, 0, 0, 0, 0, 0, 1, None),
-            (40, 0, 0, 0, 0, 0, 0, 0, 1, None),
-            (0, 3, 0, 0, 0, 0, 0, 0, 1, None),
-            (0, 0, 7, 0, 0, 0, 0, 0, 1, None),
-            (0, 0, 0, 9, 0, 0, 0, 0, 1, None),
-            (0, 0, 0, 0, 6, 0, 0, 0, 1, None),
-            (0, 0, 0, 0, 0, 8, 0, 0, 1, None),
-            (0, 0, 0, 0, 0, 0, 12, 0, 1, None),
-            (0, 0, 0, 0, 0, 0, 0, 5, 1, None),
-            (0, 0, 0, 0, 0, 0, 0, 0, 40, None),
-            (0, 0, 0, 0, 0, 0, 0, 0, 1, 0),
-            (0, 0, 0, 0, 0, 0, 0, 0, 1, 4_000),
+            (0, 0, 0, 0, 0, 0, 0, 0, 1, None, 0),
+            (40, 0, 0, 0, 0, 0, 0, 0, 1, None, 0),
+            (0, 3, 0, 0, 0, 0, 0, 0, 1, None, 0),
+            (0, 0, 7, 0, 0, 0, 0, 0, 1, None, 0),
+            (0, 0, 0, 9, 0, 0, 0, 0, 1, None, 0),
+            (0, 0, 0, 0, 6, 0, 0, 0, 1, None, 0),
+            (0, 0, 0, 0, 0, 8, 0, 0, 1, None, 0),
+            (0, 0, 0, 0, 0, 0, 12, 0, 1, None, 0),
+            (0, 0, 0, 0, 0, 0, 0, 5, 1, None, 0),
+            (0, 0, 0, 0, 0, 0, 0, 0, 40, None, 0),
+            (0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0),
+            (0, 0, 0, 0, 0, 0, 0, 0, 1, 4_000, 0),
+            (0, 0, 0, 0, 0, 0, 0, 0, 1, None, 30),
         ):
             tracemalloc.start()
             before, _ = tracemalloc.get_traced_memory()
@@ -215,6 +227,7 @@ class TestACarrysSize:
                     plugged=plugged,
                     prompted=prompted,
                     checkpointed=checkpointed,
+                    unhashed=unhashed,
                 )
                 for place in range(1_000, 1_400)
             ]
@@ -269,6 +282,9 @@ class TestACarrysSize:
         self,
     ) -> None:
         assert _carry(removed=2).size == _carry(queued=2).size > _carry().size
+
+    def test_a_commit_whose_hash_no_line_showed_counts(self) -> None:
+        assert _carry(unhashed=2).size > _carry(unhashed=1).size > _carry().size
 
     def test_the_labellers_checkpoint_counts_with_its_text(self) -> None:
         assert (

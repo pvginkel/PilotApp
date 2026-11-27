@@ -7,6 +7,7 @@ and when it was sent, the Events, and each Call's context parts are the
 publication's."""
 
 import json
+import posixpath
 import re
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
@@ -97,11 +98,17 @@ TOOL_CALL_FACTS = (
     "denial_kind",
     "result_characters",
     "saved_characters",
+    "commits",
+    "file_edits",
 )
 SUMMARY = "compact_summary"
 """The Context Part Kind of a compaction's summary."""
 DENIALS = {"permission-rule": "rule", "user-rejected": "person"}
 """A Denial Kind by the `toolDenialKind` a result's line names."""
+CHECKOUT = re.compile(r"/work/(?P<repository>[^/]+)")
+"""A checkout of the scenario's world, by its folder."""
+COMMITTED = re.compile(r"^\[main (?P<sha>[0-9a-f]+)\] (?P<subject>.+)$", re.MULTILINE)
+"""The line a command's output shows a commit it made as."""
 
 
 def _lines(file: HomeFile) -> list[dict[str, Any]]:
@@ -175,7 +182,43 @@ def _tool_call(
         read["saved_characters"] = len(on_disk.content.decode())
     elif (stated := SAVED_STATED.match(said)) is not None:
         read["saved_characters"] = int(stated.group(1).replace(",", ""))
+    if not read["failed"]:
+        read |= _changed(asked, requested["cwd"], said, record)
     return read
+
+
+def _changed(
+    asked: dict[str, Any], directory: str, said: str, record: Any
+) -> dict[str, Any]:
+    """What a successful call of the `asked` block, its line in `directory`,
+    changed of the checkout that holds it: the commits its output shows, and
+    the lines its record shows an edit changed of a file."""
+    held = CHECKOUT.match(directory)
+    if held is None:
+        return {}
+    repository = held["repository"]
+    if asked["name"] == "Bash":
+        commits = [
+            {"repository": repository, "subject": made["subject"], "sha": made["sha"]}
+            for made in COMMITTED.finditer(said)
+        ]
+        return {"commits": commits} if commits else {}
+    if asked["name"] not in ("Edit", "Write"):
+        return {}
+    path = posixpath.join(directory, asked["input"]["file_path"])
+    if record.get("type") == "create":
+        added, removed = record["content"].count("\n"), 0
+    else:
+        lines = [line for hunk in record["structuredPatch"] for line in hunk["lines"]]
+        added = sum(line.startswith("+") for line in lines)
+        removed = sum(line.startswith("-") for line in lines)
+    edited = {
+        "repository": repository,
+        "path": posixpath.relpath(path, held[0]),
+        "lines_added": added,
+        "lines_removed": removed,
+    }
+    return {"file_edits": [edited]}
 
 
 def _is_boundary(line: dict[str, Any]) -> bool:
@@ -679,7 +722,7 @@ class TestTheHome:
             "/mcp-pantry-list_recipes-toolu_0004.txt",
             f"projects/-work-RecipeBox/{HALVING}/subagents/agent-{COUNTING}.jsonl",
             f"projects/-work-RecipeBox/{HALVING}/subagents/agent-{COUNTING}.meta.json",
-            f"projects/-work-RecipeBox/{HALVING}/tool-results/toolu_0008.txt",
+            f"projects/-work-RecipeBox/{HALVING}/tool-results/toolu_0010.txt",
             f"projects/-work-BikeLog/{GEARS}.jsonl",
         ]
 
@@ -812,6 +855,20 @@ class TestAPublicationIsWhatItsFileSays:
         ]
         assert sum("compaction" in call for call in calls) == 1
         assert all("sent_at" in call for call in calls)
+        assert sorted(
+            (asked["tool"], edited["lines_added"], edited["lines_removed"])
+            for call in calls
+            for asked in call.get("tool_calls", [])
+            for edited in asked.get("file_edits", [])
+        ) == [("Edit", 4, 4), ("Write", 6, 0)]
+        assert [
+            made
+            for call in calls
+            for asked in call.get("tool_calls", [])
+            for made in asked.get("commits", [])
+        ] == [
+            {"repository": "RecipeBox", "subject": "Halve the stew", "sha": "4be1d2c"}
+        ]
         for chosen in (
             "requested_model",
             "effort",
@@ -868,7 +925,7 @@ class TestAPublicationIsWhatItsFileSays:
         home = {file.path: file for file in Builder(SCENARIO, UNTIL).files()}
         stated = f"projects/-work-RecipeBox/{HALVING}/tool-results"
 
-        assert len(home[f"{stated}/toolu_0008.txt"].content) == 33_180
+        assert len(home[f"{stated}/toolu_0010.txt"].content) == 33_180
         assert (
             len(home[f"{stated}/mcp-pantry-list_recipes-toolu_0004.txt"].content)
             == 48_300

@@ -53,6 +53,15 @@ class Retry:
 
 
 @dataclass(frozen=True)
+class Committed:
+    """A commit a Bash call's command made in its session's directory, under
+    that `subject`, its own line in the call's output showing its `sha`."""
+
+    subject: str
+    sha: str
+
+
+@dataclass(frozen=True)
 class ToolUse:
     """A call of one tool, requested as its Call completed. `took` is the
     seconds to its result, none where none arrived, and `characters` that
@@ -62,7 +71,11 @@ class ToolUse:
     `denied` the Denial Kind's code where it was denied before it ran, by a
     permission rule (`rule`), the person (`person`) or a hook (`hook`), its
     result an error in Claude Code's words for that, so `failed`; `spawns`
-    the sub-agent it started, by name."""
+    the sub-agent it started, by name. `added` and `removed` are the lines a
+    successful Edit or Write changed of the file its argument names, which
+    its result's patch shows, a Write that `created` its file adding its
+    content's lines; `commits` the commits a Bash call's command made, its
+    argument."""
 
     tool: str
     argument: str | None = None
@@ -75,6 +88,10 @@ class ToolUse:
     saved: int | None = None
     denied: str | None = None
     spawns: str | None = None
+    added: int = 0
+    removed: int = 0
+    created: bool = False
+    commits: tuple[Committed, ...] = ()
 
 
 @dataclass(frozen=True)

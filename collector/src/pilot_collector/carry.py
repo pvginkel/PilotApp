@@ -24,8 +24,9 @@ Prompt, what the lines before it record of the Context Parts of the
 boundary's Call where it is its Launch's first, the Context Parts injected
 before the boundary's Call, the prompts waiting in the queue, those a
 `remove` took out of it that no message taken in the middle of a run has
-claimed, and on a fork's thread the call that started it, with the message
-of its parent's that holds that call and its time. No id of any other line
+claimed, the commits made before it whose hash no line before it showed, and
+on a fork's thread the call that started it, with the message of its
+parent's that holds that call and its time. No id of any other line
 before the boundary is held, and of no Call but the one the chain leads to;
 no request shape but those the boundary's Call's requests name.
 
@@ -49,7 +50,7 @@ from pathlib import Path
 _DIGEST = 16
 """The bytes of a digest."""
 
-_HELD = 1_440
+_HELD = 1_480
 """The bytes a carry is counted at beside its words and its queue."""
 
 _LEFT = 560
@@ -84,7 +85,7 @@ _RECEIVED = 40
 """The bytes each Prompt's characters are counted at among what a Launch's
 first Call carries."""
 
-_FILE = 120
+_FILE = 160
 """The bytes an instruction file loaded is counted at beside its path."""
 
 _SHAPE = 160
@@ -103,6 +104,10 @@ _FORK = 160
 
 _CHECKPOINT = 240
 """The bytes a labeller's checkpoint is counted at beside its words."""
+
+_UNHASHED = 320
+"""The bytes a commit whose hash no line showed is counted at beside its
+words."""
 
 
 def digest(content: bytes) -> bytes:
@@ -286,6 +291,17 @@ class Fork:
 
 
 @dataclass(frozen=True)
+class Unhashed:
+    """A commit a call made whose hash no line has shown: a later call's
+    `git log` in its Repository shows it by its subject."""
+
+    made_by: str
+    """The `tool_use_id` of the call that made it."""
+    repository: str
+    subject: str
+
+
+@dataclass(frozen=True)
 class Standing:
     """Where a reading stands before one line of the file: what the lines
     from that line on continue. A file's first line continues nothing."""
@@ -345,6 +361,9 @@ class Standing:
     fork: Fork | None = None
     """On a fork's thread, the call that started it, as the lines before it
     found it; none on any other thread."""
+    unhashed: tuple[Unhashed, ...] = ()
+    """The commits made before it whose hash no line the reading took
+    shows, in the order they were made."""
 
 
 @dataclass(frozen=True)
@@ -428,6 +447,11 @@ class Carry:
             *(part.name for part in stands.injected),
             *(() if fork is None else (fork.spawned_by, fork.message)),
             *(
+                word
+                for made in stands.unhashed
+                for word in (made.made_by, made.repository, made.subject)
+            ),
+            *(
                 ()
                 if checkpoint is None
                 else (
@@ -456,6 +480,7 @@ class Carry:
             + _REQUESTED * len(stands.requests)
             + _OCCURRED * len(stands.events)
             + _QUEUED * (len(stands.queue) + len(stands.removed))
+            + _UNHASHED * len(stands.unhashed)
         )
 
 

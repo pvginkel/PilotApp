@@ -42,8 +42,13 @@ process writes as it exits.
   system prompt's text blocks and the tools' schemas. A process under
   another version of Claude Code sends a shape of its own.
 - A tool's result is a `user` line holding one `tool_result` block that names
-  its request's id, with `toolUseResult`, the tool's own record of it. A
-  denied call's result is an error in Claude Code's words for its denial,
+  its request's id, with `toolUseResult`, the tool's own record of it: an
+  Edit's and a Write's the file's text before and after, and the patch
+  between them as `structuredPatch`, its hunks' lines each opening `+`, `-`
+  or a space; a Write's its `type`, `create` for a new file, else `update`.
+  A Bash command's output shows each commit it made as git prints it,
+  `[main <hash>] <subject>`, and its record names the last as
+  `gitOperation`. A denied call's result is an error in Claude Code's words for its denial,
   its line naming the kind as `toolDenialKind`: `permission-rule` for a
   rule's and for a hook's, whose words open `PreToolUse:<tool> hook error:`,
   and `user-rejected` for the person's.
@@ -147,6 +152,9 @@ _REJECTED = (
 
 _STOP = "Stop"
 """The event a Stop hook runs at."""
+
+_BRANCH = "main"
+"""The branch a commit is made on."""
 
 _SHAPED = ("system_prompt", "tool_schemas")
 """The Context Part Kinds a request's shape holds."""
@@ -912,12 +920,15 @@ def request(
     elif use.tool == "Read":
         asked = {"file_path": use.argument}
     elif use.tool == "Edit":
+        old, new = _edit(use)
         asked = {
             "file_path": use.argument,
-            "old_string": text(24),
-            "new_string": text(40),
+            "old_string": old,
+            "new_string": new,
             "replace_all": False,
         }
+    elif use.tool == "Write":
+        asked = {"file_path": use.argument, "content": _written(use.added, "new")}
     elif use.tool == "Skill":
         asked = {"skill": use.argument}
     elif use.tool == "Agent":
@@ -935,6 +946,39 @@ def request(
         "input": asked,
         "caller": {"type": "direct"},
     }
+
+
+def _written(lines: int, kind: str) -> str:
+    """A file's text of that many lines, invented, the `kind` of text it is
+    in each."""
+    return "".join(f"{text(28)}{kind} {line}\n" for line in range(lines))
+
+
+def _edit(use: ToolUse) -> tuple[str, str]:
+    """An Edit's old and new text: the lines it removed and added, else a
+    line of invented words each."""
+    if not use.added and not use.removed:
+        return text(24), text(40)
+    return _written(use.removed, "old"), _written(use.added, "new")
+
+
+def _patch(use: ToolUse) -> list[dict[str, Any]]:
+    """The patch between a file's text before and after an Edit or a Write
+    over it: one hunk of the lines it removed and added, none where it
+    changed none."""
+    if not use.added and not use.removed:
+        return []
+    old, new = _written(use.removed, "old"), _written(use.added, "new")
+    return [
+        {
+            "oldStart": 1,
+            "oldLines": use.removed,
+            "newStart": 1,
+            "newLines": use.added,
+            "lines": [f"-{line}" for line in old.splitlines()]
+            + [f"+{line}" for line in new.splitlines()],
+        }
+    ]
 
 
 def _result(use: ToolUse, saved: str | None) -> str:
@@ -966,6 +1010,10 @@ def _result(use: ToolUse, saved: str | None) -> str:
             )
     elif use.failed and use.exit_code is not None:
         head = f"Exit code {use.exit_code}\n"
+    elif use.commits:
+        head = "".join(
+            f"[{_BRANCH} {made.sha}] {made.subject}\n" for made in use.commits
+        )
     return head + text(length - len(head) - len(foot)) + foot
 
 
@@ -994,6 +1042,9 @@ def _record(
                 "persistedOutputPath": f"{SESSION_HOME}/{saved}",
                 "persistedOutputSize": use.saved,
             }
+        if use.commits:
+            made = {"sha": use.commits[-1].sha, "kind": "committed", "branch": _BRANCH}
+            record["gitOperation"] = {"commit": made}
         return record
     if use.tool == "Read":
         lines = result.count("\n") + 1
@@ -1008,14 +1059,32 @@ def _record(
             },
         }
     if use.tool == "Edit":
+        old, new = _edit(use)
         return {
             "filePath": use.argument,
-            "oldString": text(24),
-            "newString": text(40),
-            "originalFile": None,
-            "structuredPatch": [],
+            "oldString": old,
+            "newString": new,
+            "originalFile": old,
+            "structuredPatch": _patch(use),
             "userModified": False,
             "replaceAll": False,
+        }
+    if use.tool == "Write":
+        content = _written(use.added, "new")
+        if use.created:
+            return {
+                "type": "create",
+                "filePath": use.argument,
+                "content": content,
+                "structuredPatch": [],
+                "originalFile": None,
+            }
+        return {
+            "type": "update",
+            "filePath": use.argument,
+            "content": content,
+            "structuredPatch": _patch(use),
+            "originalFile": _written(use.removed, "old"),
         }
     if use.tool == "Skill":
         return {"success": True, "commandName": use.argument}
