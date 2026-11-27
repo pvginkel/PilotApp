@@ -5,12 +5,14 @@ run's figures (F156.13, F156.14) and the project's pick."""
 
 import itertools
 import uuid
-from collections.abc import Generator, Sequence
+from collections.abc import Generator, Iterator, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from typing import Any
 
 import pytest
 from flask import Flask
+from sqlalchemy import Connection, Engine, event, insert, update
 from sqlalchemy.orm import Session as DbSession
 
 from app import models
@@ -1851,7 +1853,7 @@ class TestWorkEstimatesRead:
 
         assert statements.texts == []
 
-    def test_any_number_of_work_items_and_kinds_is_four_statements(
+    def test_any_number_of_work_items_and_kinds_is_one_statement(
         self,
         session: DbSession,
         project: Project,
@@ -1861,8 +1863,8 @@ class TestWorkEstimatesRead:
         """The running Sessions with their runs' starts and timings, their
         lists with their runs' other listings, their repos' own timings and
         all repos', as they stand, as they stood when each running step
-        began and as they stood when each run began; the runs here on a
-        conversation of two, three and none."""
+        began and as they stood when each run began, in one snapshot of the
+        record; the runs here on a conversation of two, three and none."""
         works = []
         for number, repo in enumerate((REPO, OTHER_REPO, None)):
             conversation = None if repo is None else f"conversation-{number}"
@@ -1911,7 +1913,7 @@ class TestWorkEstimatesRead:
             for each in estimates.values()
             if each.run_figures is not None
         ] == [(80, 10 + 5 + 2), (80, 20 + 6 + 2), (80, 7 + 2)]
-        assert len(statements.texts) == 4
+        assert len(statements.texts) == 1
 
 
 class TestWorkEstimatesPlans:
@@ -1960,25 +1962,123 @@ class TestWorkEstimatesPlans:
         for path in ("seqscan", "bitmapscan", "sort"):
             connection.exec_driver_sql(f"SET LOCAL enable_{path} = off")
 
-        plans = []
-        for statement in statements.built[2:]:
-            compiled = statement.compile(connection)
-            rows = connection.exec_driver_sql(
-                f"EXPLAIN {compiled.string}", compiled.params
-            )
-            plans.append("\n".join(row[0] for row in rows))
+        (statement,) = statements.built
+        compiled = statement.compile(
+            connection, compile_kwargs={"render_postcompile": True}
+        )
+        plan = connection.exec_driver_sql(
+            f"EXPLAIN (FORMAT JSON) {compiled.string}", compiled.params
+        ).scalar_one()[0]["Plan"]
 
-        own, every = plans
-        assert (
-            "Index Scan Backward using"
-            " ix_step_timings_repo_kind_code_listed_ahead_ended_at" in own
+        scans = [
+            scan
+            for node in _nodes(plan)
+            if node["Node Type"] == "Limit"
+            for scan in node["Plans"]
+        ]
+        assert sorted(scan.get("Index Name") for scan in scans) == [
+            "ix_step_timings_kind_code_listed_ahead_ended_at",
+            "ix_step_timings_repo_kind_code_listed_ahead_ended_at",
+        ]
+        for scan in scans:
+            assert (scan["Node Type"], scan["Scan Direction"]) == (
+                "Index Scan",
+                "Backward",
+            )
+            assert "Filter" not in scan
+
+
+def _nodes(node: dict[str, Any]) -> Iterator[dict[str, Any]]:
+    """`node` of a plan and every node under it."""
+    yield node
+    for child in node.get("Plans", ()):
+        yield from _nodes(child)
+
+
+class TestWorkEstimatesAcrossAWrite:
+    """An estimate read while a progress write commits, on a database of its
+    own, the write on a connection of its own."""
+
+    @pytest.fixture
+    def engine(self, committed_app: Flask) -> Engine:
+        with committed_app.app_context():
+            return db.engine
+
+    @pytest.fixture
+    def writer(self, engine: Engine) -> Generator[Connection]:
+        """The write's connection, taken before the test's session takes
+        one."""
+        with engine.connect() as connection:
+            yield connection
+
+    @pytest.fixture
+    def session(self, engine: Engine, writer: Connection) -> Generator[DbSession]:
+        """The test's session, on a clone of the run's template; what it
+        commits stays until the clone is dropped."""
+        with DbSession(engine, expire_on_commit=False) as fresh:
+            yield fresh
+
+    def test_a_write_committed_while_it_reads_is_read_whole_or_not_at_all(
+        self,
+        session: DbSession,
+        writer: Connection,
+        project: Project,
+        project_session: models.Session,
+        past: uuid.UUID,
+    ) -> None:
+        """The run's `write` done in 20 minutes, its `review` running for 10
+        and its `ship` not begun; a progress write ends the review and begins
+        the ship, its Step Timing with them, committed once the estimate's
+        first statement has run: the estimate answers the run as it stood
+        before the write, read after it as it stands after, 30 minutes so far
+        either way."""
+        run = _run(session, project, project_session)
+        for kind in ("write", "review", "ship"):
+            _timed(session, past, kind, [20] * 10)
+        _list(
+            session,
+            run,
+            [_done("write", 40), _active("review", 10), _pending("ship")],
         )
-        assert (
-            "Index Scan Backward using ix_step_timings_kind_code_listed_ahead_ended_at"
-            in every
-        )
-        assert "Sort" not in own + every
-        assert "Filter" not in own + every
+        _timed_at(session, run, "write", [20], ended=39)
+        session.commit()
+        connection = session.connection()
+        before = _estimates(session, [run])[run]
+
+        def publish(*_: object) -> None:
+            of_run = ProgressStep.work_id == run
+            writer.execute(
+                update(ProgressStep)
+                .where(of_run, ProgressStep.position == 2)
+                .values(state_code=ProgressState.DONE, ended_at=NOW)
+            )
+            writer.execute(
+                update(ProgressStep)
+                .where(of_run, ProgressStep.position == 3)
+                .values(
+                    state_code=ProgressState.ACTIVE, started_at=NOW, listed_ahead=True
+                )
+            )
+            writer.execute(
+                insert(StepTiming).values(
+                    work_id=run,
+                    kind_code="review",
+                    ended_at=NOW,
+                    duration=10 * MINUTE,
+                    listed_ahead=True,
+                    code="step-2",
+                    repo=REPO,
+                )
+            )
+            writer.commit()
+
+        event.listen(connection, "after_cursor_execute", publish, once=True)
+        across = _estimates(session, [run])[run]
+        after = _estimates(session, [run])[run]
+
+        assert across == before
+        assert before.ran_seconds == after.ran_seconds == 30 * MINUTE
+        assert after.seconds != before.seconds
 
 
 class TestStepEstimates:

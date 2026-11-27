@@ -3824,7 +3824,7 @@ class TestWorkStatusEstimate:
     ) -> None:
         """The status rides `work_moved`, which the relay sends on most
         records it writes: a work item placed in a repo adds the estimate's
-        four statements, whatever its list and its kind's history."""
+        one statement, whatever its list and its kind's history."""
         project = _make(container)
         short = _work(session, project, environment, SessionState.RUNNING)
         timed(session, short.id, "code-writer", 20, count=5)
@@ -3850,7 +3850,7 @@ class TestWorkStatusEstimate:
             assert (found[work.id].estimate is None) == (work is idle)
             return len(each.texts)
 
-        assert statements(short) == statements(long) == statements(idle) + 4
+        assert statements(short) == statements(long) == statements(idle) + 1
 
     def test_a_timelines_work_item_carries_it_under_the_settings(
         self,
