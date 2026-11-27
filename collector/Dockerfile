@@ -32,6 +32,12 @@ RUN uv sync --locked --no-dev --no-editable
 
 FROM registry:5000/modern-app-backend
 
+# git, which the clones of the mirror are made, fetched and read with
+# (pilot_collector.mirror).
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends git \
+    && rm -rf /var/lib/apt/lists/*
+
 # The readings' port, COLLECTOR_PORT's default.
 EXPOSE 3503
 

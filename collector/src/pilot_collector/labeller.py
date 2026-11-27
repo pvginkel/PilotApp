@@ -4,10 +4,11 @@ plugin's copy, which the home's `plugins/installed_plugins.json` names, with
 each call's verb appended; one JSON request on its stdin and one answer on
 its stdout, under the labeller's contract 1 (the plugin's `docs/labeller.md`
 § Running it). Nothing of the workflow is the collector's: the labeller's
-lists, its stamps and its index are taken as it hands them.
+lists, its stamps, its index and its files' classes are taken as it hands
+them.
 
 Every request names the contract and the home as the collector sees it, its
-`projects` and its `plugins`. Three verbs are called here:
+`projects` and its `plugins`. Four verbs are called here:
 
 - `stamps`, at every walk: the stamp the labeller would give now for every
   transcript on the home, each handed in its conversation with what Pilot's
@@ -27,6 +28,9 @@ Every request names the contract and the home as the collector sees it, its
   error, of which a publication carries the labels of the rows it holds and
   the carry the checkpoint it hands back (§ The label request and answer;
   § Settled, the boundary and the checkpoint).
+- `classes`: the class of each File Pilot holds that it is handed, by its
+  Repository's name and its path, and the digest of the rules it classed
+  them under (§ File classes).
 
 A call that gives no answer the collector takes raises `Unanswered`: no copy
 installed, a refusal (exit 2), a crash (exit 1), no answer within the time
@@ -43,6 +47,7 @@ from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Any, Literal
 
+from pilot_collection.files import FileClassesSchema, FileClassSchema, HeldFileSchema
 from pilot_collection.inventory import InventorySchema
 from pilot_collection.publication import (
     PublicationSchema,
@@ -121,6 +126,11 @@ class _Stamps(_Answer):
     stamps: list[_Stamp]
 
 
+class _Classes(_Answer):
+    file_rules: str
+    classes: list[str]
+
+
 class _Group(BaseModel):
     key: str
     name: str
@@ -182,6 +192,18 @@ class Declared:
     """What Pilot is declared."""
     groups: dict[str, PublishedGroupSchema]
     """Each group it declares, by its key, as a publication names one."""
+
+
+@dataclass(frozen=True)
+class Classed:
+    """The labeller's `classes` answer as Pilot takes it."""
+
+    version: str
+    """The labeller's own version that answered."""
+    file_rules: str
+    """The digest of the file-class rules it classed the files under."""
+    classes: FileClassesSchema
+    """Each file's class, as Pilot is given them."""
 
 
 @dataclass(frozen=True)
@@ -305,6 +327,38 @@ class Labeller:
             raise Unanswered(
                 f"its vocabularies are not the shape Pilot takes: {error}"[:_SAID]
             ) from error
+
+    def classes(self, files: Sequence[HeldFileSchema]) -> Classed:
+        """The labeller's class of each of `files`, in one call.
+
+        Raises:
+            Unanswered: The labeller gave no answer the collector takes, or
+                not one class for each file, each a code.
+        """
+        answer = self._answer(
+            "classes",
+            _Classes,
+            {"files": [[file.repository, file.path] for file in files]},
+        )
+        if len(answer.classes) != len(files):
+            raise Unanswered(
+                f"its classes are {len(answer.classes)}, and it was handed"
+                f" {len(files)} files"
+            )
+        try:
+            classes = FileClassesSchema(
+                classes=[
+                    FileClassSchema(
+                        repository=file.repository, path=file.path, file_class=code
+                    )
+                    for file, code in zip(files, answer.classes, strict=True)
+                ]
+            )
+        except ValidationError as error:
+            raise Unanswered(
+                f"its classes are not the shape Pilot takes: {error}"[:_SAID]
+            ) from error
+        return Classed(answer.version, answer.file_rules, classes)
 
     def label(
         self, batch: Sequence[tuple[Listed, Read]], inventory: InventorySchema

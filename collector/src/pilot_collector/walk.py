@@ -69,6 +69,25 @@ After its last publication the walk tells Pilot it ended, whether it
 published or not. A walk Pilot does not admit, or cannot be reached by, ends
 where it stands and tells no end; the next starts over from the inventory.
 
+**The clones and the Files** (F152.11, F158.5). After it ended, the first
+walk after the collector starts, and then the first once the settings'
+`COLLECTOR_MIRROR_SECONDS` have passed since the last read began, reads the
+clones of the mirror of every Repository Pilot holds (`mirror.py`) and gives
+Pilot what each gave, a Repository's read in one call where it fits; a
+walk that left transcripts of its behind turn for the next waits for one
+that did not, so that a Repository is read after every transcript on the
+home is published, since Pilot's tie settles a commit's hash before its
+subject within one call alone. A Repository whose clone cannot be made, fetched or
+read is logged where its reason is new, and read again at the next read.
+Then, where the labeller answered the stamps, it has the labeller class the
+Files Pilot holds with no class, or every File where the stamps' file rules
+are other than those it last classed every File under, after a start among
+them, and gives Pilot their classes (`labeller.md` § File classes): a walk
+where nothing changed asks Pilot for no File beyond the knowledge that none
+waits. Classes Pilot refuses have the vocabularies declared again and are
+given once more; refused again, no File is classed until the labeller's
+version or its file rules change.
+
 A transcript the collector cannot read, and one Pilot refuses for good, is
 logged with its file and the reason and set aside: no walk takes it again
 until its file's size or time changes. What is set aside is in the
@@ -95,6 +114,7 @@ from pilot_collector import VERSION
 from pilot_collector.carry import Carries, Carry
 from pilot_collector.home import PROJECTS, Listed, transcripts
 from pilot_collector.labeller import (
+    Classed,
     Labelled,
     Labeller,
     Labels,
@@ -103,6 +123,7 @@ from pilot_collector.labeller import (
     labelled,
     major,
 )
+from pilot_collector.mirror import Clones, Unread
 from pilot_collector.pilot import (
     NotAdmitted,
     NotAdoptable,
@@ -162,6 +183,10 @@ class Walked:
     stamps: Stamps | None = None
     """The labeller's stamps of the walk; none where no labeller answered,
     or Pilot refused its vocabularies."""
+    commits: int = 0
+    """The commits the clones gave Pilot."""
+    classed: int = 0
+    """The Files whose classes Pilot was given."""
 
 
 def _newest_first(found: list[Listed]) -> list[Listed]:
@@ -305,6 +330,19 @@ class Walker:
         the labels were given under, the file as the walk listed it."""
         self._unlabelled: str | None = None
         """Why the last walk had no labeller's stamps; none where it had."""
+        self._clones = Clones(settings)
+        self._mirror_seconds = settings.COLLECTOR_MIRROR_SECONDS
+        self._mirrored: float | None = None
+        """When the last read of the clones began; none before the first."""
+        self._unread: dict[str, str] = {}
+        """Each Repository whose clone was not read at the last read, by its
+        name: why."""
+        self._classed_under: str | None = None
+        """The labeller's file rules the collector last classed every File
+        Pilot holds under; none after a start."""
+        self._unclassable: tuple[str, str] | None = None
+        """The labeller's version and file rules whose classes Pilot refused
+        twice; none where it took the last."""
 
     def run(self) -> None:
         """Walk every interval until `stop` is set."""
@@ -381,15 +419,21 @@ class Walker:
             if not self._batch(batch, "changed", held, labelling, work, walked):
                 return
         taken = 0
+        left = False
         for batch in _batches(work.behind):
             if time.perf_counter() - began >= self.interval:
                 walked.waiting += len(work.behind) - taken
+                left = True
                 break
             if not self._batch(batch, "behind", held, labelling, work, walked):
                 return
             taken += len(batch)
         self._pilot.end_walk()
         walked.ended = True
+        if not left and not self._stop.is_set():
+            self._read_clones(walked)
+        if walked.stamps is not None and not self._stop.is_set():
+            self._classify(walked.stamps, walked)
 
     def _stamped(
         self, listed: list[Listed], inventory: InventorySchema
@@ -418,6 +462,111 @@ class Walker:
             )
         self._unlabelled = why
         return None
+
+    def _read_clones(self, walked: Walked) -> None:
+        """Read the clone of every Repository Pilot holds and give Pilot what
+        each gave, where no read was made since the collector started or
+        `_mirror_seconds` have passed since the last began."""
+        now = time.monotonic()
+        if self._mirrored is not None and now - self._mirrored < self._mirror_seconds:
+            return
+        self._mirrored = now
+        began = time.perf_counter()
+        given = 0
+        for held in self._pilot.repositories().repositories:
+            if self._stop.is_set():
+                return
+            try:
+                reads = self._clones.read(held)
+            except Unread as error:
+                if self._unread.get(held.name) != str(error):
+                    logger.warning(
+                        "The clone of the Repository %s is not read: %s",
+                        held.name,
+                        error,
+                    )
+                self._unread[held.name] = str(error)
+                continue
+            if self._unread.pop(held.name, None) is not None:
+                logger.info("The clone of the Repository %s is read again", held.name)
+            for part in reads:
+                try:
+                    self._pilot.read(part)
+                except Refused as error:
+                    logger.warning(
+                        "Pilot refused the read of the Repository %s with %s",
+                        held.name,
+                        error,
+                    )
+                    break
+                walked.commits += len(part.commits)
+                given += 1
+        logger.log(
+            logging.INFO if given else logging.DEBUG,
+            "The clones gave Pilot %d commits in %d calls, in %.1f s",
+            walked.commits,
+            given,
+            time.perf_counter() - began,
+        )
+
+    def _classify(self, stamps: Stamps, walked: Walked) -> None:
+        """Have the labeller class the Files Pilot holds with no class, or
+        every File where the file rules of `stamps` are other than those
+        every File was last classed under, and give Pilot their classes;
+        none while Pilot refuses those of the labeller's version and file
+        rules as they stand. Where it gives none, or Pilot refuses them, the
+        reason is logged."""
+        if (stamps.version, stamps.file_rules) == self._unclassable:
+            return
+        every = stamps.file_rules != self._classed_under
+        files = self._pilot.files(unclassed=not every).files
+        if not files:
+            if every:
+                self._classed_under = stamps.file_rules
+            return
+        try:
+            classed = self._labeller.classes(files)
+            self._classes_given(classed, stamps)
+        except Unanswered as error:
+            logger.warning(
+                "No File is classed in this walk: the labeller did not answer: %s",
+                error,
+            )
+            return
+        except Refused as error:
+            self._unclassable = (classed.version, classed.file_rules)
+            logger.warning(
+                "No File is classed until the labeller's version or its file rules"
+                " change: %s",
+                error,
+            )
+            return
+        if every:
+            self._classed_under = classed.file_rules
+        self._unclassable = None
+        walked.classed = len(files)
+        logger.info(
+            "%d Files are classed under the labeller %s's file rules",
+            len(files),
+            classed.version,
+        )
+
+    def _classes_given(self, classed: Classed, stamps: Stamps) -> None:
+        """Give Pilot the classes `classed`, the vocabularies of its version
+        declared first where Pilot was last declared another's, and declared
+        again and given once more where Pilot refuses them.
+
+        Raises:
+            Unanswered: The labeller gave its vocabularies no answer.
+            Refused: Pilot refused the vocabularies, or the classes twice.
+        """
+        if self._declared is None or classed.version != self._declared[0]:
+            self._declare(stamps.declarations)
+        try:
+            self._pilot.classify(classed.classes)
+        except Refused:
+            self._declare(stamps.declarations)
+            self._pilot.classify(classed.classes)
 
     def _declare(self, declarations: str) -> None:
         """Declare the labeller's vocabularies to Pilot, and keep its

@@ -25,6 +25,13 @@ def _are_absolute(roots: list[str]) -> list[str]:
     return roots
 
 
+def _are_owners(owners: list[str]) -> list[str]:
+    for owner in owners:
+        if not owner or "/" in owner or owner in (".", ".."):
+            raise ValueError(f"the owner `{owner}` is no name of one folder")
+    return owners
+
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(case_sensitive=True, extra="ignore")
 
@@ -110,5 +117,40 @@ class Settings(BaseSettings):
         description=(
             "Seconds a call of the labeller may take: past them it is stopped,"
             " and the walk labels nothing (F152.6)"
+        ),
+    )
+    COLLECTOR_MIRROR_URL: str = Field(
+        default="http://gitblit.git-sync-prd.svc.cluster.local/r",
+        min_length=1,
+        description=(
+            "Where the Gitblit mirror serves the repositories, with no"
+            " credential: a Repository's address is `<this>/<owner>/<name>.git`,"
+            " as git reads one, a folder's path included (F152.11)"
+        ),
+    )
+    COLLECTOR_MIRROR_OWNERS: Annotated[list[str], AfterValidator(_are_owners)] = Field(
+        default=["pvginkel"],
+        min_length=1,
+        description=(
+            "The owners on the mirror a Repository is looked for under, in"
+            " the order they are tried, as a JSON list (F152.11)"
+        ),
+    )
+    COLLECTOR_MIRROR_SECONDS: float = Field(
+        default=3_600.0,
+        gt=0,
+        description=(
+            "Seconds from one read of the clones to the next: the first walk"
+            " after a start reads them, and then the first walk once these have"
+            " passed since the last read began, one that left transcripts for"
+            " the next walk waiting for one that did not (F152.11)"
+        ),
+    )
+    COLLECTOR_CLONES: Path = Field(
+        default=Path("/tmp/pilot-collector/clones"),
+        description=(
+            "The folder the bare clones of the mirror are kept in, on the"
+            " collector's own storage: a clone it holds is fetched, and one it"
+            " lacks is cloned (F152.11)"
         ),
     )

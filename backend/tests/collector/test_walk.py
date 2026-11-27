@@ -3,13 +3,16 @@ scenario's transcript files, walked by the collector's own code over HTTP
 with the stub labeller (F122.5), and what Pilot's record then holds, of a
 file published whole with its labels (F152.6, F152.7), of one that grew,
 published appended where no labeller answers (F152.15), and of the
-labeller's vocabularies."""
+labeller's vocabularies, and of the commits read from the clones of a
+mirror the test serves from a folder of its own and the Files' classes
+(F152.11, F158.5)."""
 
 import json
 import logging
 import os
 import re
 import shutil
+import subprocess
 import sys
 import threading
 import time
@@ -24,7 +27,9 @@ import pilot_collector
 import pytest
 from dependency_injector import providers
 from flask import Flask
+from pilot_collection.files import FileClassesSchema, HeldFileSchema
 from pilot_collection.publication import PublicationSchema
+from pilot_collection.repositories import RepositoryReadSchema
 from pilot_collection.vocabularies import VocabulariesSchema
 from pilot_collector import home as collector_home
 from pilot_collector import labeller as running
@@ -43,15 +48,19 @@ from werkzeug.serving import make_server
 from app.extensions import db
 from app.models import (
     Call,
+    Commit,
     Compaction,
     ComponentVersion,
     Environment,
     Event,
+    File,
+    FileChange,
     HookRun,
     Launch,
     LaunchComponent,
     Project,
     Prompt,
+    Repository,
     Segment,
     ToolCall,
     Transcript,
@@ -85,6 +94,10 @@ OLDER = "0.9.0"
 LOGGER = "pilot_collector.walk"
 PUBLICATIONS = "app.services.publication_service"
 """The logger of Pilot's side of a publication."""
+
+MIRROR = "mirror"
+"""The folder of the home's that serves the mirror's repositories, each as
+`<owner>/<name>.git`."""
 
 UNLABELLED = {"COLLECTOR_LABELLER": labeller.command("--speaks", "2")}
 """The settings of a collector whose labeller speaks a contract it does
@@ -138,12 +151,14 @@ def walker(pilot_url: str, home: Path, stop: threading.Event) -> Generator[Walke
 
 def _settings(pilot_url: str, home: Path, **given: Any) -> Settings:
     """The collector's settings for that Pilot and home, the stub labeller
-    its labeller, but for `given`."""
+    its labeller and the mirror a folder of the home's, but for `given`."""
     named: dict[str, Any] = {
         "COLLECTOR_PILOT_URL": pilot_url,
         "COLLECTOR_TOKEN": COLLECTOR_TOKEN,
         "COLLECTOR_HOME": home,
         "COLLECTOR_LABELLER": labeller.command(),
+        "COLLECTOR_MIRROR_URL": f"file://{home / MIRROR}",
+        "COLLECTOR_CLONES": home / "clones",
     }
     return Settings(**(named | given))
 
@@ -564,7 +579,8 @@ class TestAWalksOrder:
             run = running.subprocess.run
 
             def late(command: list[str], **kwargs: Any) -> Any:
-                time.sleep(1.0)
+                if command[0] != "git":
+                    time.sleep(1.0)
                 return run(command, **kwargs)
 
             monkeypatch.setattr(running.subprocess, "run", late)
@@ -920,7 +936,8 @@ def _verbs(monkeypatch: pytest.MonkeyPatch) -> list[str]:
     run = running.subprocess.run
 
     def called(command: list[str], **given: Any) -> Any:
-        verbs.append(command[-1])
+        if command[0] != "git":
+            verbs.append(command[-1])
         return run(command, **given)
 
     monkeypatch.setattr(running.subprocess, "run", called)
@@ -1000,7 +1017,7 @@ class TestTheLabeller:
         with caplog.at_level(logging.INFO, LOGGER):
             walked = walker.walk()
 
-        assert verbs == ["stamps", "vocabularies", "label"]
+        assert verbs == ["stamps", "vocabularies", "label", "classes"]
         assert walked.stamps is not None
         assert walked.stamps.version == labeller.VERSION
         assert {
@@ -1024,16 +1041,25 @@ class TestTheLabeller:
         monkeypatch: pytest.MonkeyPatch,
         caplog: pytest.LogCaptureFixture,
     ) -> None:
+        """It classes no File, and asks Pilot for none beyond the knowledge
+        that none waits (R14)."""
         walker.walk()
         verbs = _verbs(monkeypatch)
         sent = _sent(walker, monkeypatch)
+        asked = _files_asked(walker, monkeypatch)
         caplog.clear()
 
         with caplog.at_level(logging.DEBUG, LOGGER):
             walked = walker.walk()
 
         assert verbs == ["stamps"]
-        assert (walked.published, sent, walked.ended) == (0, [], True)
+        assert asked == [(True, 0)]
+        assert (walked.published, sent, walked.classed, walked.ended) == (
+            0,
+            [],
+            0,
+            True,
+        )
         (line,) = _walks_lines(caplog)
         assert f"; the labeller {labeller.VERSION}'s stamps took " in line
 
@@ -1088,9 +1114,10 @@ class TestTheLabeller:
         walker.walk()
         verbs = _verbs(monkeypatch)
 
-        Walker(walker._pilot, _settings(pilot_url, home), stop).walk()
+        walked = Walker(walker._pilot, _settings(pilot_url, home), stop).walk()
 
-        assert verbs == ["stamps", "vocabularies"]
+        assert verbs == ["stamps", "vocabularies", "classes"]
+        assert walked.classed == 2
 
 
 class TestNoLabellerToRun:
@@ -1324,7 +1351,8 @@ class TestTheLabels:
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """P-455: labels written under the labeller's 1.2.0 are kept under
-        1.3.0 and 1.2.1, and written again under 2.0.0."""
+        1.3.0 and 1.2.1, and written again under 2.0.0, whose file rules,
+        made under another major, class every File again."""
         _stub(walker, monkeypatch, "--version", "1.2.0")
         walker.walk()
         verbs = _verbs(monkeypatch)
@@ -1343,7 +1371,7 @@ class TestTheLabels:
         assert under == {"1.3.0": {"1.2.0"}, "1.2.1": {"1.2.0"}, "2.0.0": {"2.0.0"}}
         assert verbs == [
             *("stamps", "vocabularies") * 2,
-            *("stamps", "vocabularies", "label"),
+            *("stamps", "vocabularies", "label", "classes"),
         ]
 
     def test_a_plugin_release_that_leaves_the_labeller_alone_relabels_nothing(
@@ -1674,6 +1702,456 @@ class TestTheLabels:
             message.startswith(f"The main thread {RIDES} is published with no group: ")
             for message in caplog.messages
         )
+
+
+def _files_asked(
+    walker: Walker, monkeypatch: pytest.MonkeyPatch
+) -> list[tuple[bool, int]]:
+    """Each call of the walker's for Pilot's Files from here on: whether it
+    asked for those with no class, and how many Pilot gave."""
+    asked: list[tuple[bool, int]] = []
+    files = walker._pilot.files
+
+    def kept(*, unclassed: bool) -> Any:
+        given = files(unclassed=unclassed)
+        asked.append((unclassed, len(given.files)))
+        return given
+
+    monkeypatch.setattr(walker._pilot, "files", kept)
+    return asked
+
+
+def _classes_handed(monkeypatch: pytest.MonkeyPatch) -> list[list[list[str]]]:
+    """The files each `classes` call of the labeller's is handed from here
+    on, in their order."""
+    handed: list[list[list[str]]] = []
+    run = running.subprocess.run
+
+    def called(command: list[str], **given: Any) -> Any:
+        if command[0] != "git" and command[-1] == "classes":
+            handed.append(json.loads(given["input"])["files"])
+        return run(command, **given)
+
+    monkeypatch.setattr(running.subprocess, "run", called)
+    return handed
+
+
+_ALONE = {
+    "GIT_CONFIG_GLOBAL": os.devnull,
+    "GIT_CONFIG_NOSYSTEM": "1",
+    "GIT_AUTHOR_NAME": "A cook",
+    "GIT_AUTHOR_EMAIL": "cook@recipes.invalid",
+    "GIT_COMMITTER_NAME": "A cook",
+    "GIT_COMMITTER_EMAIL": "cook@recipes.invalid",
+}
+"""What the test's own git calls run under: no config of the host's, and an
+invented author."""
+
+
+def _git(tree: Path | None, *arguments: str, at: datetime | None = None) -> str:
+    dated = (
+        {}
+        if at is None
+        else {"GIT_AUTHOR_DATE": at.isoformat(), "GIT_COMMITTER_DATE": at.isoformat()}
+    )
+    return subprocess.run(
+        ["git", *([] if tree is None else ["-C", str(tree)]), *arguments],
+        capture_output=True,
+        check=True,
+        text=True,
+        env=os.environ | _ALONE | dated,
+    ).stdout.strip()
+
+
+class _Mirrored:
+    """A repository on the home's mirror under the owner the collector
+    tries by default, and the working tree its commits are pushed from."""
+
+    def __init__(self, home: Path, name: str = "RecipeBox") -> None:
+        self.bare = home / MIRROR / "pvginkel" / f"{name}.git"
+        self.tree = home / "trees" / name
+        _git(None, "init", "--quiet", "--bare", "-b", "main", str(self.bare))
+        _git(None, "init", "--quiet", "-b", "main", str(self.tree))
+        _git(self.tree, "remote", "add", "origin", str(self.bare))
+
+    def pushed(self, message: str, at: datetime, files: dict[str, str]) -> str:
+        """Commit `files` at `at` under `message` and push it; its whole
+        hash."""
+        for path, content in files.items():
+            (self.tree / path).parent.mkdir(parents=True, exist_ok=True)
+            (self.tree / path).write_text(content)
+        _git(self.tree, "add", "--all")
+        _git(self.tree, "commit", "--quiet", "-m", message, at=at)
+        _git(self.tree, "push", "--quiet", "origin", "--all")
+        return _git(self.tree, "rev-parse", "HEAD")
+
+
+def _halved_at() -> datetime:
+    """When the scenario's halving requested the call that made its
+    commit."""
+    for built in Builder(SCENARIO, UNTIL).publications():
+        for call in built["calls"]:
+            for tool_call in call.get("tool_calls", []):
+                if tool_call.get("commits"):
+                    return datetime.fromisoformat(tool_call["requested_at"])
+    raise AssertionError("the scenario makes no commit")
+
+
+def _stew(*words: str) -> str:
+    return "".join(f"{word}\n" for word in words)
+
+
+STEW = _stew("onion", "carrot", "leek", "stock", "salt", "pepper", "thyme", "bay")
+HALVED = _stew("half an onion", "half a carrot", "half a leek", "half the stock")
+HALVED += _stew("salt", "pepper", "thyme", "bay")
+SHOPPING = _stew("onion", "carrot", "leek", "stock", "thyme", "bay")
+
+
+def _commits(app: Flask) -> dict[str, dict[str, Any]]:
+    """Each Commit of RecipeBox Pilot holds, by its subject."""
+    with _record(app) as record:
+        commits = record.execute(
+            select(Commit, ToolCall.tool_use_id)
+            .join(Repository, Repository.id == Commit.repository_id)
+            .outerjoin(ToolCall, ToolCall.id == Commit.tool_call_id)
+            .where(Repository.name == "RecipeBox")
+        ).all()
+        changes = record.execute(
+            select(
+                FileChange.commit_id,
+                File.path,
+                FileChange.lines_added,
+                FileChange.lines_removed,
+            ).join(File, File.id == FileChange.file_id)
+        ).all()
+    return {
+        commit.subject: {
+            "sha": commit.sha,
+            "made_at": commit.made_at,
+            "read": commit.lines_read_at is not None,
+            "call": tool_use_id,
+            "files": {
+                path: (added, removed)
+                for commit_id, path, added, removed in changes
+                if commit_id == commit.id
+            },
+        }
+        for commit, tool_use_id in commits
+    }
+
+
+def _classes(app: Flask) -> dict[tuple[str, str], str | None]:
+    """Each File Pilot holds, by its Repository's name and its path: its
+    class."""
+    with _record(app) as record:
+        rows = record.execute(
+            select(Repository.name, File.path, File.class_code).join(
+                Repository, Repository.id == File.repository_id
+            )
+        ).all()
+    return {(name, path): code for name, path, code in rows}
+
+
+def _not_read(caplog: pytest.LogCaptureFixture) -> list[str]:
+    """The walk's lines for the clones it did not read."""
+    return [
+        record.getMessage()
+        for record in caplog.records
+        if record.name == LOGGER and "is not read: " in record.getMessage()
+    ]
+
+
+class TestTheClones:
+    """The clones of the mirror read after a walk, and what Pilot then
+    holds of each Repository's commits (F152.11, F158.4)."""
+
+    def test_a_walk_reads_each_repository_and_completes_the_commit_a_call_made(
+        self,
+        committed_app: Flask,
+        home: Path,
+        walker: Walker,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """The halving's call showed a short hash its mirror's commit does
+        not start with, so its subject within the hour of the call ties it:
+        a rebase."""
+        mirrored = _Mirrored(home)
+        halved_at = _halved_at()
+        stocked = mirrored.pushed(
+            "Stock the box", halved_at - timedelta(hours=2), {"recipes/stew.md": STEW}
+        )
+        halved = mirrored.pushed(
+            "Halve the stew",
+            halved_at + timedelta(minutes=1),
+            {"recipes/stew.md": HALVED, "recipes/shopping.md": SHOPPING},
+        )
+
+        with caplog.at_level(logging.INFO, LOGGER):
+            walked = walker.walk()
+
+        assert (walked.ended, walked.commits) == (True, 2)
+        commits = _commits(committed_app)
+        assert commits["Halve the stew"] == {
+            "sha": halved,
+            "made_at": halved_at + timedelta(minutes=1),
+            "read": True,
+            "call": commits["Halve the stew"]["call"],
+            "files": {"recipes/stew.md": (4, 4), "recipes/shopping.md": (6, 0)},
+        }
+        assert commits["Halve the stew"]["call"] is not None
+        assert commits["Stock the box"] == {
+            "sha": stocked,
+            "made_at": halved_at - timedelta(hours=2),
+            "read": True,
+            "call": None,
+            "files": {"recipes/stew.md": (8, 0)},
+        }
+        (not_read,) = _not_read(caplog)
+        assert not_read.startswith(
+            "The clone of the Repository BikeLog is not read: no owner on the mirror"
+            " holds it: pvginkel: `git clone` exited 128: "
+        )
+        assert "The clones gave Pilot 2 commits in 1 calls, in " in caplog.text
+
+    def test_they_are_read_again_once_their_time_has_passed(
+        self,
+        committed_app: Flask,
+        home: Path,
+        walker: Walker,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        mirrored = _Mirrored(home)
+        mirrored.pushed("Stock the box", _halved_at(), {"recipes/stew.md": STEW})
+        with caplog.at_level(logging.INFO, LOGGER):
+            first = walker.walk()
+            seasoned = mirrored.pushed(
+                "Season the stew",
+                _halved_at() + timedelta(minutes=30),
+                {"recipes/stew.md": STEW + "nutmeg\n"},
+            )
+            within = walker.walk()
+            assert walker._mirrored is not None
+            walker._mirrored -= 3_600
+            after = walker.walk()
+
+        assert [each.commits for each in (first, within, after)] == [1, 0, 1]
+        assert _commits(committed_app)["Season the stew"]["sha"] == seasoned
+        assert len(_not_read(caplog)) == 1
+
+    def test_a_walk_that_left_transcripts_for_the_next_waits_to_read_them(
+        self,
+        committed_app: Flask,
+        pilot_url: str,
+        home: Path,
+        stop: threading.Event,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """So that a Repository is read after every transcript is published:
+        Pilot settles a commit's hash before its subject within one call
+        alone."""
+        mirrored = _Mirrored(home)
+        settings = _settings(pilot_url, home, COLLECTOR_MIRROR_SECONDS=0.000_001)
+        with Pilot(pilot_url, COLLECTOR_TOKEN) as pilot:
+            walker = Walker(pilot, settings, stop)
+            with monkeypatch.context() as older:
+                _read_under(older, OLDER)
+                walker.walk()
+            mirrored.pushed("Stock the box", _halved_at(), {"recipes/stew.md": STEW})
+            _copied(home)
+            _configure(committed_app, interval=0.000_001)
+            left = walker.walk()
+            _configure(committed_app, interval=30.0)
+            caught_up = walker.walk()
+
+        assert (left.waiting, left.commits) == (3, 0)
+        assert (caught_up.waiting, caught_up.commits) == (0, 1)
+
+    def test_a_restarted_collector_clones_again_and_reads_what_pilot_lacks(
+        self,
+        pilot_url: str,
+        home: Path,
+        walker: Walker,
+        stop: threading.Event,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        mirrored = _Mirrored(home)
+        mirrored.pushed("Stock the box", _halved_at(), {"recipes/stew.md": STEW})
+        walker.walk()
+        read: list[RepositoryReadSchema] = []
+        settings = _settings(pilot_url, home, COLLECTOR_CLONES=home / "restarted")
+        with Pilot(pilot_url, COLLECTOR_TOKEN) as pilot:
+            restarted = Walker(pilot, settings, stop)
+            monkeypatch.setattr(pilot, "read", read.append)
+
+            walked = restarted.walk()
+
+        assert (walked.commits, read) == (0, [])
+        assert (home / "restarted" / "RecipeBox.git" / "HEAD").is_file()
+
+
+class TestTheFilesClasses:
+    """Every File Pilot holds classed by the labeller (F158.5; `labeller.md`
+    § File classes): once after a start, again whenever its file rules
+    change, and a File with no class at the next walk."""
+
+    def test_the_first_walk_classes_every_file_pilot_holds(
+        self,
+        committed_app: Flask,
+        walker: Walker,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        with caplog.at_level(logging.INFO, LOGGER):
+            walked = walker.walk()
+
+        assert walked.classed == 2
+        assert _classes(committed_app) == {
+            ("RecipeBox", "recipes/stew.md"): "note",
+            ("RecipeBox", "recipes/shopping.md"): "note",
+        }
+        assert (
+            f"2 Files are classed under the labeller {labeller.VERSION}'s file rules"
+            in caplog.messages
+        )
+
+    def test_a_file_with_no_class_is_classed_alone_at_the_next_walk(
+        self,
+        committed_app: Flask,
+        pilot_url: str,
+        home: Path,
+        stop: threading.Event,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """One a read of the mirror makes, a File Change's."""
+        settings = _settings(pilot_url, home, COLLECTOR_MIRROR_SECONDS=0.000_001)
+        with Pilot(pilot_url, COLLECTOR_TOKEN) as pilot:
+            walker = Walker(pilot, settings, stop)
+            walker.walk()
+            _Mirrored(home).pushed(
+                "Make the soup", _halved_at(), {"menus/soup.md": STEW}
+            )
+            handed = _classes_handed(monkeypatch)
+
+            walked = walker.walk()
+
+        assert (walked.commits, walked.classed) == (1, 1)
+        assert handed == [[["RecipeBox", "menus/soup.md"]]]
+        assert _classes(committed_app)[("RecipeBox", "menus/soup.md")] == "note"
+
+    def test_file_rules_that_change_reclass_every_file(
+        self,
+        committed_app: Flask,
+        home: Path,
+        walker: Walker,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        walker.walk()
+        records = json.loads(_records(home).read_text())
+        rules = {"RecipeBox": [{"class": "menu", "paths": ["recipes/shopping.md"]}]}
+        _records(home).write_text(json.dumps(records | {"file_rules": rules}))
+        handed = _classes_handed(monkeypatch)
+
+        walked = walker.walk()
+
+        assert walked.classed == 2
+        assert sorted(map(tuple, handed[0])) == [
+            ("RecipeBox", "recipes/shopping.md"),
+            ("RecipeBox", "recipes/stew.md"),
+        ]
+        assert _classes(committed_app) == {
+            ("RecipeBox", "recipes/stew.md"): "note",
+            ("RecipeBox", "recipes/shopping.md"): "menu",
+        }
+
+    def test_classes_pilot_refuses_twice_wait_on_the_labellers_file_rules(
+        self,
+        committed_app: Flask,
+        home: Path,
+        walker: Walker,
+        monkeypatch: pytest.MonkeyPatch,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """A class the labeller does not declare: the vocabularies declared
+        again do not make Pilot take it."""
+        handed: list[list[HeldFileSchema]] = []
+        classes = walker._labeller.classes
+
+        def souffle(files: list[HeldFileSchema]) -> Any:
+            handed.append(files)
+            classed = classes(files)
+            return replace(
+                classed,
+                classes=FileClassesSchema(
+                    classes=[
+                        each.model_copy(update={"file_class": "souffle"})
+                        for each in classed.classes.classes
+                    ]
+                ),
+            )
+
+        monkeypatch.setattr(walker._labeller, "classes", souffle)
+        verbs = _verbs(monkeypatch)
+
+        with caplog.at_level(logging.WARNING, LOGGER):
+            walker.walk()
+            walker.walk()
+
+        assert (len(handed), verbs.count("vocabularies")) == (1, 2)
+        assert set(_classes(committed_app).values()) == {None}
+        (refused,) = [
+            message
+            for message in caplog.messages
+            if message.startswith("No File is classed until ")
+        ]
+        assert "souffle" in refused
+        records = json.loads(_records(home).read_text())
+        rules = {"RecipeBox": [{"class": "menu", "paths": ["**"]}]}
+        _records(home).write_text(json.dumps(records | {"file_rules": rules}))
+
+        walker.walk()
+
+        assert len(handed) == 2
+
+    def test_classes_the_labeller_gives_none_of_are_asked_again_at_the_next_walk(
+        self,
+        committed_app: Flask,
+        walker: Walker,
+        monkeypatch: pytest.MonkeyPatch,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        classes = walker._labeller.classes
+        with monkeypatch.context() as failing:
+
+            def unanswered(files: list[HeldFileSchema]) -> Any:
+                raise running.Unanswered("its `classes` call exited 1: KeyError")
+
+            failing.setattr(walker._labeller, "classes", unanswered)
+            with caplog.at_level(logging.WARNING, LOGGER):
+                first = walker.walk()
+        assert walker._labeller.classes == classes
+
+        second = walker.walk()
+
+        assert (first.classed, second.classed) == (0, 2)
+        assert (
+            "No File is classed in this walk: the labeller did not answer: its"
+            " `classes` call exited 1: KeyError"
+        ) in caplog.messages
+        assert set(_classes(committed_app).values()) == {"note"}
+
+    def test_a_walk_no_labeller_answers_classes_no_file(
+        self,
+        committed_app: Flask,
+        pilot_url: str,
+        home: Path,
+        stop: threading.Event,
+    ) -> None:
+        with Pilot(pilot_url, COLLECTOR_TOKEN) as pilot:
+            walked = Walker(
+                pilot, _settings(pilot_url, home, **UNLABELLED), stop
+            ).walk()
+
+        assert walked.classed == 0
+        assert set(_classes(committed_app).values()) == {None}
 
 
 class TestTheWalksRhythm:

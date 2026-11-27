@@ -48,6 +48,21 @@ class TestTheSettings:
         ]
         assert settings.COLLECTOR_LABELLER_SECONDS == 60.0
 
+    def test_the_clones_are_of_the_gitblit_mirrors_pvginkel_read_hourly(
+        self,
+    ) -> None:
+        """The mirror inside the cluster, which serves every repository with
+        no credential (P-335)."""
+        settings = given()
+
+        assert (
+            settings.COLLECTOR_MIRROR_URL
+            == "http://gitblit.git-sync-prd.svc.cluster.local/r"
+        )
+        assert settings.COLLECTOR_MIRROR_OWNERS == ["pvginkel"]
+        assert settings.COLLECTOR_MIRROR_SECONDS == 3_600.0
+        assert settings.COLLECTOR_CLONES == Path("/tmp/pilot-collector/clones")
+
     def test_each_is_read_from_the_environment(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -60,6 +75,10 @@ class TestTheSettings:
         monkeypatch.setenv("COLLECTOR_PORT", "8088")
         monkeypatch.setenv("COLLECTOR_LABELLER", '["/srv/loom/label", "--quiet"]')
         monkeypatch.setenv("COLLECTOR_LABELLER_SECONDS", "4.5")
+        monkeypatch.setenv("COLLECTOR_MIRROR_URL", "http://mirror.loom.invalid/git")
+        monkeypatch.setenv("COLLECTOR_MIRROR_OWNERS", '["weavers", "spinners"]')
+        monkeypatch.setenv("COLLECTOR_MIRROR_SECONDS", "90")
+        monkeypatch.setenv("COLLECTOR_CLONES", "/srv/clones")
 
         settings = Settings()
 
@@ -73,6 +92,10 @@ class TestTheSettings:
         assert settings.COLLECTOR_PORT == 8_088
         assert settings.COLLECTOR_LABELLER == ["/srv/loom/label", "--quiet"]
         assert settings.COLLECTOR_LABELLER_SECONDS == 4.5
+        assert settings.COLLECTOR_MIRROR_URL == "http://mirror.loom.invalid/git"
+        assert settings.COLLECTOR_MIRROR_OWNERS == ["weavers", "spinners"]
+        assert settings.COLLECTOR_MIRROR_SECONDS == 90.0
+        assert settings.COLLECTOR_CLONES == Path("/srv/clones")
 
     @pytest.mark.parametrize("missing", sorted(WALKS))
     def test_pilots_address_the_bearer_and_the_home_have_no_default(
@@ -138,3 +161,26 @@ class TestTheSettings:
     def test_a_labellers_time_of_none_is_refused(self) -> None:
         with pytest.raises(ValidationError, match="greater than 0"):
             given(COLLECTOR_LABELLER_SECONDS=0)
+
+    @pytest.mark.parametrize(
+        ("owners", "fault"),
+        [
+            ([], "at least 1 item"),
+            (["weavers/loom"], "`weavers/loom` is no name of one folder"),
+            ([".."], "`..` is no name of one folder"),
+            ([""], "`` is no name of one folder"),
+        ],
+    )
+    def test_owners_that_are_no_folders_names_are_refused(
+        self, owners: list[str], fault: str
+    ) -> None:
+        with pytest.raises(ValidationError, match=fault):
+            given(COLLECTOR_MIRROR_OWNERS=owners)
+
+    def test_a_mirror_of_no_address_is_refused(self) -> None:
+        with pytest.raises(ValidationError, match="at least 1 character"):
+            given(COLLECTOR_MIRROR_URL="")
+
+    def test_a_cadence_of_none_is_refused(self) -> None:
+        with pytest.raises(ValidationError, match="greater than 0"):
+            given(COLLECTOR_MIRROR_SECONDS=0)

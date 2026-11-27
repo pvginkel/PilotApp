@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from pilot_collection.files import FileClassesSchema, FileClassSchema, HeldFileSchema
 from pilot_collection.inventory import InventorySchema
 from pilot_collection.publication import PublicationSchema, PublishedGroupSchema
 from pilot_collection.vocabularies import VocabulariesSchema
@@ -1028,6 +1029,95 @@ class TestWithLabels:
 
         with pytest.raises(Unanswered, match=fault):
             with_labels(taken.publication, line, "1.4.2", {})
+
+
+def _files(*named: tuple[str, str]) -> list[HeldFileSchema]:
+    return [
+        HeldFileSchema(repository=repository, path=path) for repository, path in named
+    ]
+
+
+class TestTheClasses:
+    """Every File the collector holds classed by the labeller, from its
+    Repository's name and its path alone (F158.5; `labeller.md` § File
+    classes)."""
+
+    FILES = (
+        ("RecipeBox", "menus/monday.md"),
+        ("RecipeBox", "recipes/stew.md"),
+        ("RecipeBox", "tests/test_stew.py"),
+        ("BikeLog", "menus/route.md"),
+        ("RecipeBox", "recipes/stew.py"),
+    )
+
+    def test_each_is_classed_in_one_call_in_their_order(
+        self, home: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        records = home / "plugins" / "data" / labeller.DATA / labeller.RECORDS
+        kept = json.loads(records.read_text())
+        rules = {"RecipeBox": [{"class": "menu", "paths": ["menus/**"]}]}
+        records.write_text(json.dumps(kept | {"file_rules": rules}))
+        stub = _stub(home)
+        calls = _calls(monkeypatch)
+
+        classed = stub.classes(_files(*self.FILES))
+
+        assert calls == [
+            ("classes", calls[0][1] | {"files": [list(file) for file in self.FILES]})
+        ]
+        assert classed.version == labeller.VERSION
+        assert (
+            classed.file_rules
+            == stub.stamps(transcripts(home / "projects"), _inventory()).file_rules
+        )
+        assert classed.classes == FileClassesSchema(
+            classes=[
+                FileClassSchema(repository=repository, path=path, file_class=code)
+                for (repository, path), code in zip(
+                    self.FILES,
+                    ["menu", "note", "tasting", "note", "recipe"],
+                    strict=True,
+                )
+            ]
+        )
+
+    def test_its_rules_digest_moves_with_a_projects_rules(self, home: Path) -> None:
+        stub = _stub(home)
+        before = stub.classes(_files(*self.FILES)).file_rules
+        records = home / "plugins" / "data" / labeller.DATA / labeller.RECORDS
+        kept = json.loads(records.read_text())
+        rules = {"BikeLog": [{"class": "logbook", "paths": ["**"]}]}
+        records.write_text(json.dumps(kept | {"file_rules": rules}))
+
+        after = stub.classes(_files(*self.FILES))
+
+        assert after.file_rules != before
+        assert after.classes.classes[3].file_class == "logbook"
+
+    @pytest.mark.parametrize(
+        ("classes", "fault"),
+        [
+            (["note"], "its classes are 1, and it was handed 2 files"),
+            (["note", ""], "its classes are not the shape Pilot takes: "),
+        ],
+    )
+    def test_an_answer_not_one_class_for_each_file_is_none(
+        self, home: Path, classes: list[str], fault: str
+    ) -> None:
+        said = json.dumps(
+            {"contract": 1, "version": "1.0.0", "file_rules": "f", "classes": classes}
+        )
+
+        with pytest.raises(Unanswered, match=fault):
+            _answering(home, said).classes(_files(*self.FILES[:2]))
+
+    def test_one_of_another_contract_is_none(self, home: Path) -> None:
+        said = json.dumps(
+            {"contract": 2, "version": "2.0.0", "file_rules": "f", "classes": []}
+        )
+
+        with pytest.raises(Unanswered, match="of contract 2, and the collector"):
+            _answering(home, said).classes([])
 
 
 class TestTheCommand:

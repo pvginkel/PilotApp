@@ -1,6 +1,7 @@
-"""Pilot as a walk calls it (F152.1, F152.2, F152.6): its inventory, a
-publication of one transcript, the labeller's vocabularies and the walk's
-end, the four routes behind Pilot's door for a collector.
+"""Pilot as a walk calls it (F152.1, F152.2, F152.6, F152.11, F158.5): its
+inventory, a publication of one transcript, the labeller's vocabularies, the
+walk's end, the Repositories and a read of one, and the Files and their
+classes, the routes behind Pilot's door for a collector.
 
 Every call carries the collector's bearer and names the version of the
 collector's API it speaks. An answer is the call's own, or one of five
@@ -16,10 +17,12 @@ answer of Pilot's to the call.
 from typing import Any, Self
 
 import httpx
+from pilot_collection.files import FileClassesSchema, FilesSchema
 from pilot_collection.inventory import InventorySchema
 from pilot_collection.publication import CollectorProtocolRangeSchema, PublicationSchema
+from pilot_collection.repositories import RepositoriesSchema, RepositoryReadSchema
 from pilot_collection.vocabularies import VocabulariesSchema
-from pydantic import ValidationError
+from pydantic import BaseModel, ValidationError
 
 PROTOCOL = 2
 """The version of the collector's API these calls speak."""
@@ -56,9 +59,10 @@ class NotAdoptable(Exception):
 
 
 class Refused(Exception):
-    """Pilot refused a publication or a declaration, and refuses the same
-    call again: it does not validate, its body is too large, or its `group`
-    names no project and the stage has no service user to make one."""
+    """Pilot refused a publication, a declaration, a read or the classes,
+    and refuses the same call again: it does not validate, its body is too
+    large, or its `group` names no project and the stage has no service user
+    to make one."""
 
 
 class NotAdmitted(Exception):
@@ -150,9 +154,63 @@ class Pilot:
         if answer.status_code != 204:
             raise Unreachable(_unexpected(answer))
 
+    def repositories(self) -> RepositoriesSchema:
+        """Every Repository Pilot holds, each with the hash of every commit
+        a read of it gave."""
+        return self._got("/repositories", RepositoriesSchema)
+
+    def read(self, read: RepositoryReadSchema) -> None:
+        """Give Pilot what a read of one Repository's clone gave: Pilot then
+        holds each commit as read.
+
+        Raises:
+            Refused: Pilot answered 400 or 413; the message has its reason.
+        """
+        self._sent("POST", "/commits", read.model_dump_json())
+
+    def files(self, *, unclassed: bool) -> FilesSchema:
+        """The Files Pilot holds: those with no class where `unclassed`,
+        else every one."""
+        return self._got(
+            "/files?unclassed=true" if unclassed else "/files", FilesSchema
+        )
+
+    def classify(self, classes: FileClassesSchema) -> None:
+        """Give Pilot the classes the labeller gave its Files: Pilot then
+        holds each File at the class the call names.
+
+        Raises:
+            Refused: Pilot answered 400 or 413; the message has its reason.
+        """
+        self._sent("PUT", "/classes", classes.model_dump_json())
+
     def end_walk(self) -> None:
         """Tell Pilot a walk ended, after the walk's last publication."""
         answer = self._call("POST", "/walks")
+        if answer.status_code != 204:
+            raise Unreachable(_unexpected(answer))
+
+    def _got[T: BaseModel](self, path: str, shape: type[T]) -> T:
+        """A route's answer of `shape`."""
+        answer = self._call("GET", path)
+        if answer.status_code != 200:
+            raise Unreachable(_unexpected(answer))
+        try:
+            return shape.model_validate_json(answer.content)
+        except ValidationError as error:
+            raise Unreachable(f"Pilot's answer to {path} is none: {error}") from error
+
+    def _sent(self, method: str, path: str, body: str) -> None:
+        """A route's call with a JSON body, answered 204.
+
+        Raises:
+            Refused: Pilot answered 400 or 413.
+        """
+        answer = self._call(
+            method, path, content=body, headers={"Content-Type": "application/json"}
+        )
+        if answer.status_code in (400, 413):
+            raise Refused(f"{answer.status_code}: {_reason(answer)}")
         if answer.status_code != 204:
             raise Unreachable(_unexpected(answer))
 
