@@ -1,0 +1,1026 @@
+{
+ "taken_at": "2026-11-27T06:32:49.080137+00:00",
+ "record": {
+  "rows": {
+   "calls": 629283,
+   "transcripts": 22660,
+   "launches": 16490,
+   "tool_calls": 642622,
+   "events": 6868,
+   "compactions": 5774,
+   "sessions": 6026,
+   "turns": 7930,
+   "work_units": 3771,
+   "segments": 378119
+  },
+  "first_call": "2026-09-17T22:21:25+00:00",
+  "last_call": "2026-11-27T07:39:21+00:00",
+  "database_bytes": 665163455,
+  "largest_tables": {
+   "calls": 326000640,
+   "tool_calls": 204144640,
+   "segments": 55304192,
+   "context_parts": 12500992,
+   "transcripts": 10313728,
+   "file_edits": 9904128,
+   "prompts": 9781248,
+   "sessions": 3825664,
+   "launches": 2908160,
+   "launch_components": 2703360,
+   "turns": 2621440,
+   "hook_runs": 2023424
+  }
+ },
+ "conversation": "0793e7d9-4fee-4800-b095-862eed306d96",
+ "thresholds": {
+  "all": "2734.35",
+  "lqw": "212.67"
+ },
+ "parts": [
+  {
+   "key": "attributes",
+   "label": "The attributes' counts (By's panel), a task",
+   "range": "all",
+   "state": "t=all&by=project&m=cost.sum",
+   "ms": 48295.9,
+   "runs": [
+    48295.9
+   ],
+   "temp_bytes": 1439384007,
+   "statements": [
+    {
+     "head": "SELECT quota_weeks.starts_at, quota_weeks.ends_at FROM quota_weeks ORDER BY quota_weeks.starts_at",
+     "ms": 0.0,
+     "temp_blocks": 0,
+     "spills": []
+    },
+    {
+     "head": "SELECT count(*) FILTER (WHERE g.g0 = %(g0_1)s::INTEGER) AS a0, count(*) FILTER (WHERE g.g1 = %(g1_1)s::INTEGER) AS a1, count(*) FILTER (WHERE g.g2 = %(g2_1)s::I",
+     "ms": 55078.3,
+     "temp_blocks": 322089,
+     "spills": [
+      "Aggregate (Mixed) to disk, 32 batches, 568048 kB",
+      "Sort to disk, 138576 kB",
+      "Hash in 4 batches"
+     ]
+    },
+    {
+     "head": "SELECT count(*) FILTER (WHERE g.g0 = %(g0_1)s::INTEGER) AS a0, count(*) FILTER (WHERE g.g1 = %(g1_1)s::INTEGER) AS a1 FROM (SELECT grouping(r.a0) AS g0, groupin",
+     "ms": 4035.0,
+     "temp_blocks": 2710,
+     "spills": [
+      "Hash in 8 batches"
+     ]
+    }
+   ],
+   "error": null
+  },
+  {
+   "key": "attributes",
+   "label": "The attributes' counts (By's panel), a task",
+   "range": "lqw",
+   "state": "t=lqw&by=project&m=cost.sum",
+   "ms": 4913.7,
+   "runs": [
+    5060.9,
+    4913.7,
+    4682.5
+   ],
+   "temp_bytes": 115434506,
+   "statements": [
+    {
+     "head": "SELECT quota_weeks.starts_at, quota_weeks.ends_at FROM quota_weeks ORDER BY quota_weeks.starts_at",
+     "ms": 0.1,
+     "temp_blocks": 0,
+     "spills": []
+    },
+    {
+     "head": "SELECT count(*) FILTER (WHERE g.g0 = %(g0_1)s::INTEGER) AS a0, count(*) FILTER (WHERE g.g1 = %(g1_1)s::INTEGER) AS a1, count(*) FILTER (WHERE g.g2 = %(g2_1)s::I",
+     "ms": 2340.7,
+     "temp_blocks": 11666,
+     "spills": [
+      "Sort to disk, 13888 kB",
+      "Hash in 4 batches"
+     ]
+    },
+    {
+     "head": "SELECT count(*) FILTER (WHERE g.g0 = %(g0_1)s::INTEGER) AS a0, count(*) FILTER (WHERE g.g1 = %(g1_1)s::INTEGER) AS a1 FROM (SELECT grouping(r.a0) AS g0, groupin",
+     "ms": 3205.5,
+     "temp_blocks": 2456,
+     "spills": [
+      "Hash in 8 batches"
+     ]
+    }
+   ],
+   "error": null
+  },
+  {
+   "key": "lanes",
+   "label": "The lanes by project",
+   "range": "all",
+   "state": "t=all&by=project&p=lanes&m=cost.sum",
+   "ms": 31973.8,
+   "runs": [
+    31973.8
+   ],
+   "temp_bytes": 251201172,
+   "statements": [
+    {
+     "head": "SELECT quota_weeks.starts_at, quota_weeks.ends_at FROM quota_weeks ORDER BY quota_weeks.starts_at",
+     "ms": 0.1,
+     "temp_blocks": 0,
+     "spills": []
+    },
+    {
+     "head": "SELECT grouping(r.b) AS g, r.b, max(r.b_name) AS b_name, sum(r.v0) AS v0, count(r.v0) AS n0 FROM (SELECT project.id AS b, project.name AS b_name, call.cost AS v",
+     "ms": 1319.4,
+     "temp_blocks": 0,
+     "spills": []
+    },
+    {
+     "head": "SELECT r.b, min(r.at) AS first, max(r.at) AS last FROM (SELECT project.id AS b, call.at AS at FROM ( SELECT calls.*, calls.completed_at AS at, false AS estimate",
+     "ms": 1106.1,
+     "temp_blocks": 0,
+     "spills": []
+    },
+    {
+     "head": "SELECT n.b, n.run, n.v, n.transcript_id, min(n.at) AS first, max(n.at) AS last, count(*) AS n, sum(n.cost) AS cost, bool_or(n.waited) AS waited FROM (SELECT l.b",
+     "ms": 4142.5,
+     "temp_blocks": 20577,
+     "spills": [
+      "Sort to disk, 37936 kB",
+      "Hash in 4 batches"
+     ]
+    },
+    {
+     "head": "SELECT r.b, r.transcript_id, r.call_id, r.at, r.past_ttl, r.waited_seconds, r.since FROM (SELECT project.id AS b, call.transcript_id AS transcript_id, call.call",
+     "ms": 2039.7,
+     "temp_blocks": 4988,
+     "spills": [
+      "Sort to disk, 39792 kB"
+     ]
+    },
+    {
+     "head": "SELECT r.b, r.at, r.kind_code, r.is_error, r.source_id, r.call_id, r.transcript_id, r.cost, r.detail, r.tool_code, r.saved_characters, r.denial_kind_code, r.hoo",
+     "ms": 4177.9,
+     "temp_blocks": 5162,
+     "spills": [
+      "Sort to disk, 5104 kB",
+      "Hash in 8 batches"
+     ]
+    }
+   ],
+   "error": null
+  },
+  {
+   "key": "lanes",
+   "label": "The lanes by project",
+   "range": "lqw",
+   "state": "t=lqw&by=project&p=lanes&m=cost.sum",
+   "ms": 4921.5,
+   "runs": [
+    4921.5,
+    4944.4,
+    4915.9
+   ],
+   "temp_bytes": 61987364,
+   "statements": [
+    {
+     "head": "SELECT quota_weeks.starts_at, quota_weeks.ends_at FROM quota_weeks ORDER BY quota_weeks.starts_at",
+     "ms": 0.1,
+     "temp_blocks": 0,
+     "spills": []
+    },
+    {
+     "head": "SELECT grouping(r.b) AS g, r.b, max(r.b_name) AS b_name, sum(r.v0) AS v0, count(r.v0) AS n0 FROM (SELECT project.id AS b, project.name AS b_name, call.cost AS v",
+     "ms": 255.3,
+     "temp_blocks": 0,
+     "spills": []
+    },
+    {
+     "head": "SELECT r.b, min(r.at) AS first, max(r.at) AS last FROM (SELECT project.id AS b, call.at AS at FROM ( SELECT calls.*, calls.completed_at AS at, false AS estimate",
+     "ms": 190.4,
+     "temp_blocks": 0,
+     "spills": []
+    },
+    {
+     "head": "SELECT n.b, n.run, n.v, n.transcript_id, min(n.at) AS first, max(n.at) AS last, count(*) AS n, sum(n.cost) AS cost, bool_or(n.waited) AS waited FROM (SELECT l.b",
+     "ms": 593.5,
+     "temp_blocks": 2968,
+     "spills": [
+      "Sort to disk, 3800 kB",
+      "Hash in 4 batches"
+     ]
+    },
+    {
+     "head": "SELECT r.b, r.transcript_id, r.call_id, r.at, r.past_ttl, r.waited_seconds, r.since FROM (SELECT project.id AS b, call.transcript_id AS transcript_id, call.call",
+     "ms": 267.9,
+     "temp_blocks": 500,
+     "spills": [
+      "Sort to disk, 3992 kB"
+     ]
+    },
+    {
+     "head": "SELECT r.b, r.at, r.kind_code, r.is_error, r.source_id, r.call_id, r.transcript_id, r.cost, r.detail, r.tool_code, r.saved_characters, r.denial_kind_code, r.hoo",
+     "ms": 3175.6,
+     "temp_blocks": 4112,
+     "spills": [
+      "Hash in 8 batches"
+     ]
+    }
+   ],
+   "error": null
+  },
+  {
+   "key": "lanes_conversation",
+   "label": "The lanes by conversation",
+   "range": "all",
+   "state": "t=all&by=conversation&p=lanes&m=cost.sum",
+   "ms": 5625.0,
+   "runs": [
+    6017.0,
+    5625.0,
+    5361.6
+   ],
+   "temp_bytes": 33093592,
+   "statements": [
+    {
+     "head": "SELECT quota_weeks.starts_at, quota_weeks.ends_at FROM quota_weeks ORDER BY quota_weeks.starts_at",
+     "ms": 0.0,
+     "temp_blocks": 0,
+     "spills": []
+    },
+    {
+     "head": "SELECT grouping(r.b) AS g, r.b, sum(r.v0) AS v0, count(r.v0) AS n0 FROM (SELECT call.transcript_id AS b, call.cost AS v0 FROM ( SELECT calls.*, calls.completed_",
+     "ms": 766.1,
+     "temp_blocks": 775,
+     "spills": [
+      "Aggregate (Mixed) to disk, 5 batches, 3656 kB"
+     ]
+    },
+    {
+     "head": "SELECT r.b, min(r.at) AS first, max(r.at) AS last FROM (SELECT call.transcript_id AS b, call.at AS at FROM ( SELECT calls.*, calls.completed_at AS at, false AS ",
+     "ms": 744.4,
+     "temp_blocks": 2494,
+     "spills": [
+      "Aggregate (Hashed) to disk, 5 batches, 11720 kB"
+     ]
+    },
+    {
+     "head": "SELECT n.b, n.run, n.v, n.transcript_id, min(n.at) AS first, max(n.at) AS last, count(*) AS n, sum(n.cost) AS cost, bool_or(n.waited) AS waited FROM (SELECT l.b",
+     "ms": 236.8,
+     "temp_blocks": 1696,
+     "spills": [
+      "Hash in 4 batches"
+     ]
+    },
+    {
+     "head": "SELECT r.b, r.transcript_id, r.call_id, r.at, r.past_ttl, r.waited_seconds, r.since FROM (SELECT call.transcript_id AS b, call.transcript_id AS transcript_id, c",
+     "ms": 101.4,
+     "temp_blocks": 0,
+     "spills": []
+    },
+    {
+     "head": "SELECT r.b, r.at, r.kind_code, r.is_error, r.source_id, r.call_id, r.transcript_id, r.cost, r.detail, r.tool_code, r.saved_characters, r.denial_kind_code, r.hoo",
+     "ms": 3718.3,
+     "temp_blocks": 427,
+     "spills": [
+      "Hash in 4 batches"
+     ]
+    }
+   ],
+   "error": null
+  },
+  {
+   "key": "lanes_conversation",
+   "label": "The lanes by conversation",
+   "range": "lqw",
+   "state": "t=lqw&by=conversation&p=lanes&m=cost.sum",
+   "ms": 3593.4,
+   "runs": [
+    3464.6,
+    3764.9,
+    3593.4
+   ],
+   "temp_bytes": 14483772,
+   "statements": [
+    {
+     "head": "SELECT quota_weeks.starts_at, quota_weeks.ends_at FROM quota_weeks ORDER BY quota_weeks.starts_at",
+     "ms": 0.0,
+     "temp_blocks": 0,
+     "spills": []
+    },
+    {
+     "head": "SELECT grouping(r.b) AS g, r.b, sum(r.v0) AS v0, count(r.v0) AS n0 FROM (SELECT call.transcript_id AS b, call.cost AS v0 FROM ( SELECT calls.*, calls.completed_",
+     "ms": 143.6,
+     "temp_blocks": 0,
+     "spills": []
+    },
+    {
+     "head": "SELECT r.b, min(r.at) AS first, max(r.at) AS last FROM (SELECT call.transcript_id AS b, call.at AS at FROM ( SELECT calls.*, calls.completed_at AS at, false AS ",
+     "ms": 133.0,
+     "temp_blocks": 0,
+     "spills": []
+    },
+    {
+     "head": "SELECT n.b, n.run, n.v, n.transcript_id, min(n.at) AS first, max(n.at) AS last, count(*) AS n, sum(n.cost) AS cost, bool_or(n.waited) AS waited FROM (SELECT l.b",
+     "ms": 194.9,
+     "temp_blocks": 1695,
+     "spills": [
+      "Hash in 4 batches"
+     ]
+    },
+    {
+     "head": "SELECT r.b, r.transcript_id, r.call_id, r.at, r.past_ttl, r.waited_seconds, r.since FROM (SELECT call.transcript_id AS b, call.transcript_id AS transcript_id, c",
+     "ms": 51.3,
+     "temp_blocks": 0,
+     "spills": []
+    },
+    {
+     "head": "SELECT r.b, r.at, r.kind_code, r.is_error, r.source_id, r.call_id, r.transcript_id, r.cost, r.detail, r.tool_code, r.saved_characters, r.denial_kind_code, r.hoo",
+     "ms": 3166.9,
+     "temp_blocks": 80,
+     "spills": [
+      "Hash in 4 batches"
+     ]
+    }
+   ],
+   "error": null
+  },
+  {
+   "key": "kind_rows",
+   "label": "Rows by the widest kind of work: its units, their measure and the cost",
+   "range": "all",
+   "state": "t=all&by=errand&m=cost.sum&m=units.count&m=parts.sum",
+   "ms": 828.0,
+   "runs": [
+    829.3,
+    828.0,
+    826.1
+   ],
+   "temp_bytes": 29993642,
+   "statements": [
+    {
+     "head": "SELECT quota_weeks.starts_at, quota_weeks.ends_at FROM quota_weeks ORDER BY quota_weeks.starts_at",
+     "ms": 0.0,
+     "temp_blocks": 0,
+     "spills": []
+    },
+    {
+     "head": "SELECT grouping(r.b) AS g, r.b, max(r.b_name) AS b_name, min(r.axis) AS axis, sum(r.v0) AS v0, count(r.v0) AS n0 FROM (SELECT CASE WHEN (unit.kind_code = %(kind",
+     "ms": 1123.4,
+     "temp_blocks": 2756,
+     "spills": [
+      "Sort to disk, 21968 kB"
+     ]
+    },
+    {
+     "head": "SELECT grouping(r.b) AS g, r.b, max(r.b_name) AS b_name, min(r.axis) AS axis, count(r.v1) AS v1, count(r.v1) AS n1, sum(r.v2) AS v2, count(r.v2) AS n2 FROM (SEL",
+     "ms": 6.9,
+     "temp_blocks": 0,
+     "spills": []
+    }
+   ],
+   "error": null
+  },
+  {
+   "key": "kind_rows",
+   "label": "Rows by the widest kind of work: its units, their measure and the cost",
+   "range": "lqw",
+   "state": "t=lqw&by=errand&m=cost.sum&m=units.count&m=parts.sum",
+   "ms": 170.1,
+   "runs": [
+    159.4,
+    170.1,
+    172.2
+   ],
+   "temp_bytes": 0,
+   "statements": [
+    {
+     "head": "SELECT quota_weeks.starts_at, quota_weeks.ends_at FROM quota_weeks ORDER BY quota_weeks.starts_at",
+     "ms": 0.0,
+     "temp_blocks": 0,
+     "spills": []
+    },
+    {
+     "head": "SELECT grouping(r.b) AS g, r.b, max(r.b_name) AS b_name, min(r.axis) AS axis, sum(r.v0) AS v0, count(r.v0) AS n0 FROM (SELECT CASE WHEN (unit.kind_code = %(kind",
+     "ms": 175.3,
+     "temp_blocks": 281,
+     "spills": [
+      "Sort to disk, 2240 kB"
+     ]
+    },
+    {
+     "head": "SELECT grouping(r.b) AS g, r.b, max(r.b_name) AS b_name, min(r.axis) AS axis, count(r.v1) AS v1, count(r.v1) AS n1, sum(r.v2) AS v2, count(r.v2) AS n2 FROM (SEL",
+     "ms": 2.1,
+     "temp_blocks": 0,
+     "spills": []
+    }
+   ],
+   "error": null
+  },
+  {
+   "key": "kind_color",
+   "label": "Rows by project, colored by the widest kind of work",
+   "range": "all",
+   "state": "t=all&by=project&m=cost.sum&col=errand",
+   "ms": 1264.0,
+   "runs": [
+    1253.2,
+    1264.0,
+    1284.6
+   ],
+   "temp_bytes": 28811264,
+   "statements": [
+    {
+     "head": "SELECT quota_weeks.starts_at, quota_weeks.ends_at FROM quota_weeks ORDER BY quota_weeks.starts_at",
+     "ms": 0.1,
+     "temp_blocks": 0,
+     "spills": []
+    },
+    {
+     "head": "SELECT grouping(r.b, r.c) AS g, r.b, r.c, max(r.c_name) AS c_name, max(r.b_name) AS b_name, sum(r.v0) AS v0, count(r.v0) AS n0, sum(r.s0) AS s0 FROM (SELECT pro",
+     "ms": 1850.5,
+     "temp_blocks": 3529,
+     "spills": [
+      "Sort to disk, 28136 kB"
+     ]
+    }
+   ],
+   "error": null
+  },
+  {
+   "key": "kind_color",
+   "label": "Rows by project, colored by the widest kind of work",
+   "range": "lqw",
+   "state": "t=lqw&by=project&m=cost.sum&col=errand",
+   "ms": 214.0,
+   "runs": [
+    214.0,
+    206.9,
+    214.9
+   ],
+   "temp_bytes": 0,
+   "statements": [
+    {
+     "head": "SELECT quota_weeks.starts_at, quota_weeks.ends_at FROM quota_weeks ORDER BY quota_weeks.starts_at",
+     "ms": 0.1,
+     "temp_blocks": 0,
+     "spills": []
+    },
+    {
+     "head": "SELECT grouping(r.b, r.c) AS g, r.b, r.c, max(r.c_name) AS c_name, max(r.b_name) AS b_name, sum(r.v0) AS v0, count(r.v0) AS n0, sum(r.s0) AS s0 FROM (SELECT pro",
+     "ms": 287.7,
+     "temp_blocks": 359,
+     "spills": [
+      "Sort to disk, 2864 kB"
+     ]
+    }
+   ],
+   "error": null
+  },
+  {
+   "key": "roles",
+   "label": "Rows by a unit's role, with the share of work done again",
+   "range": "all",
+   "state": "t=all&by=role&m=cost.sum&m=units.count&m=r:rework_share",
+   "ms": 612.4,
+   "runs": [
+    612.4,
+    595.0,
+    626.1
+   ],
+   "temp_bytes": 977578,
+   "statements": [
+    {
+     "head": "SELECT quota_weeks.starts_at, quota_weeks.ends_at FROM quota_weeks ORDER BY quota_weeks.starts_at",
+     "ms": 0.1,
+     "temp_blocks": 0,
+     "spills": []
+    },
+    {
+     "head": "SELECT grouping(r.b) AS g, r.b, sum(r.v0) AS v0, count(r.v0) AS n0, sum(r.v2) AS v2, count(r.v2) AS n2 FROM (SELECT unit.role AS b, call.cost AS v0, CASE WHEN c",
+     "ms": 891.0,
+     "temp_blocks": 0,
+     "spills": []
+    },
+    {
+     "head": "SELECT grouping(r.b) AS g, r.b, count(r.v1) AS v1, count(r.v1) AS n1 FROM (SELECT unit.role AS b, %(param_1)s::INTEGER AS v1 FROM (SELECT u.id AS work_unit_id, ",
+     "ms": 2.5,
+     "temp_blocks": 0,
+     "spills": []
+    }
+   ],
+   "error": null
+  },
+  {
+   "key": "roles",
+   "label": "Rows by a unit's role, with the share of work done again",
+   "range": "lqw",
+   "state": "t=lqw&by=role&m=cost.sum&m=units.count&m=r:rework_share",
+   "ms": 144.8,
+   "runs": [
+    147.1,
+    144.8,
+    140.9
+   ],
+   "temp_bytes": 0,
+   "statements": [
+    {
+     "head": "SELECT quota_weeks.starts_at, quota_weeks.ends_at FROM quota_weeks ORDER BY quota_weeks.starts_at",
+     "ms": 0.1,
+     "temp_blocks": 0,
+     "spills": []
+    },
+    {
+     "head": "SELECT grouping(r.b) AS g, r.b, sum(r.v0) AS v0, count(r.v0) AS n0, sum(r.v2) AS v2, count(r.v2) AS n2 FROM (SELECT unit.role AS b, call.cost AS v0, CASE WHEN c",
+     "ms": 151.1,
+     "temp_blocks": 0,
+     "spills": []
+    },
+    {
+     "head": "SELECT grouping(r.b) AS g, r.b, count(r.v1) AS v1, count(r.v1) AS n1 FROM (SELECT unit.role AS b, %(param_1)s::INTEGER AS v1 FROM (SELECT u.id AS work_unit_id, ",
+     "ms": 1.2,
+     "temp_blocks": 0,
+     "spills": []
+    }
+   ],
+   "error": null
+  },
+  {
+   "key": "kind_order",
+   "label": "In order: each leg by its start, its outliers judged among its role, with the marker of a role's configuration",
+   "range": "all",
+   "state": "t=all&by=leg&p=order&m=cost.sum",
+   "ms": 2788.2,
+   "runs": [
+    2788.2,
+    2851.5,
+    2689.4
+   ],
+   "temp_bytes": 8167424,
+   "statements": [
+    {
+     "head": "SELECT quota_weeks.starts_at, quota_weeks.ends_at FROM quota_weeks ORDER BY quota_weeks.starts_at",
+     "ms": 0.1,
+     "temp_blocks": 0,
+     "spills": []
+    },
+    {
+     "head": "SELECT grouping(r.b) AS g, r.b, max(r.b_name) AS b_name, min(r.axis) AS axis, sum(r.v0) AS v0, count(r.v0) AS n0 FROM (SELECT CASE WHEN (unit.kind_code = %(kind",
+     "ms": 916.2,
+     "temp_blocks": 0,
+     "spills": []
+    },
+    {
+     "head": "SELECT r.b, CASE WHEN (count(r.role) = count(*) AND min(r.role) = max(r.role)) THEN min(r.role) END AS role FROM (SELECT CASE WHEN (unit.kind_code = %(kind_code",
+     "ms": 622.6,
+     "temp_blocks": 0,
+     "spills": []
+    },
+    {
+     "head": "SELECT r.v, min(r.at) AS at FROM (SELECT \"version_claude-code\".version AS v, call.at AS at FROM ( SELECT calls.*, calls.completed_at AS at, false AS estimate FR",
+     "ms": 863.1,
+     "temp_blocks": 0,
+     "spills": []
+    },
+    {
+     "head": "SELECT r.v, min(r.at) AS at FROM (SELECT version_collector.version AS v, call.at AS at FROM ( SELECT calls.*, calls.completed_at AS at, false AS estimate FROM (",
+     "ms": 1.6,
+     "temp_blocks": 0,
+     "spills": []
+    },
+    {
+     "head": "SELECT r.v, min(r.at) AS at FROM (SELECT version_labeller.version AS v, call.at AS at FROM ( SELECT calls.*, calls.completed_at AS at, false AS estimate FROM (S",
+     "ms": 1.1,
+     "temp_blocks": 0,
+     "spills": []
+    },
+    {
+     "head": "SELECT r.v, min(r.at) AS at FROM (SELECT \"version_plugin:pantry\".version AS v, call.at AS at FROM ( SELECT calls.*, calls.completed_at AS at, false AS estimate ",
+     "ms": 599.8,
+     "temp_blocks": 0,
+     "spills": []
+    },
+    {
+     "head": "SELECT c.role, c.model, c.effort, c.at, c.model_before, c.effort_before FROM (SELECT f.role AS role, f.model AS model, f.effort AS effort, f.at AS at, lag(f.mod",
+     "ms": 732.0,
+     "temp_blocks": 999,
+     "spills": [
+      "Sort to disk, 7976 kB"
+     ]
+    }
+   ],
+   "error": null
+  },
+  {
+   "key": "kind_order",
+   "label": "In order: each leg by its start, its outliers judged among its role, with the marker of a role's configuration",
+   "range": "lqw",
+   "state": "t=lqw&by=leg&p=order&m=cost.sum",
+   "ms": 2671.9,
+   "runs": [
+    2647.7,
+    2689.6,
+    2671.9
+   ],
+   "temp_bytes": 8167424,
+   "statements": [
+    {
+     "head": "SELECT quota_weeks.starts_at, quota_weeks.ends_at FROM quota_weeks ORDER BY quota_weeks.starts_at",
+     "ms": 0.1,
+     "temp_blocks": 0,
+     "spills": []
+    },
+    {
+     "head": "SELECT grouping(r.b) AS g, r.b, max(r.b_name) AS b_name, min(r.axis) AS axis, sum(r.v0) AS v0, count(r.v0) AS n0 FROM (SELECT CASE WHEN (unit.kind_code = %(kind",
+     "ms": 148.8,
+     "temp_blocks": 0,
+     "spills": []
+    },
+    {
+     "head": "SELECT r.b FROM (SELECT CASE WHEN (unit.kind_code = %(kind_code_1)s::VARCHAR) THEN unit.id END AS b, coalesce(CASE WHEN (unit.kind_code = %(kind_code_2)s::VARCH",
+     "ms": 627.3,
+     "temp_blocks": 0,
+     "spills": []
+    },
+    {
+     "head": "SELECT grouping(r.b) AS g, r.b, max(r.b_name) AS b_name, min(r.axis) AS axis, sum(r.v0) AS v0, count(r.v0) AS n0 FROM (SELECT CASE WHEN (unit.kind_code = %(kind",
+     "ms": 651.0,
+     "temp_blocks": 0,
+     "spills": []
+    },
+    {
+     "head": "SELECT r.b, CASE WHEN (count(r.role) = count(*) AND min(r.role) = max(r.role)) THEN min(r.role) END AS role FROM (SELECT CASE WHEN (unit.kind_code = %(kind_code",
+     "ms": 129.3,
+     "temp_blocks": 0,
+     "spills": []
+    },
+    {
+     "head": "SELECT r.v, min(r.at) AS at FROM (SELECT \"version_claude-code\".version AS v, call.at AS at FROM ( SELECT calls.*, calls.completed_at AS at, false AS estimate FR",
+     "ms": 845.8,
+     "temp_blocks": 0,
+     "spills": []
+    },
+    {
+     "head": "SELECT r.v, min(r.at) AS at FROM (SELECT version_collector.version AS v, call.at AS at FROM ( SELECT calls.*, calls.completed_at AS at, false AS estimate FROM (",
+     "ms": 1.1,
+     "temp_blocks": 0,
+     "spills": []
+    },
+    {
+     "head": "SELECT r.v, min(r.at) AS at FROM (SELECT version_labeller.version AS v, call.at AS at FROM ( SELECT calls.*, calls.completed_at AS at, false AS estimate FROM (S",
+     "ms": 1.1,
+     "temp_blocks": 0,
+     "spills": []
+    },
+    {
+     "head": "SELECT r.v, min(r.at) AS at FROM (SELECT \"version_plugin:pantry\".version AS v, call.at AS at FROM ( SELECT calls.*, calls.completed_at AS at, false AS estimate ",
+     "ms": 617.1,
+     "temp_blocks": 0,
+     "spills": []
+    },
+    {
+     "head": "SELECT c.role, c.model, c.effort, c.at, c.model_before, c.effort_before FROM (SELECT f.role AS role, f.model AS model, f.effort AS effort, f.at AS at, lag(f.mod",
+     "ms": 732.3,
+     "temp_blocks": 999,
+     "spills": [
+      "Sort to disk, 7976 kB"
+     ]
+    }
+   ],
+   "error": null
+  },
+  {
+   "key": "kind_dots",
+   "label": "In order: each errand by its start, its conversations as dots, each with its role",
+   "range": "all",
+   "state": "t=all&by=errand&p=order&m=cost.median.conversation",
+   "ms": 4332.6,
+   "runs": [
+    4677.6,
+    4215.2,
+    4332.6
+   ],
+   "temp_bytes": 61186048,
+   "statements": [
+    {
+     "head": "SELECT quota_weeks.starts_at, quota_weeks.ends_at FROM quota_weeks ORDER BY quota_weeks.starts_at",
+     "ms": 0.1,
+     "temp_blocks": 0,
+     "spills": []
+    },
+    {
+     "head": "SELECT grouping(r.b) AS g, r.b, max(r.b_name) AS b_name, min(r.axis) AS axis FROM (SELECT CASE WHEN (unit.kind_code = %(kind_code_1)s::VARCHAR) THEN unit.id WHE",
+     "ms": 991.6,
+     "temp_blocks": 2208,
+     "spills": [
+      "Sort to disk, 17592 kB"
+     ]
+    },
+    {
+     "head": "SELECT i.g AS g, i.b, percentile_cont(%(percentile_cont_1)s) WITHIN GROUP (ORDER BY CAST(i.v0 AS DOUBLE PRECISION)) AS v0, count(i.v0) AS n0 FROM (SELECT groupi",
+     "ms": 1133.5,
+     "temp_blocks": 2707,
+     "spills": [
+      "Sort to disk, 21576 kB"
+     ]
+    },
+    {
+     "head": "SELECT r.b, CASE WHEN (count(r.role) = count(*) AND min(r.role) = max(r.role)) THEN min(r.role) END AS role FROM (SELECT CASE WHEN (unit.kind_code = %(kind_code",
+     "ms": 745.8,
+     "temp_blocks": 0,
+     "spills": []
+    },
+    {
+     "head": "SELECT i.b, i.item, i.v, i.at, i.place, i.role FROM (SELECT r.b AS b, r.item AS item, sum(r.v) AS v, min(r.at) AS at, min(min(r.place)) OVER (PARTITION BY r.b) ",
+     "ms": 814.3,
+     "temp_blocks": 1580,
+     "spills": [
+      "Sort to disk, 12608 kB"
+     ]
+    },
+    {
+     "head": "SELECT r.v, min(r.at) AS at FROM (SELECT \"version_claude-code\".version AS v, call.at AS at FROM ( SELECT calls.*, calls.completed_at AS at, false AS estimate FR",
+     "ms": 843.8,
+     "temp_blocks": 0,
+     "spills": []
+    },
+    {
+     "head": "SELECT r.v, min(r.at) AS at FROM (SELECT version_collector.version AS v, call.at AS at FROM ( SELECT calls.*, calls.completed_at AS at, false AS estimate FROM (",
+     "ms": 1.1,
+     "temp_blocks": 0,
+     "spills": []
+    },
+    {
+     "head": "SELECT r.v, min(r.at) AS at FROM (SELECT version_labeller.version AS v, call.at AS at FROM ( SELECT calls.*, calls.completed_at AS at, false AS estimate FROM (S",
+     "ms": 1.1,
+     "temp_blocks": 0,
+     "spills": []
+    },
+    {
+     "head": "SELECT r.v, min(r.at) AS at FROM (SELECT \"version_plugin:pantry\".version AS v, call.at AS at FROM ( SELECT calls.*, calls.completed_at AS at, false AS estimate ",
+     "ms": 603.4,
+     "temp_blocks": 0,
+     "spills": []
+    },
+    {
+     "head": "SELECT c.role, c.model, c.effort, c.at, c.model_before, c.effort_before FROM (SELECT f.role AS role, f.model AS model, f.effort AS effort, f.at AS at, lag(f.mod",
+     "ms": 780.7,
+     "temp_blocks": 999,
+     "spills": [
+      "Sort to disk, 7976 kB"
+     ]
+    }
+   ],
+   "error": null
+  },
+  {
+   "key": "kind_dots",
+   "label": "In order: each errand by its start, its conversations as dots, each with its role",
+   "range": "lqw",
+   "state": "t=lqw&by=errand&p=order&m=cost.median.conversation",
+   "ms": 2725.3,
+   "runs": [
+    2725.3,
+    2701.8,
+    2770.5
+   ],
+   "temp_bytes": 29081600,
+   "statements": [
+    {
+     "head": "SELECT quota_weeks.starts_at, quota_weeks.ends_at FROM quota_weeks ORDER BY quota_weeks.starts_at",
+     "ms": 0.1,
+     "temp_blocks": 0,
+     "spills": []
+    },
+    {
+     "head": "SELECT grouping(r.b) AS g, r.b, max(r.b_name) AS b_name, min(r.axis) AS axis FROM (SELECT CASE WHEN (unit.kind_code = %(kind_code_1)s::VARCHAR) THEN unit.id WHE",
+     "ms": 150.5,
+     "temp_blocks": 0,
+     "spills": []
+    },
+    {
+     "head": "SELECT i.g AS g, i.b, percentile_cont(%(percentile_cont_1)s) WITHIN GROUP (ORDER BY CAST(i.v0 AS DOUBLE PRECISION)) AS v0, count(i.v0) AS n0 FROM (SELECT groupi",
+     "ms": 167.8,
+     "temp_blocks": 272,
+     "spills": [
+      "Sort to disk, 2176 kB"
+     ]
+    },
+    {
+     "head": "SELECT r.b, CASE WHEN (count(r.role) = count(*) AND min(r.role) = max(r.role)) THEN min(r.role) END AS role FROM (SELECT CASE WHEN (unit.kind_code = %(kind_code",
+     "ms": 132.3,
+     "temp_blocks": 0,
+     "spills": []
+    },
+    {
+     "head": "SELECT i.b, i.item, i.v, i.at, i.place, i.role FROM (SELECT r.b AS b, r.item AS item, sum(r.v) AS v, min(r.at) AS at, min(min(r.place)) OVER (PARTITION BY r.b) ",
+     "ms": 138.0,
+     "temp_blocks": 0,
+     "spills": []
+    },
+    {
+     "head": "SELECT r.item, sum(r.v) AS v FROM (SELECT call.transcript_id AS item, call.cost AS v, call.at AS at FROM ( SELECT calls.*, calls.completed_at AS at, false AS es",
+     "ms": 810.7,
+     "temp_blocks": 3800,
+     "spills": [
+      "Aggregate (Hashed) to disk, 5 batches, 18248 kB"
+     ]
+    },
+    {
+     "head": "SELECT r.v, min(r.at) AS at FROM (SELECT \"version_claude-code\".version AS v, call.at AS at FROM ( SELECT calls.*, calls.completed_at AS at, false AS estimate FR",
+     "ms": 847.9,
+     "temp_blocks": 0,
+     "spills": []
+    },
+    {
+     "head": "SELECT r.v, min(r.at) AS at FROM (SELECT version_collector.version AS v, call.at AS at FROM ( SELECT calls.*, calls.completed_at AS at, false AS estimate FROM (",
+     "ms": 1.2,
+     "temp_blocks": 0,
+     "spills": []
+    },
+    {
+     "head": "SELECT r.v, min(r.at) AS at FROM (SELECT version_labeller.version AS v, call.at AS at FROM ( SELECT calls.*, calls.completed_at AS at, false AS estimate FROM (S",
+     "ms": 1.2,
+     "temp_blocks": 0,
+     "spills": []
+    },
+    {
+     "head": "SELECT r.v, min(r.at) AS at FROM (SELECT \"version_plugin:pantry\".version AS v, call.at AS at FROM ( SELECT calls.*, calls.completed_at AS at, false AS estimate ",
+     "ms": 612.8,
+     "temp_blocks": 0,
+     "spills": []
+    },
+    {
+     "head": "SELECT c.role, c.model, c.effort, c.at, c.model_before, c.effort_before FROM (SELECT f.role AS role, f.model AS model, f.effort AS effort, f.at AS at, lag(f.mod",
+     "ms": 747.4,
+     "temp_blocks": 999,
+     "spills": [
+      "Sort to disk, 7976 kB"
+     ]
+    }
+   ],
+   "error": null
+  },
+  {
+   "key": "lanes_model",
+   "label": "The lanes by conversation, their runs colored by model",
+   "range": "all",
+   "state": "t=all&by=conversation&p=lanes&m=cost.sum&col=model",
+   "ms": 6176.4,
+   "runs": [
+    6018.4,
+    6176.4,
+    6275.5
+   ],
+   "temp_bytes": 51295656,
+   "statements": [
+    {
+     "head": "SELECT quota_weeks.starts_at, quota_weeks.ends_at FROM quota_weeks ORDER BY quota_weeks.starts_at",
+     "ms": 0.0,
+     "temp_blocks": 0,
+     "spills": []
+    },
+    {
+     "head": "SELECT grouping(r.b, r.c) AS g, r.b, r.c, sum(r.v0) AS v0, count(r.v0) AS n0, sum(r.s0) AS s0 FROM (SELECT call.transcript_id AS b, call.model_code AS c, call.c",
+     "ms": 1045.4,
+     "temp_blocks": 4385,
+     "spills": [
+      "Sort to disk, 34976 kB"
+     ]
+    },
+    {
+     "head": "SELECT r.b, min(r.at) AS first, max(r.at) AS last FROM (SELECT call.transcript_id AS b, call.at AS at FROM ( SELECT calls.*, calls.completed_at AS at, false AS ",
+     "ms": 769.2,
+     "temp_blocks": 2494,
+     "spills": [
+      "Aggregate (Hashed) to disk, 5 batches, 11720 kB"
+     ]
+    },
+    {
+     "head": "SELECT n.b, n.run, n.v, n.transcript_id, min(n.at) AS first, max(n.at) AS last, count(*) AS n, sum(n.cost) AS cost, bool_or(n.waited) AS waited FROM (SELECT l.b",
+     "ms": 115.8,
+     "temp_blocks": 0,
+     "spills": []
+    },
+    {
+     "head": "SELECT r.b, r.transcript_id, r.call_id, r.at, r.past_ttl, r.waited_seconds, r.since FROM (SELECT call.transcript_id AS b, call.transcript_id AS transcript_id, c",
+     "ms": 100.2,
+     "temp_blocks": 0,
+     "spills": []
+    },
+    {
+     "head": "SELECT r.b, r.at, r.kind_code, r.is_error, r.source_id, r.call_id, r.transcript_id, r.cost, r.detail, r.tool_code, r.saved_characters, r.denial_kind_code, r.hoo",
+     "ms": 3797.2,
+     "temp_blocks": 427,
+     "spills": [
+      "Hash in 4 batches"
+     ]
+    }
+   ],
+   "error": null
+  },
+  {
+   "key": "lanes_model",
+   "label": "The lanes by conversation, their runs colored by model",
+   "range": "lqw",
+   "state": "t=lqw&by=conversation&p=lanes&m=cost.sum&col=model",
+   "ms": 3392.1,
+   "runs": [
+    3725.5,
+    3392.1,
+    3319.1
+   ],
+   "temp_bytes": 626236,
+   "statements": [
+    {
+     "head": "SELECT quota_weeks.starts_at, quota_weeks.ends_at FROM quota_weeks ORDER BY quota_weeks.starts_at",
+     "ms": 0.1,
+     "temp_blocks": 0,
+     "spills": []
+    },
+    {
+     "head": "SELECT grouping(r.b, r.c) AS g, r.b, r.c, sum(r.v0) AS v0, count(r.v0) AS n0, sum(r.s0) AS s0 FROM (SELECT call.transcript_id AS b, call.model_code AS c, call.c",
+     "ms": 159.2,
+     "temp_blocks": 0,
+     "spills": []
+    },
+    {
+     "head": "SELECT r.b, min(r.at) AS first, max(r.at) AS last FROM (SELECT call.transcript_id AS b, call.at AS at FROM ( SELECT calls.*, calls.completed_at AS at, false AS ",
+     "ms": 122.2,
+     "temp_blocks": 0,
+     "spills": []
+    },
+    {
+     "head": "SELECT n.b, n.run, n.v, n.transcript_id, min(n.at) AS first, max(n.at) AS last, count(*) AS n, sum(n.cost) AS cost, bool_or(n.waited) AS waited FROM (SELECT l.b",
+     "ms": 86.9,
+     "temp_blocks": 0,
+     "spills": []
+    },
+    {
+     "head": "SELECT r.b, r.transcript_id, r.call_id, r.at, r.past_ttl, r.waited_seconds, r.since FROM (SELECT call.transcript_id AS b, call.transcript_id AS transcript_id, c",
+     "ms": 95.9,
+     "temp_blocks": 0,
+     "spills": []
+    },
+    {
+     "head": "SELECT r.b, r.at, r.kind_code, r.is_error, r.source_id, r.call_id, r.transcript_id, r.cost, r.detail, r.tool_code, r.saved_characters, r.denial_kind_code, r.hoo",
+     "ms": 2971.5,
+     "temp_blocks": 80,
+     "spills": [
+      "Hash in 4 batches"
+     ]
+    }
+   ],
+   "error": null
+  },
+  {
+   "key": "inventory",
+   "label": "Pilot's inventory with what it hands the labeller, a collector's call",
+   "range": "all",
+   "state": "",
+   "ms": 583.6,
+   "runs": [
+    583.6,
+    567.8,
+    619.3
+   ],
+   "temp_bytes": 0,
+   "statements": [
+    {
+     "head": "SELECT transcripts.session_id, transcripts.agent_id, transcripts.file_size, transcripts.file_modified_at, transcripts.replayed_size, component_versions.version ",
+     "ms": 31.7,
+     "temp_blocks": 0,
+     "spills": []
+    },
+    {
+     "head": "SELECT sessions.id, sessions.conversation_id, sessions.kind_code, sessions.created_at, (SELECT left(turns.message, %(left_2)s::INTEGER) AS left_1 FROM turns WHE",
+     "ms": 25.4,
+     "temp_blocks": 0,
+     "spills": []
+    },
+    {
+     "head": "SELECT holds.session_id, holds.kind_code, holds.started_at, holds.ended_at FROM holds JOIN sessions ON sessions.id = holds.session_id WHERE sessions.conversatio",
+     "ms": 0.0,
+     "temp_blocks": 0,
+     "spills": []
+    },
+    {
+     "head": "SELECT turns.session_id, turns.started_at, turns.cause_code FROM turns JOIN sessions ON sessions.id = turns.session_id WHERE sessions.conversation_id IS NOT NUL",
+     "ms": 6.7,
+     "temp_blocks": 0,
+     "spills": []
+    },
+    {
+     "head": "SELECT documents.id, items.created_by_session_id, sessions.conversation_id, documents.source_path FROM documents JOIN items ON items.id = documents.id JOIN sess",
+     "ms": 0.0,
+     "temp_blocks": 0,
+     "spills": []
+    }
+   ],
+   "error": null
+  }
+ ],
+ "burst": []
+}
