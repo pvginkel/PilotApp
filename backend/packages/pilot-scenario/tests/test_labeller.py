@@ -358,6 +358,36 @@ class TestItsVocabularies:
 
         assert [kind["code"] for kind in answer["lists"]["work_unit_kind"]] == ["chore"]
 
+    def test_a_nesting_the_run_records_give_is_declared_as_they_give_it(
+        self, tmp_path: Path
+    ) -> None:
+        nesting = [
+            {"inner": "trip", "outer": "errand"},
+            {"inner": "leg", "outer": "trip"},
+            {"inner": "check", "outer": "errand"},
+            {"inner": "check", "outer": "trip"},
+        ]
+        records = _records(tmp_path)
+        records.parent.mkdir(parents=True)
+        records.write_text(
+            json.dumps(
+                {"kinds": ["errand", "trip", "leg", "check"], "nesting": nesting}
+            )
+        )
+
+        (answer,) = _run("vocabularies", {"contract": 1, "home": _home(tmp_path)})[1]
+
+        assert answer["nesting"] == nesting
+        assert [
+            (kind["code"], kind["description"], kind["position"])
+            for kind in answer["lists"]["work_unit_kind"]
+        ] == [
+            ("errand", "The widest kind of work.", 1),
+            ("trip", "A part of one errand.", 2),
+            ("leg", "A part of one trip.", 3),
+            ("check", "A part of one errand or trip.", 4),
+        ]
+
 
 def _stamps(home: Path, **given: Any) -> dict[str | None, str | None]:
     """Each transcript's stamp by its agent id, the main threads' by their

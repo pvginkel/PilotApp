@@ -32,7 +32,9 @@ Its run records are one file, `records.json`, in the folder the request's
 none holds no records. Every key is optional:
 
 - `kinds`: the kinds of work, the widest first, each but the first a part of
-  the one before;
+  the one before where there is no `nesting`;
+- `nesting`: each pairing of kinds as the answer gives it, its `inner` a part
+  of its `outer`;
 - `units`: each Work Unit's row as a label answer gives it, its `key`, `kind`,
   `title` and `part_of` among them;
 - `ran`: the key of the unit each conversation's main thread carried out, by
@@ -397,19 +399,29 @@ def _stamp(
 
 def vocabularies(records: Mapping[str, Any], version: str = VERSION) -> dict[str, Any]:
     """The `vocabularies` answer: every list, the Work Unit Kinds the run
-    records', the nestings, each kind but the widest in the one before it,
-    and the groups."""
+    records', their nestings, else each kind but the widest in the one before
+    it, and the groups."""
     kinds: list[str] = records.get("kinds", [])
+    nesting: list[dict[str, str]] = records.get(
+        "nesting",
+        [
+            {"inner": inner, "outer": outer}
+            for outer, inner in zip(kinds, kinds[1:], strict=False)
+        ],
+    )
+    outers: dict[str, list[str]] = {}
+    for pair in nesting:
+        outers.setdefault(pair["inner"], []).append(pair["outer"].replace("_", " "))
     declared = {
         "work_unit_kind": [
             _value(
                 kind,
                 kind.replace("_", " ").capitalize(),
-                "The widest kind of work."
-                if place == 0
-                else f"A part of one {kinds[place - 1].replace('_', ' ')}.",
+                f"A part of one {' or '.join(outers[kind])}."
+                if kind in outers
+                else "The widest kind of work.",
             )
-            for place, kind in enumerate(kinds)
+            for kind in kinds
         ],
         **_LISTS,
     }
@@ -424,10 +436,7 @@ def vocabularies(records: Mapping[str, Any], version: str = VERSION) -> dict[str
             ]
             for name, values in declared.items()
         },
-        "nesting": [
-            {"inner": inner, "outer": outer}
-            for outer, inner in zip(kinds, kinds[1:], strict=False)
-        ],
+        "nesting": nesting,
         "groups": [
             {
                 "key": group["key"],

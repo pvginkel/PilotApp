@@ -1172,6 +1172,25 @@ class TestItsLabels:
         ]
         assert vocabularies["nesting"] == [{"inner": "leg", "outer": "errand"}]
 
+    def test_a_scenario_that_pairs_its_kinds_gives_the_stub_its_nesting(
+        self,
+    ) -> None:
+        scenario = replace(
+            SCENARIO,
+            kinds=("errand", "leg", "check"),
+            nesting=(("leg", "errand"), ("check", "errand"), ("check", "leg")),
+        )
+
+        records = Builder(scenario, UNTIL).records()
+
+        assert records["nesting"] == [
+            {"inner": "leg", "outer": "errand"},
+            {"inner": "check", "outer": "errand"},
+            {"inner": "check", "outer": "leg"},
+        ]
+        assert "nesting" not in Builder(SCENARIO, UNTIL).records()
+        assert labeller.vocabularies(records)["nesting"] == records["nesting"]
+
 
 class TestTheTurnsOfPilots:
     def test_the_turn_a_session_ran_under(self) -> None:

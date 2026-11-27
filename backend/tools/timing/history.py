@@ -19,9 +19,10 @@ collected, their Turns standing in with their own cost and tokens.
 Its shape is the fleet's as `architecture.md` *The sizes* has it: some nine
 thousand Calls a day (`CALLS_A_DAY`), fewer at the weekend, about thirty a
 transcript, a third of the conversations with sub-agents. Each work session
-of Pilot's carries out a leg of its project's errand of the day, in one of
-the `ROLES`, its round the role's count in the errand, a later round now and
-then work cooked again; a role's legs run on the model its configuration
+of Pilot's carries out a leg of its project's errand of the day, in a stop
+of one of its trips, a porter's in the trip itself (`KINDS`, `NESTING`), in
+one of the `ROLES`, its round the role's count in the errand, a later round
+now and then work cooked again; a role's legs run on the model its configuration
 gives for each four weeks (`configured`), so that a role's configuration
 changes between its units. They are drawn from a seed of their own, so the
 rest of a day is drawn as before they were. A day already
@@ -185,8 +186,35 @@ ERRANDS = (
     "Mend the lines",
 )
 
+KINDS = ("errand", "trip", "stop", "leg", "tidy", "check")
+"""The kinds of work, the widest first: a project's errand of the day, its
+trips, a trip's stops, the legs Pilot's work sessions carry out, a trip's
+tidying and the check of a stop or a trip."""
+
+NESTING = (
+    ("trip", "errand"),
+    ("stop", "trip"),
+    ("leg", "stop"),
+    ("leg", "trip"),
+    ("tidy", "trip"),
+    ("check", "stop"),
+    ("check", "trip"),
+)
+"""Each pairing of kinds, inner in outer: the `dev` labeller's seven of its
+six kinds in the history's words (its `labeller.md`, `nesting`), the widest
+three steps up from a leg in a stop."""
+
+LEGS_A_STOP = 3
+"""The legs of a stop, a trip's first stop filled first."""
+
+STOPS_A_TRIP = 3
+"""The stops of a trip, an errand's first trip filled first."""
+
 ROLES = (("cook", 60), ("taster", 30), ("porter", 10))
 """The roles a leg is done in, by weight."""
+
+PORTER = "porter"
+"""The role whose legs sit in their trip, in no stop."""
 
 _LARGEST = {"cook": 0.8, "taster": 0.5, "porter": 0.2}
 """How often a role's configuration is the day's largest model, else the
@@ -243,6 +271,35 @@ def errand(place: Place, day: date) -> str:
     """The name of a project's errand of a day, which its work sessions'
     legs are parts of."""
     return f"{place.name} errands of {day.isoformat()}"
+
+
+def trip(place: Place, day: date, leg: int) -> str:
+    """The name of the trip of a project's errand of a day that its `leg`th
+    leg, counted from 0, is a part of."""
+    return f"{errand(place, day)}, trip {leg // (LEGS_A_STOP * STOPS_A_TRIP) + 1}"
+
+
+def stop(place: Place, day: date, leg: int) -> str:
+    """The name of the stop of its trip that a project's `leg`th leg of a
+    day, counted from 0, is a part of."""
+    within = leg % (LEGS_A_STOP * STOPS_A_TRIP) // LEGS_A_STOP + 1
+    return f"{trip(place, day, leg)}, stop {within}"
+
+
+def _units(place: Place, day: date, legs: Sequence[Unit]) -> Iterator[Unit]:
+    """A project's units of a day, each after the one it is a part of: its
+    errand, its legs, and the trips and stops they sit in."""
+    yield Unit("errand", errand(place, day), project=place.slug)
+    seen: set[str] = set()
+    for n, leg in enumerate(legs):
+        placed = [("trip", trip(place, day, n), errand(place, day))]
+        if leg.role != PORTER:
+            placed.append(("stop", stop(place, day, n), trip(place, day, n)))
+        for kind, name, within in placed:
+            if name not in seen:
+                seen.add(name)
+                yield Unit(kind, name, within=within)
+        yield leg
 
 
 def _version(day: date) -> str:
@@ -673,7 +730,9 @@ def draw(day: date, calls: int | None = None) -> Day:
                     Unit(
                         "leg",
                         leg,
-                        within=errand(place, day),
+                        within=(trip if role == PORTER else stop)(
+                            place, day, len(done)
+                        ),
                         role=role,
                         round=round_,
                         rework_kind=labeller.RECOOKED
@@ -758,17 +817,15 @@ def draw(day: date, calls: int | None = None) -> Day:
         name=f"timing/{day.isoformat()}",
         people=tuple(p for p, _ in PEOPLE),
         projects=tuple(p.slug for p in PLACES),
-        kinds=("errand", "leg"),
+        kinds=KINDS,
         units=tuple(
             unit
             for place in PLACES
             if place.slug in legs
-            for unit in (
-                Unit("errand", errand(place, day), project=place.slug),
-                *legs[place.slug],
-            )
+            for unit in _units(place, day, legs[place.slug])
         ),
         sessions=tuple(sessions),
+        nesting=NESTING,
     )
     midnight = datetime.combine(day, datetime.min.time(), ZONE).astimezone(UTC)
     return Day(day, scenario, calls, pilots, midnight)

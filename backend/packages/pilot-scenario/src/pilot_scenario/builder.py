@@ -585,12 +585,12 @@ class Builder:
         records.write_text(json.dumps(self.records(), indent=2) + "\n")
 
     def records(self) -> dict[str, Any]:
-        """The stub labeller's run records of the scenario: its kinds of work;
-        its units, each named by its key with its role, round and rework kind
-        where it has them, a unit its session ran with that session's times
-        and served, one cut into parts with their count; the
-        unit each session ran, by its conversation; and each group with the
-        conversations it adopts."""
+        """The stub labeller's run records of the scenario: its kinds of work
+        and their nesting where it pairs them; its units, each named by its
+        key with its role, round and rework kind where it has them, a unit
+        its session ran with that session's times and served, one cut into
+        parts with their count; the unit each session ran, by its
+        conversation; and each group with the conversations it adopts."""
         units = {unit.name: unit for unit in self.scenario.units}
 
         def key(unit: Unit) -> str:
@@ -636,7 +636,7 @@ class Builder:
                 | {"repository": session.repository, "conversations": []},
             )
             group["conversations"].append(self.conversation(session))
-        return {
+        records: dict[str, Any] = {
             "kinds": list(self.scenario.kinds),
             "units": rows,
             "ran": {
@@ -645,6 +645,12 @@ class Builder:
             },
             "groups": list(groups.values()),
         }
+        if self.scenario.nesting:
+            records["nesting"] = [
+                {"inner": inner, "outer": outer}
+                for inner, outer in self.scenario.nesting
+            ]
+        return records
 
     def vocabularies(self) -> dict[str, Any]:
         """The stub labeller's vocabularies of the scenario as a collector

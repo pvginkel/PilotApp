@@ -8,10 +8,11 @@ from datetime import date, timedelta
 from typing import Any
 
 from pilot_scenario import Builder, labeller
-from pilot_scenario.script import Call, Session
+from pilot_scenario.script import Call, Session, Unit
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session as DbSession
 
+from app.dashboard.dimensions import reaches
 from app.models import Launch, TokenCount, Transcript, Turn
 from app.models import Session as AgentSession
 from app.models.call import Call as CallRow
@@ -19,8 +20,11 @@ from app.models.label import WorkUnit
 from app.services.container import ServiceContainer
 from tools.timing.history import (
     CONFIGURED_DAYS,
+    KINDS,
     LONG_CALLS,
+    NESTING,
     PLACES,
+    PORTER,
     ROLES,
     Day,
     _tokens,
@@ -118,7 +122,26 @@ class TestTheDays:
         assert _words(list(PLACES)) & WORKFLOW == set()
 
 
+def _up(units: dict[str, Unit], unit: Unit) -> list[str]:
+    """The kinds of a unit and of every unit above it, its own first."""
+    kinds = [unit.kind]
+    while unit.within is not None:
+        unit = units[unit.within]
+        kinds.append(unit.kind)
+    return kinds
+
+
 class TestTheUnits:
+    def test_the_kinds_nest_as_the_labellers_with_an_errand_three_steps_up(
+        self,
+    ) -> None:
+        day = draw(TUESDAY)
+
+        assert (day.scenario.kinds, day.scenario.nesting) == (KINDS, NESTING)
+        assert reaches(NESTING)["errand"] == 3
+        assert len(KINDS) == 6 and len(NESTING) == 7
+        assert {kind for pair in NESTING for kind in pair} == set(KINDS)
+
     def test_each_work_session_carries_out_a_leg_of_its_projects_errand(
         self,
     ) -> None:
@@ -126,7 +149,8 @@ class TestTheUnits:
         units = {unit.name: unit for unit in day.scenario.units}
         work = {name for name, plan in day.pilots.items() if plan.kind == "work"}
 
-        assert work and day.scenario.kinds == ("errand", "leg")
+        assert work
+        chains = set()
         for session in day.scenario.sessions:
             if session.name not in work:
                 assert session.unit is None
@@ -134,9 +158,39 @@ class TestTheUnits:
             assert session.unit is not None
             leg = units[session.unit]
             place = day.pilots[session.name].place
-            assert (leg.kind, leg.within) == ("leg", errand(place, day.day))
+            chain = _up(units, leg)
+            chains.add(tuple(chain))
+            assert chain == (
+                ["leg", "trip", "errand"]
+                if leg.role == PORTER
+                else ["leg", "stop", "trip", "errand"]
+            )
+            top = leg
+            while top.within is not None:
+                top = units[top.within]
+            assert (top.name, top.project) == (errand(place, day.day), place.slug)
             assert leg.role in dict(ROLES)
-            assert units[leg.within].project == place.slug
+        assert len(chains) == 2
+
+    def test_every_unit_sits_where_a_nesting_pairs_its_kind(self) -> None:
+        units = draw(TUESDAY).scenario.units
+        named = {unit.name: unit for unit in units}
+
+        assert all(
+            (unit.kind, named[unit.within].kind) in NESTING
+            for unit in units
+            if unit.within is not None
+        )
+        assert all(
+            named[unit.within] in units[:at]
+            for at, unit in enumerate(units)
+            if unit.within is not None
+        )
+        stops = Counter(unit.within for unit in units if unit.kind == "leg")
+        assert (
+            max(count for name, count in stops.items() if named[name].kind == "stop")
+            == 3
+        )
 
     def test_a_legs_round_counts_its_role_in_the_errand_and_a_later_one_may_be_redone(
         self,
@@ -144,12 +198,17 @@ class TestTheUnits:
         seen: Counter[tuple[str | None, str | None]] = Counter()
         redone = 0
         for day in (TUESDAY, TUESDAY + timedelta(days=1)):
-            for unit in draw(day).scenario.units:
-                if unit.kind == "errand":
+            units = draw(day).scenario.units
+            named = {unit.name: unit for unit in units}
+            for unit in units:
+                if unit.kind != "leg":
                     assert (unit.role, unit.round, unit.rework_kind) == (None,) * 3
                     continue
-                seen[(unit.within, unit.role)] += 1
-                assert unit.round == seen[(unit.within, unit.role)]
+                top = unit
+                while top.within is not None:
+                    top = named[top.within]
+                seen[(top.name, unit.role)] += 1
+                assert unit.round == seen[(top.name, unit.role)]
                 if unit.rework_kind is not None:
                     assert unit.rework_kind == labeller.RECOOKED
                     assert unit.round > 1
@@ -298,3 +357,16 @@ class TestTheWrite:
             == (drawn[title].role, drawn[title].round, drawn[title].rework_kind)
             for title in legs
         )
+        written = {unit.id: unit for unit in session.scalars(select(WorkUnit))}
+        named = {unit.name: unit for unit in day.scenario.units}
+        assert all(
+            written[unit.part_of_id].title == named[unit.title].within
+            for unit in written.values()
+            if unit.part_of_id is not None
+        )
+        assert {unit.kind_code for unit in written.values()} >= {
+            "errand",
+            "trip",
+            "stop",
+            "leg",
+        }

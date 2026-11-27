@@ -252,7 +252,8 @@ class Unit:
 class Scenario:
     """A short script in invented words, under the name its conversations'
     ids are drawn from. `kinds` are its kinds of work, the widest first: each
-    but the first is a part of the one before it."""
+    but the first is a part of the one before it, unless `nesting` pairs
+    them, each an inner kind and the outer one it is a part of."""
 
     name: str
     people: tuple[str, ...]
@@ -260,3 +261,4 @@ class Scenario:
     kinds: tuple[str, ...]
     units: tuple[Unit, ...]
     sessions: tuple[Session, ...]
+    nesting: tuple[tuple[str, str], ...] = ()
