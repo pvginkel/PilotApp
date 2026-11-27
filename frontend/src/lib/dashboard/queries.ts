@@ -134,6 +134,8 @@ export function quickFilterCountsQuery(key: string, listen: Listen) {
       }),
     staleTime: Infinity,
     refetchOnWindowFocus: false,
+    // A read asked again starts its task again, which holds the engine again: a failure waits for its Retry.
+    retry: false,
     meta: { [OVER_STREAM]: true },
   });
 }

@@ -5,9 +5,10 @@
  * others' counts; one that counts nothing and is off takes no press. "Add as quick filter", in a
  * dimension's pane, makes one under a name, for everyone, its amount the cost, no chip joining the
  * scope; its × removes it after a dialog. On the walk's event the counts are read again with the
- * rows (F160.6), and a count whose answer the stream lost as it dropped is asked again as it comes
- * back up. The figures are the tally's (`backend/tests/dashboard/test_tally.py`), on projects of the
- * spec's own; the quick filters are everyone's in the worker's record, so each is found by its name.
+ * rows (F160.6), and a count whose answer the stream lost, as it dropped or before it first stood,
+ * is asked again as it comes up. The figures are the tally's (`backend/tests/dashboard/test_tally.py`),
+ * on projects of the spec's own; the quick filters are everyone's in the worker's record, so each is
+ * found by its name.
  */
 
 import type { Page, Request } from '@playwright/test';
@@ -265,5 +266,30 @@ test.describe('The quick filters', () => {
     await expect(dashboard.quickFilters).toHaveAttribute('aria-busy', 'false');
     expect(counts()).toHaveLength(2);
     expect(counts()[1]).toBe(counts()[0]);
+  });
+
+  test('reads the counts as the stream first stands where the dashboard opened with none, their answer then lost', async ({
+    page,
+    people,
+    projects,
+    collection,
+    shell,
+    dashboard,
+    deploymentSse,
+    outage,
+  }) => {
+    const { first, chip } = await tally(people, projects, collection);
+    await outage.refuse();
+    const started = page.waitForResponse((response) => new URL(response.url()).pathname === '/api/dashboard/counts/quick-filters');
+
+    await shell.open(`${projectAddress(first)}${dashboardAddress(`t=all&by=call&m=cost.sum&${chip}`)}`);
+    await expect(dashboard.rows).toHaveCount(16);
+    await started;
+    await expect(dashboard.quickFilter('Cache misses').count).toHaveText('–');
+
+    await outage.end();
+    await deploymentSse.ensureConnected();
+
+    await expectSeeded(dashboard);
   });
 });

@@ -11,7 +11,8 @@
  * An event reaches only the browsers whose stream the sending process holds, so each time the
  * stream comes back up the figures are read again as on the event; its first coming up is none. A
  * read whose answer comes over the stream (`OVER_STREAM`), a task's, and is under way as it comes
- * back up is asked again at once, since an answer sent while it was down never lands.
+ * up, the first time included, is asked again at once, since an answer sent while no stream stood
+ * never lands.
  */
 
 import { useEffect, useRef } from 'react';
@@ -28,25 +29,28 @@ export function useWalkReads(): void {
   const queryClient = useQueryClient();
   const { isConnected, addEventListener } = useSseContext();
   const readAll = useRef<(lost?: boolean) => void>(() => undefined);
+  const askLost = useRef<() => void>(() => undefined);
 
   useEffect(() => {
     const cache = queryClient.getQueryCache();
     const owed = new Set<Query>();
     const stale = (query: Query) => queryClient.invalidateQueries({ queryKey: query.queryKey, exact: true, refetchType: hidden() ? 'none' : 'active' });
+    const overStream = (query: Query) => query.state.fetchStatus !== 'idle' && query.meta?.[OVER_STREAM] === true;
+    const askAgain = (query: Query) => {
+      owed.delete(query);
+      void queryClient.cancelQueries({ queryKey: query.queryKey, exact: true }).then(() => stale(query));
+    };
     const readOne = (query: Query, lost = false) => {
       if (query.state.fetchStatus !== 'idle') {
-        if (lost && query.meta?.[OVER_STREAM] === true) {
-          owed.delete(query);
-          void queryClient.cancelQueries({ queryKey: query.queryKey, exact: true }).then(() => stale(query));
-          return;
-        }
-        owed.add(query);
+        if (lost && overStream(query)) askAgain(query);
+        else owed.add(query);
         return;
       }
       if (query.state.data === undefined) return;
       void stale(query);
     };
     readAll.current = (lost = false) => cache.findAll({ queryKey: [FIGURES] }).forEach((query) => readOne(query, lost));
+    askLost.current = () => cache.findAll({ queryKey: [FIGURES], predicate: overStream }).forEach(askAgain);
     const unwatch = cache.subscribe((event) => {
       if (event.type === 'removed') owed.delete(event.query);
       if (event.type !== 'updated' || event.query.state.fetchStatus !== 'idle' || !owed.delete(event.query)) return;
@@ -66,16 +70,15 @@ export function useWalkReads(): void {
     };
   }, [addEventListener, queryClient]);
 
-  // Whether the stream has been up, and whether it went down since.
-  const up = useRef(isConnected);
-  const down = useRef(false);
+  // Whether the stream stood at its last change, and whether it has stood since the dashboard mounted.
+  const standing = useRef(isConnected);
+  const stood = useRef(isConnected);
   useEffect(() => {
-    if (!isConnected) {
-      down.current = up.current;
-      return;
-    }
-    if (down.current) readAll.current(true);
-    up.current = true;
-    down.current = false;
+    const cameUp = isConnected && !standing.current;
+    standing.current = isConnected;
+    if (!cameUp) return;
+    if (stood.current) readAll.current(true);
+    else askLost.current();
+    stood.current = true;
   }, [isConnected]);
 }

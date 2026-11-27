@@ -5,11 +5,12 @@
  * engine's bounds (F154.5) as its rows are, the engine's timeout set below any read's here.
  */
 
-import type { Page, Response } from '@playwright/test';
+import type { Page, Request, Response } from '@playwright/test';
+import type { SseTestEvent } from '@/lib/test/test-events';
 import { test, expect } from '../support/fixtures';
 import type { Collection } from '../support/collection';
 import { NONE_LEFT } from '../support/dashboard-bounds';
-import { expectConsoleError, makeUnique } from '../support/helpers';
+import { expectConsoleError, makeUnique, waitTestEvent } from '../support/helpers';
 import { dashboardAddress, type DashboardPage } from '../support/page-objects/dashboard-page';
 import type { People } from '../support/people';
 import { projectAddress, type Projects } from '../support/projects';
@@ -30,6 +31,8 @@ const declareRefusals = (page: Page) => expectConsoleError(page, /409/);
 
 /** The chip's projects named, their lookups answered before the engine refuses every read. */
 const labelled = (dashboard: DashboardPage) => expect(dashboard.chipWords(dashboard.chips)).toHaveText(/Recipes-.*Bikes-|Bikes-.*Recipes-/);
+
+const isCounts = (request: Request) => new URL(request.url()).pathname === '/api/dashboard/counts/quick-filters';
 
 /** The rows next answered. */
 const rowsAnswered = (page: Page) =>
@@ -111,6 +114,43 @@ test.describe('The dashboard’s banner', () => {
     expect(reads()).toHaveLength(3);
     await expect(dashboard.banner).toHaveCount(0);
     await expect(dashboard.allValues).toHaveText(['$2.29']);
+  });
+
+  test('shows the engine’s refusal of the quick filters’ counts read again on the walk’s event, read once, the counts drawn staying; Retry reads them again', async ({
+    page,
+    people,
+    projects,
+    collection,
+    shell,
+    dashboard,
+    dashboardBounds,
+    deploymentSse,
+  }) => {
+    const { first, chip } = await tally(people, projects, collection);
+    await shell.open(`${projectAddress(first)}${dashboardAddress(`t=all&by=call&m=cost.sum&${chip}`)}`);
+    await deploymentSse.ensureConnected();
+    const misses = dashboard.quickFilter('Cache misses').count;
+    await expect(misses).toHaveText('2');
+    await labelled(dashboard);
+    await declareRefusals(page);
+    await dashboardBounds.set({ timeout_seconds: NONE_LEFT });
+    const counts = dashboard.countsReads();
+    const failed = waitTestEvent<SseTestEvent>(page, 'sse', (event) => event.event === 'task_event' && (event.data as { event_type: string }).event_type === 'task_failed');
+
+    expect((await collection.walk()).announced).toBe(true);
+
+    await failed;
+    // The query client's default asks a failed read again a second after it failed.
+    await expect(page.waitForRequest(isCounts, { timeout: 3_000 })).rejects.toThrow();
+    expect(counts()).toHaveLength(1);
+    await expect(dashboard.bannerText).toContainText(TIMED_OUT);
+    await expect(misses).toHaveText('2');
+
+    await dashboardBounds.set({});
+    await dashboard.retry.click();
+    await expect.poll(() => counts()).toHaveLength(2);
+    await expect(dashboard.banner).toHaveCount(0);
+    await expect(misses).toHaveText('2');
   });
 
   test('shows the engine’s refusal of a new state’s rows, the answer drawn before staying until Retry draws the new', async ({
