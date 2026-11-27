@@ -47,12 +47,12 @@ a window's lag; **the runs**, by the By the stretches of consecutive rows of
 one value of a dimension and one thread with no such gap in them, each with
 its first and last moment, its rows, their cost and whether a gap opens it,
 a window's lag and a running count of where one opens; and **the events**, by
-the By in time order, each with its detail. The items read, by index of the thing they are about: **a part's
-items**, by each item its first and last moment and each figure taken
-together, the earliest first, with the count of all; **a fact's own rows as
-items**, each with the dimensions shown on it; and **a thread's calls and
-its events** over all time, each call saying whether the plan's window and
-scope hold it.
+the By in time order, each with its detail. The items read, by index of the
+thing they are about: **a part's items**, by each item its first and last
+moment and each figure taken together, the earliest first, with the count
+of all; **a fact's own rows as items**, each with the dimensions shown on
+it; and **a thread's calls and its events** over all time, each call saying
+whether the plan's window and scope hold it.
 
 The counts read, each one statement of one fact: **the attributes'
 counts**, each dimension's count of values, none counting as one, by a

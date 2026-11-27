@@ -234,9 +234,9 @@ class Session:
     """A conversation with Claude Code in one directory, its main thread and
     its sub-agents'. One Pilot ran has what Pilot holds of it, `ran`; one a
     person ran by hand has that `person`, is on no project of Pilot's
-    running, and may belong to a `group`. `unit` is the unit of work it ran. Its `repository` is the
-    checkout its `directory` lies under, and its `environment` the one that
-    hosted it, each none where it has none."""
+    running, and may belong to a `group`. `unit` is the unit of work it ran.
+    Its `repository` is the checkout its `directory` lies under, and its
+    `environment` the one that hosted it, each none where it has none."""
 
     name: str
     directory: str

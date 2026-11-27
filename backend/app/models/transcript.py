@@ -81,12 +81,13 @@ class Transcript(db.Model):  # type: ignore[name-defined]
     back with them, of all it read for them besides the file (DB decision
     81.3); a stamp is handed back with labels alone. `first_call_at` and
     `last_call_at` are the `completed_at` of its first and of its last Call
-    by `position`, none while it has no Call (DB §7.4). That a thread's main has no `agent_id` (DB 534), that its
-    spawning call lies under that main (DB 535), that an adopted
-    Transcript's Project is `adopted` and no Launch of it is run by a Session
-    (DB 539), and that `read_under_id` and `labelled_under_id` are versions
-    of the collector's and of the labeller's Component are the publication's
-    and the placement's to keep: no key reaches them.
+    by `position`, none while it has no Call (DB §7.4). That a thread's main
+    has no `agent_id` (DB 534), that its spawning call lies under that main
+    (DB 535), that an adopted Transcript's Project is `adopted` and no
+    Launch of it is run by a Session (DB 539), and that `read_under_id` and
+    `labelled_under_id` are versions of the collector's and of the
+    labeller's Component are the publication's and the placement's to keep:
+    no key reaches them.
     """
 
     __tablename__ = "transcripts"

@@ -124,10 +124,11 @@ class ScenarioService:
     ) -> list[Transcript]:
         """The scenario as `builder` built it, in the caller's transaction:
         what Pilot holds of each session it ran, then the stub's
-        vocabularies declared and each thread published, and its Transcripts in the publications' order, each session's main
-        thread, then its sub-agents'. Where the record holds the scenario,
-        it then holds it as this build has it: its times the build's, and
-        its Sessions of Pilot's on the projects given.
+        vocabularies declared and each thread published, and its Transcripts
+        in the publications' order, each session's main thread, then its
+        sub-agents'. Where the record holds the scenario, it then holds it
+        as this build has it: its times the build's, and its Sessions of
+        Pilot's on the projects given.
 
         `projects` gives, for each of the scenario's projects Pilot ran a
         session on, by the scenario's name of it, the Project that stands
