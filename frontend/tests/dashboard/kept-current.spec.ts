@@ -10,7 +10,8 @@
 import type { Page, Request } from '@playwright/test';
 import { test, expect } from '../support/fixtures';
 import { TALLY, type Collection } from '../support/collection';
-import { makeUnique } from '../support/helpers';
+import { NONE_LEFT } from '../support/dashboard-bounds';
+import { expectConsoleError, makeUnique } from '../support/helpers';
 import { waitForSseEvent } from '../support/helpers/test-events';
 import { slowNetwork } from '../support/network';
 import { dashboardAddress } from '../support/page-objects/dashboard-page';
@@ -148,6 +149,36 @@ test.describe('The dashboard kept current', () => {
     await device.foreground();
     await expect(dashboard.rows).toHaveCount(4);
     expect(reads()).toHaveLength(1);
+  });
+
+  test('reads a figure never answered, its read refused, not again as the page shows: it waits for its Retry', async ({
+    page,
+    people,
+    projects,
+    collection,
+    shell,
+    dashboard,
+    dashboardBounds,
+    device,
+  }) => {
+    const { first } = await fourProjects(people, projects, collection);
+    await expectConsoleError(page, /409/);
+    await dashboardBounds.set({ timeout_seconds: NONE_LEFT });
+    const reads = dashboard.rowsReads();
+    await shell.open(`${projectAddress(first)}${dashboardAddress('t=all&by=project&m=cost.sum')}`);
+    await expect(dashboard.bannerText).toContainText("its read ran past the engine's timeout");
+    expect(reads()).toHaveLength(1);
+
+    await device.hide();
+    await device.foreground();
+
+    await page.evaluate(() => undefined);
+    await expect(page.waitForRequest(isRows, { timeout: 2_000 })).rejects.toThrow();
+    expect(reads()).toHaveLength(1);
+    await dashboardBounds.set({});
+    await dashboard.retry.click();
+    await expect(dashboard.rows).not.toHaveCount(0);
+    expect(reads()).toHaveLength(2);
   });
 
   test('asks the rows of the state without its look-only parts, so that a change of look asks nothing', async ({ page, people, projects, collection, shell, dashboard }) => {

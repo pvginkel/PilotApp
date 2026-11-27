@@ -57,8 +57,10 @@ export function useWalkReads(): void {
       const { query } = event;
       queueMicrotask(() => readOne(query));
     });
+    // A query with no data is always stale: one whose read was refused is passed over, as readOne does.
+    const answeredOrUnrefused = (query: Query) => query.state.data !== undefined || query.state.status !== 'error';
     const shown = () => {
-      if (!hidden()) void queryClient.refetchQueries({ queryKey: [FIGURES], type: 'active', stale: true }, { cancelRefetch: false });
+      if (!hidden()) void queryClient.refetchQueries({ queryKey: [FIGURES], type: 'active', stale: true, predicate: answeredOrUnrefused }, { cancelRefetch: false });
     };
     document.addEventListener('visibilitychange', shown);
     const unsubscribe = addEventListener(EVENT, () => readAll.current());
