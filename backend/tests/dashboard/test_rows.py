@@ -963,3 +963,15 @@ class TestAWorkUnitKind:
         menu = _by_key(found)[units.menu.id]
         assert _round(menu.values)[0] == 1.85
         assert menu.values[1] is None
+
+    def test_a_chip_on_each_items_cost_keeps_no_unit(
+        self, service: RowsService, units: Labelled
+    ) -> None:
+        """A Work Unit row lies in no thread, so a chip on each item of a
+        Call's figure keeps none, as a filter on a Call's dimension keeps
+        none."""
+        found = _rows(service, "t=all&by=menu&m=cost.sum&m=units.count&c=@items,gt,0,cost")
+
+        menu = _by_key(found)[units.menu.id]
+        assert menu.values[0] is not None
+        assert menu.values[1] is None
