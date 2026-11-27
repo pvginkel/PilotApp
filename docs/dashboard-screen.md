@@ -211,8 +211,8 @@ The measures are the view's columns, with no chip (`measure-heads.tsx`, `use-mea
   grains, with filters of its own, picked in a dimension's pane among the dimensions that reach the
   side's fact, Is or Is not, with no mark and no quick filter; and its format, by default a share
   where the two figures have one format, else the numerator's (D284). A ratio made joins the view's
-  columns; a change reads again every figure of a state that names it; a name another person's
-  ratio has is said under the field. A remove asks in a dialog and takes the ratio out of every
+  columns; a change keeps the ratio's note, which the form does not show, and reads again every
+  figure of a state that names it; a name another person's ratio has is said under the field. A remove asks in a dialog and takes the ratio out of every
   open tab, as it is now and as it opened: its column, a threshold on it and a sort on it, a view
   left with no measure taking cost.
 

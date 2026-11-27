@@ -7,7 +7,8 @@
  * the person's pick, by default the one a ratio of the two sides is given where no one picks
  * (`ratioFormat`), until they pick one. Save keeps it for everyone, under its key: a new one, or one
  * of theirs changed, which every view that shows it shows changed; a name another person's ratio has
- * is said under the field, which stays open.
+ * is said under the field, which stays open. A change keeps the ratio's note, which the form does
+ * not show.
  */
 
 import { useState } from 'react';
@@ -98,7 +99,8 @@ export function RatioForm({ ratio, scope, onSaved, onBack }: RatioFormProps) {
   const submit = () => {
     if (typed === '' || save.isPending) return;
     save.mutate(
-      { ratio, body: { name: typed, numerator: measureKey(sides.numerator), denominator: measureKey(sides.denominator), format } },
+      // A change keeps the note the ratio carries, which the form does not show: a write without one sets none.
+      { ratio, body: { name: typed, numerator: measureKey(sides.numerator), denominator: measureKey(sides.denominator), format, ...(ratio === null ? {} : { note: ratio.note }) } },
       {
         onSuccess: (saved) => onSaved(saved.key),
         onError: (error) => setTaken(isNameTaken(error)),

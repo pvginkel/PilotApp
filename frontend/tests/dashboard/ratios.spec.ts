@@ -4,11 +4,12 @@
  * each side a figure with its aggregate, its items and filters of its own, and the format the
  * person picks, by default a share where the two figures have one format, else the numerator's. A
  * new one joins the view's columns, the entry in place; a change shows in every view that shows it,
- * Edit… in its heading's panel changing it too; a name another ratio has is said under the field. A
- * remove asks in a dialog, and the ratio leaves every open tab, now and as it opened. A ratio loaded
- * from the workflow's file stands there as a built-in one does, with no pencil, no × and no Edit….
- * A threshold on a custom ratio is on the By's rows. The figures are the tally's (`TALLY`), on two
- * projects of the spec's own: 16 Calls and 5 Pilot turns, 3 and 1 on Bikes, 13 and 4 on Recipes.
+ * keeping the note the form does not show, Edit… in its heading's panel changing it too; a name
+ * another ratio has is said under the field. A remove asks in a dialog, and the ratio leaves every
+ * open tab, now and as it opened. A ratio loaded from the workflow's file stands there as a built-in
+ * one does, with no pencil, no × and no Edit…. A threshold on a custom ratio is on the By's rows.
+ * The figures are the tally's (`TALLY`), on two projects of the spec's own: 16 Calls and 5 Pilot
+ * turns, 3 and 1 on Bikes, 13 and 4 on Recipes.
  */
 
 import type { Page, Request } from '@playwright/test';
@@ -149,7 +150,8 @@ test.describe('A custom ratio', () => {
     dashboard,
   }) => {
     const { recipeBox, chip } = await tally(people, projects, collection);
-    const spend = await customRatios.make({ name: makeUnique('Spend a call'), numerator: 'cost.sum', denominator: 'calls.count', format: 'usd' });
+    const note = 'What a billed call costs';
+    const spend = await customRatios.make({ name: makeUnique('Spend a call'), numerator: 'cost.sum', denominator: 'calls.count', format: 'usd', note });
     const other = await customRatios.make({ name: makeUnique('Spend a turn'), numerator: 'cost.sum', denominator: 'turns.count', format: 'usd' });
     await shell.open(`${projectAddress(recipeBox)}${dashboardAddress(`t=all&by=project&m=cost.sum&m=r:${spend.key}&m=r:per_call&${chip}&col=none`)}`);
     await expect(dashboard.measureHeadings).toHaveText(['Cost', spend.name, 'Cost per call']);
@@ -185,7 +187,8 @@ test.describe('A custom ratio', () => {
     const changed = page.waitForRequest(isWrite('PUT'));
     await dashboard.ratioSave.click();
 
-    expect((await changed).postDataJSON()).toEqual({ name: renamed, numerator: 'cost.sum', denominator: 'turns.count', format: 'usd' });
+    // The note, which the form does not show, kept.
+    expect((await changed).postDataJSON()).toEqual({ name: renamed, numerator: 'cost.sum', denominator: 'turns.count', format: 'usd', note });
     await expect(toast(page)).toContainText(`Changed the ratio "${renamed}" for everyone`);
     await expect(dashboard.ratioForm).toHaveCount(0);
     await expect(dashboard.addMeasureRow(renamed).pick).toBeVisible();
