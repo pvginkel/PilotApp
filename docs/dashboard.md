@@ -6,7 +6,8 @@ and not inside it, writing nothing. A view's whole state travels as the URL writ
 server alone gives it its meaning, down one path: read, checked against the catalogue in every
 part, written back in its normal form as the answer's `address`, planned, run under the engine's
 bounds, shaped. No copy of the calls is kept and nothing is fed, so a change in the record shows at
-the next read. The facts it reads are the transcripts' a collector publishes
+the next read. No copy is built in advance for what it may be good for. One is built only for a
+cause a timing shows, and only on the operator's explicit ruling (D299). The facts it reads are the transcripts' a collector publishes
 ([`collection.md`](collection.md)) with the caches each publication derives, the workflow's labels
 the publications carry and the vocabularies its labeller declares
 ([`collection.md`](collection.md#the-labels)), Pilot's own Sessions and Turns, the Prices and the
