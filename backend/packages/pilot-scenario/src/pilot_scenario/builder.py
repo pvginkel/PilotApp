@@ -60,7 +60,7 @@ from pilot_scenario.script import (
 )
 from pilot_scenario.transcript import MANAGED, HomeFile, Lines, Spawned, request, text
 
-COLLECTOR = "1.4.0"
+COLLECTOR = "1.5.0"
 """The version of the collector the publications say read the files."""
 
 _UNKEPT = ("batchable_condition",)

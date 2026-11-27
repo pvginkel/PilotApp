@@ -139,6 +139,17 @@ class TestAWalksWork:
 
         assert work == Work([], [listed])
 
+    def test_one_read_before_the_collector_read_commits_and_edits_is_behind(
+        self,
+    ) -> None:
+        """1.4.0 read no Tool Call's commits or file edits; with no labeller
+        to relabel it, only the version brings them to Pilot."""
+        listed = _listed()
+
+        work = plan([listed], _inventory(_held(collector="1.4.0")), NOW)
+
+        assert work == Work([], [listed])
+
     def test_one_published_appended_since_is_behind_once_its_file_has_settled(
         self,
     ) -> None:
