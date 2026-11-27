@@ -4,8 +4,8 @@ holds to the caller alone, each answering when it is done, every statement
 under the engine's timeout.
 
 - **By's counts**: each fact's attributes' counts as a progress update
-  as they are counted, its `data` the counts so far, then all of them as
-  its result.
+  as they are counted, its `data` that fact's counts alone, which the
+  reader merges, then all of them as its result.
 - **The quick filters' counts and amounts**: all of them as its result.
 
 Each runs on a session of its own thread, `BaseSessionTask`'s.
