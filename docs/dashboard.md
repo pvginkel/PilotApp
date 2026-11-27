@@ -10,7 +10,8 @@ the next read. The facts it reads are the transcripts' a collector publishes
 ([`collection.md`](collection.md)) with the caches each publication derives, Pilot's own Sessions
 and Turns, the Prices and the Quota Weeks ([`record.md`](record.md#the-tables)). What
 the dashboard stores, the saved views, quick filters, custom ratios and favourites, is
-[below](#what-the-dashboard-stores).
+[below](#what-the-dashboard-stores); the screen that reads it is
+[`dashboard-screen.md`](dashboard-screen.md).
 
 Every route is under `/api/dashboard` (`backend/app/api/dashboard.py`,
 `backend/app/api/dashboard_store.py`), for a signed-in editor ([`sign-in.md`](sign-in.md)):
@@ -50,7 +51,14 @@ the collector's facts.
   `qweek`, `day`, `weekday` and `hod`, the last three derived in `DASHBOARD_ZONE`; and the orders
   `session_start` and `turn_seq`. A two-valued dimension's values are `1` and `0`. A sitting is the
   threads on no project that follow one another within `DASHBOARD_SITTING_GAP_SECONDS`, keyed by
-  the first one's first Call.
+  the first one's first Call. Four parts read their names from what Pilot records (D287) and carry
+  the instant a value is at (`Dimension.at`): a Pilot session its work item's number and title,
+  "#2 Sort the spices", else its chat's kind, "Project chat", else its Session Kind's name, at its
+  start; a Pilot turn its number and its cause, underscores as spaces, "Turn 1 · brief", at its
+  start; a conversation its sub-agent's type and task, "Explore · Find where the jars are counted",
+  "Sub-agent" with neither, or "Main thread", at its first Call; a Call its place in its
+  conversation, "Call 12", at its end. Every reader of a dimension's name reads them: the rows, the
+  items, a series, a color's values and a filter's pane.
 - **The figures** (`measures.py`) are numbers of one fact's row: `cost`, `tokens`, `calls`,
   `misses`, `miss_cost`, `past_ttl`, `compactions`, `rewinds`, `ctx` (the context's tokens),
   `waited`, `took`, `turns`, `turn_time`, `failed_turns`, `reported_cost`, `events` and
@@ -74,7 +82,11 @@ so a state naming it drops it with a note.
 
 **`GET /api/dashboard/catalogue?part=`** answers one part: `dimensions`, each with its closed list
 of values where it has one and the markers; `measures`, the facts, figures, aggregates, grains and
-ratios; `time`, the ranges, the zone and the sitting's gap; or `stored`, the saved views with their
+ratios; `time`, the ranges, the zone, the sitting's gap and `quota_weeks`, every quota week the
+record holds, newest first, read from the record at each call: each its `starts_at`, the key a
+state names it by, its `ends_at`, exclusive, its label as facts, `year` and `week`, the ISO week of
+its Thursday, or `starts_on`, the date of a week cut short with no Thursday in it, and `running`,
+true on the first alone, the words being the page's; or `stored`, the saved views with their
 addresses and every quick filter and stored ratio row with whether the catalogue offers it. A part
 it does not have is a `400`.
 
@@ -153,7 +165,7 @@ times as instants with the engine's zone beside them, never text: the page write
 
 | Route | Answers |
 |---|---|
-| `GET /api/dashboard/rows` | each measure on every row of the By and on the All row, split by the color, in the view's sort (`rows.py`) |
+| `GET /api/dashboard/rows` | each measure on every row of the By and on the All row, split by the color, in the view's sort, a row of one of the four parts that carry an instant with its `at` (`rows.py`) |
 | `GET /api/dashboard/series` | a view in order or over time: its points along the axis, each measure as a panel with its dots, outliers, rolling band and median, and the markers (`series.py`) |
 | `GET /api/dashboard/series/events` | a series' events strip: each point's events by kind and how many are errors, apart from the series so that it never holds the chart up (`strip.py`) |
 | `GET /api/dashboard/lanes` | a lane per row of the By that holds Calls, with each measure, its waits and its events (`lanes.py`) |
@@ -176,7 +188,9 @@ times as instants with the engine's zone beside them, never text: the page write
   median of zero or less (`outliers.py`). Both are judged on every row before any is dropped, and
   the All row is answered again from the rows kept. They narrow the items, the lanes and the series
   to the rows they keep, and never By's counts or a filter's pane, which keep the scope before them
-  (D273). A row is marked where every mark on the view holds.
+  (D273). A chip on each item, `@items`, keeps the rows of the items of its measure's grain whose
+  figure over all their rows passes, or with `!` fails, its measure a plain one. A ratio's threshold is on the By's rows alone, an
+  item having no ratio of its own (D290). A row is marked where every mark on the view holds.
 - **The series** takes the By's order dimension in order, the grain over time, the By then playing
   no part. A sum or a count is a column per point, stacked by the color; a measure over the items of
   a part other than the points' is the items' dots, at most 4,000; any other one dot a point. The
@@ -243,7 +257,7 @@ time, never whole, so no count is refused for the task's length.
   dimension's count of values in the view's scope, none counting as one, under every chip, its own
   included, so that a drilled project reads one; an order dimension counts as its part. Each fact
   is counted in a read of its own, and its counts come as a `progress_update` whose `data` holds
-  every count so far, then every count as the task's result.
+  that fact's counts alone, then every count as the task's result.
 - **The quick filters' counts and amounts**, `POST /api/dashboard/counts/quick-filters`, asked with
   the view: each quick filter's count of what it keeps and its amount's figure summed over it, in
   the view's scope and under the quick filters that are on, so that one that is on narrows the
@@ -326,7 +340,11 @@ a note. The server holds no view tab and nothing of a By's look.
 - **The custom ratios** are two measures under a name. One a person makes is anyone's to change and
   remove, its key made from its name, `person_` and the name's words within 24 letters, `_2` on
   where taken, a space no built-in or loaded ratio's key is in; a name two ratios of people's
-  share is a `409`. A loaded ratio is nobody's to change or remove, `409`.
+  share is a `409`. Its format is the person's pick, made with it and changed by an edit (D284):
+  `usd`, `tokens`, `count`, `seconds` or `share`, so that Calls over Turns reads 3.2 and not 320%.
+  A loaded ratio is nobody's to change or remove, `409`, and has no format: it is written, as a
+  state's inline ratio is, as a share where its two figures have one format, else in its
+  numerator's.
 - **A person's favourites** are their stars, on a system view and a saved one alike, in the order
   starred, and their dimensions in By's list, any dimension, and in Color's, a part, an attribute
   or the token kind; one the catalogue no longer offers there is left out of the read. A favourite's
@@ -340,7 +358,7 @@ a note. The server holds no view tab and nothing of a By's look.
 | `GET /api/dashboard/favourites` | the caller's stars and favourite dimensions |
 | `POST /api/dashboard/favourites/dimensions` `{menu, dimension}`, `DELETE` with the two as its query | a favourite in By's list (`by`) or Color's (`color`) |
 | `POST /api/dashboard/quick-filters` `{label, chip, amount?, note?}`, `DELETE …/<id>` | make, remove a quick filter |
-| `POST /api/dashboard/custom-ratios` `{name, numerator, denominator, note?}`, `PUT`, `DELETE …/<id>` | make, change, remove a person's ratio |
+| `POST /api/dashboard/custom-ratios` `{name, numerator, denominator, format, note?}`, `PUT`, `DELETE …/<id>` | make, change, remove a person's ratio |
 | `PUT /api/dashboard/workflow` `{views, ratios}` | the workflow's load, the service user's alone ([below](#the-workflows-load)) |
 
 A state, a chip or a ratio's side with faults is the refusal's `400`, every fault of both sides of
@@ -384,8 +402,11 @@ of a given number of Calls in the scenario's invented words, through the app's o
 week, and runs each statement again under `EXPLAIN (ANALYZE, BUFFERS)`, writing
 `results/<calls>.json`; and `report.py` renders the report, `report.md`, from two results. The
 report gives each part's time at both sizes, the size at which it passes two seconds, the record's
-size on disk and the burst, and the engine's two defaults above are read off it. `tests/tools/`
-pins the tools.
+size on disk and the burst, and the engine's two defaults above are read off it. Its *One walk*
+prices what the walk's event makes one page with the dashboard open read again, the view in view's
+rows and its quick filters' counts ([`dashboard-screen.md`](dashboard-screen.md#kept-current)),
+summed from the parts at both sizes against the walk's 30 s, with an open filter's pane's values
+beside them (D288); no bar is set for it. `tests/tools/` pins the tools.
 
 ## Testing it
 
@@ -400,7 +421,16 @@ template. The load is pinned
 on an invented file of the workflow's, `tests/fixtures/workflow_views.json`. A test of a statement's
 plan reads it on a clone of the run's template, as the rows earlier tests rolled back on a worker's
 database weigh in the planner's estimates. The refusals' texts are pinned in
-`tests/dashboard/test_refusal.py` and the file of states.
+`tests/dashboard/test_refusal.py` and the file of states, and the tally's figures
+([`collection.md`](collection.md#testing-it)) in `tests/dashboard/test_tally.py`.
+
+**The bounds on a running backend.** `PUT /api/testing/dashboard-bounds` `{timeout_seconds?, hold?}`,
+in testing mode alone (`backend/app/api/testing_dashboard_bounds.py`), sets the engine's timeout
+for the reads that start from then on, the one the app booted with where it is left out, and,
+with `hold`, has By's counts wait after their first fact until the next `PUT` or their deadline, so that a spec sees
+the task between its first progress update and its end. The Playwright fixture `dashboardBounds`
+(`frontend/tests/support/dashboard-bounds.ts`) sets it and gives the backend its own back after the
+spec; `NONE_LEFT` has the engine refuse every read at its start, `QUERY_TIMEOUT`.
 
 **The fake collector** (`backend/app/services/fake_collector.py`, `FakeCollector`) serves the
 collector's readings route as the collector does, its bearer, its version's `426`, `404`

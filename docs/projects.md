@@ -289,7 +289,7 @@ focused and taking words.
   Space pauses a project that is not paused, the pause glyph showing under the pointer and the
   focus, and resumes one paused or pausing, the play glyph showing there, at once, with no dialog,
   and without opening the project. While the write is pending the icon shows the glyph it asked
-  for, and the write reads every query again, as the switch's does. The tab being a link, the icon
+  for, and the write reads the page's queries again, as the switch's does. The tab being a link, the icon
   is a `span role="button"`. On an archived project it is the status alone, since the record
   refuses its pause and its resume.
 - **Archived** switches the column to the archived projects (D012): their tabs, flat, in the API's
@@ -337,7 +337,7 @@ swapped in at once and reads it itself, under the query client's retries, and sh
 they give up.
 
 The list and the head are read again when the window regains focus, after each of the page's own
-writes, which invalidate every query, on the server's `project_changed` event but the one such a
+writes, which invalidate every query but the dashboard's figures, on the server's `project_changed` event but the one such a
 write committed, and whenever the event stream comes up ([`timeline.md`](timeline.md)).
 
 ## The head
@@ -375,7 +375,7 @@ inside the head, and nothing overlaps, down to 1200px beside a 420px side panel.
   switch. An archived project shows "Archived" after its name and the rest as it was left, the
   switch disabled.
 - **The auto pilot switch** flips at once with a transition by the person, `autopilot_off` or
-  `autopilot_on`, and stays pending until every query is read again (`useAutopilotFlip`). A refused
+  `autopilot_on`, and stays pending until the page's queries are read again (`useAutopilotFlip`). A refused
 flip reads the head again: where the project already stands as the flip asked, as after a second
 tap's flip or one from a page left stale, the flip is done and nothing is toasted; any other
 refusal toasts the server's words. Turned on while the head's
@@ -468,7 +468,7 @@ there is nothing, and it is never shown disabled. It is a box with a border, as 
 holds and centred: the button, "Create project", its tooltip "Hand the project to Pilot: it sets it
 up and starts the plan", and the muted line "The project is ready to be created." at the small size,
 the button left of the line, and above it at 900px and below, as on a phone. Pressed, it makes the
-`opened` transition (above) and stays pending until every query is read again, a press meanwhile
+`opened` transition (above) and stays pending until the page's queries are read again, a press meanwhile
 doing nothing. The head then reads the open project's, the route draws the timeline in the
 definition chat's place, and the address moves to the project's slug, its `draft-<number>` still
 opening it. A refusal the head cannot give, no controller or no store environment,
@@ -734,7 +734,8 @@ answers only in testing mode ([`sign-in.md`](sign-in.md)).
   wait by the project's session, deliver a card's change of state past the endpoint's token, run the
   waits' timer's tick, place a wait's run past its quiet window and close a wait as Pilot's `mark`
   does ([`waits.md`](waits.md)).
-- `POST /api/testing/scenarios` `{projects}` loads the invented scenario, its conversations
+- `POST /api/testing/scenarios` `{scenario, projects}` loads an invented scenario, `supper` or
+  `tally`, its conversations
   published through the collector's publication service, and answers `201` `{transcripts}`
   ([`collection.md`](collection.md#testing-it)).
 - `POST /api/testing/walks` ends a walk as a collector tells its end, through the same service,

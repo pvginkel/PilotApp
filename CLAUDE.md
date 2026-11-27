@@ -25,8 +25,8 @@ phase ticks it ([`docs/slice-doc-plan.md`](docs/slice-doc-plan.md) §6), and an 
 - **`backend/`** — the Flask API (Python, uv), on PostgreSQL; `pilot_mcp/`, Pilot's MCP server,
   the image's second entry point (`python -m pilot_mcp`); `packages/pilot-dsl/`, the block DSL,
   a package the backend takes by path and PilotProjects pins from git
-  ([`docs/block-dsl.md`](docs/block-dsl.md)); `packages/pilot-scenario/`, the invented scenario
-  and its builder, taken by path too ([`docs/collection.md`](docs/collection.md)); and
+  ([`docs/block-dsl.md`](docs/block-dsl.md)); `packages/pilot-scenario/`, the invented scenarios
+  and their builder, taken by path too ([`docs/collection.md`](docs/collection.md)); and
   `packages/pilot-collection/`, the publication's, the inventory's and the reading's shapes, which
   the collector takes by path as well.
 - **`collector/`** — the collector (Python, uv), app-owned, the image `pilot-collector`: it walks a
@@ -181,4 +181,5 @@ Issue tracking follows the host convention: this project is **`PilotApp`** on th
 - [`docs/usage.md`](docs/usage.md): the usage limits and each turn's tokens and cost.
 - [`docs/store-update.md`](docs/store-update.md): the store's update.
 - [`docs/dashboard.md`](docs/dashboard.md): the dashboard's query engine.
+- [`docs/dashboard-screen.md`](docs/dashboard-screen.md): the dashboard screen, its tabs, scope and view.
 - [`docs/waits.md`](docs/waits.md): the brain's card and timed waits.

@@ -8,7 +8,8 @@ store environment's repository in `pvginkel/PilotProjects`.
 **Status**: version 1 is in production; development continues.
 
 One append-only timeline per managed project shows its work, its decision documents and their asks,
-and a side chat talks to Pilot's brain, a headless Claude Code session in the store environment.
+and a side chat talks to Pilot's brain, a headless Claude Code session in the store environment;
+beside the projects, a dashboard reads what the fleet's Claude Code work cost from its transcripts.
 The app is a Flask backend with Pilot's MCP server beside it, a React + Vite frontend,
 `pilot-sync`, the store environment's sync sidecar, and the collector, which reads the fleet's
 Claude Code transcripts. It is built on the ModernAppTemplate stack (Flask on PostgreSQL,

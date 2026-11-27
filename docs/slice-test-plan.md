@@ -1013,7 +1013,12 @@ POD=$(cexec iac kubectl -n pilot-dev get pods -l app.kubernetes.io/name=pilot -o
    the API or the UI. A check may write; what it writes is invented, as on the dev stack. A check
    makes its record through the record's testing endpoints, which answer on dev to the signed-in
    test account ([`projects.md`](projects.md)): a project with its opening, its items of each kind,
-   an agent's save of one. One that needs a project as a person makes it starts a draft from the
+   an agent's save of one. A check of the dashboard on known figures loads the tally
+   ([`collection.md`](collection.md#testing-it)) on two testing projects of its own, the people its
+   Turns are by, `ada` and `ben`, put on the record first with `POST /api/testing/people` where dev
+   lacks one, and reads one view through `GET /api/dashboard/rows` and on the page opened after the
+   load at `#dash/<tab>/<state>`, the engine reading the record at the query; the tally's figures
+   are known on its own projects alone. One that needs a project as a person makes it starts a draft from the
    plus with its first message, `POST /api/projects` `{words}`, and drives it to Create project
    through the definition chat on the real brain. Through the API, curl sends the session and keeps the cookies a refresh replaces:
 

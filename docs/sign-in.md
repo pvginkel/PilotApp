@@ -149,7 +149,7 @@ API and the event stream alike: it passes only if its roles include `editor`. Th
 a read refused, does it through `people.withoutRole()`, which waits for the page's fetches under the
 old session to land, swaps the session, then waits for every fetch sent during the swap
 (`PageFetches`, `frontend/tests/support/network.ts`); a page that marks a chat seen is first left
-to make its mark (`chat.acted('read')`), whose answer refetches every query the page holds. `POST /api/testing/sse/force-callback-error?status=401` (or `403`) makes the
+to make its mark (`chat.acted('read')`), whose answer reads the page's queries again. `POST /api/testing/sse/force-callback-error?status=401` (or `403`) makes the
 next stream's connect callback refuse it, once, and `POST /api/testing/sse/outage` answers every
 stream's connect `503`, with `?silent=true` the open streams sending nothing either, until
 `DELETE /api/testing/sse/outage` (the `outage` fixture, [`ui.md`](ui.md)); the direct path's

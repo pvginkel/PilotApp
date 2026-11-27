@@ -40,8 +40,27 @@ handle step stands in place of the side column and the centre, under the top bar
 under the home's head; a screen under the shell reads the person with
 `usePerson()`, whose handle, name and avatar slot are never null.
 
+Off a phone the app has two screens, Projects, the frame and its routes, and the dashboard
+([`dashboard-screen.md`](dashboard-screen.md)), which the address's hash names, `#dash` and every
+address under `#dash/` (`src/lib/screens.ts`, `useScreens`). Under the offer and the top bar they
+share one cell of `.screen-stack`'s grid: the one out of sight is `.away`, laid out of the flow in
+the same box, its visibility off and `inert`, so that it keeps its place, its scroll and its
+answers. The dashboard is no route: `_shell.tsx` loads its module (`lazy`) and draws it the first
+time an address names it with the app open, and never takes it down. Each screen says under it
+whether it is in view (`ScreenInView`, `useScreenInView()`), and what stands outside both, the top
+bar and what the shell opens over everything, is in view always. Behind the dashboard the Projects
+screen shows nothing to what reads "this page shows a project": the page's beat names no project
+and closes none of its notifications ([`notifications.md`](notifications.md)), the keys pass over
+what is open in it (below), and the chat behind marks no reply seen and takes no key that would move it off its end; its
+events and reads go on. On a phone there is no dashboard: an address naming it has its hash taken off in
+place, on Back into such an entry too, and the module is never loaded.
+
 - **The top bar** (`components/shell/top-bar.tsx`), off a phone: at the narrow width the drawer's
-  toggle first (below); the logo and the name, the gold bar's badges after them, none at the handle step, and the person's avatar, which opens the profile
+  toggle first (below), gone while the dashboard shows; the logo and the name; the screens' tabs,
+  Projects and Dashboard (`screen-nav.tsx`), text alone and the one showing marked, Projects going
+  to the path at hand without its hash and Dashboard to it with the hash the dashboard was left on
+  in this page, `#dash` before, each press a new entry carrying none of the app's state; the gold
+  bar's badges after them; no tab and no badge at the handle step; and the person's avatar, which opens the profile
   menu (`profile-menu.tsx`). The menu holds the person's name, Theme (System, Light, Dark), Profile
   once the handle is chosen, and Sign out, which for a person deletes this browser's push
   subscription first ([`notifications.md`](notifications.md)); at its foot the short hash of the
@@ -341,7 +360,10 @@ In `src/components/shared/`:
 - `Markdown({text, className?, deltas?, documentLink?})`: GFM (react-markdown with remark-gfm)
   inside `.prose`, only a double `~` striking text out, a single one drawn as written
   (`singleTilde: false`, here, in `HeadingWords` and in `quotes.ts`'s parser alike), its text linked as the record's words are except in code and inside a link, every
-  link opening in a new tab. Given `documentLink`, as the Draft tab gives it
+  link opening in a new tab but a dashboard's, `#dash/<state>` as a reply writes one: off a phone a
+  link on the page it is read on, which opens the dashboard over the page in a view tab of its own
+  or the one showing that state, a press with a key held the browser's own; on a phone its words
+  alone. Given `documentLink`, as the Draft tab gives it
   ([`documents.md`](documents.md)), it draws every link through that component and links nothing
   else; given `materialLink`, as the project document, the handbook and the journal give it, it draws a link to a
   path in the project's `attachments/` through that component, and every other link as without it. A quote tag ([`chats.md`](chats.md) has its forms) is a chip (`QuoteChip`) that goes to what
@@ -446,7 +468,9 @@ icon on its text's capitals in a flex row; `.starts-work`; `.scroll-view`, `.scr
 top, are `console`; `overlay`, the session log's popover off a phone and a view on one, never a
 document's tab, which Esc does not close ([`documents.md`](documents.md)); `plan`; `menu`;
 `dialog`; and `keys`. Within a rank, the thing opened last is on top. An open thing registers with
-`useEscape(layer, open, close)`, stamped when `open` turns true. `?` opens
+`useEscape(layer, open, close)`, stamped when `open` turns true; one in the screen out of sight
+stays registered and is passed over until its screen shows, but for a dialog and the keys list,
+which stand over whichever screen shows. `?` opens
 the keys list, which names Ctrl+Enter, Esc and `?`. Neither key acts in a text field or with a
 modifier held; Esc in a console's own field closes the console, and Ctrl+Enter sends a text field
 that has one Send (`TextField`).
@@ -464,7 +488,8 @@ line's: its tab and its views are the history entry's ([`projects.md`](projects.
 is on the server. A component reads it with `useBrowserState()` and changes it with
 `rememberInBrowser(change)`, a panel's tab with `rememberPanel(projectId, panel)`, a width with
 `rememberPanelWidth(kind, width)` and a line with `rememberLine(projectId, line)`, each keeping what
-another tab of the browser keeps for the rest.
+another tab of the browser keeps for the rest. The dashboard's view tabs are `viewTabs`, `{tabs,
+seen}`, written by `rememberViewTabs` ([`dashboard-screen.md`](dashboard-screen.md#the-view-tabs)).
 
 The unsent text of every answer's field and of the chat's composer is a second entry,
 `pilot.unsent`, by field: `<item>/<block>/answer`, `/paste`, `/other`, `/no` and `/note`, a one-ask

@@ -122,7 +122,9 @@ wheel in the last two minutes (`keydown`, `pointerdown`, `pointermove`, `touchst
 in the capture phase; not `scroll`, which the app's own scrolling fires too): at once as the page
 goes active, every thirty seconds after, and at once when the project the route shows changes. The
 project it beats with is the route's, by the id its address resolves to, whichever of the
-project's addresses the route is at ([`projects.md`](projects.md)).
+project's addresses the route is at ([`projects.md`](projects.md)), while the Projects screen
+shows: behind the dashboard, whose address keeps the project's path, a page shows none and beats
+with none, so that nothing waiting there counts as seen ([`ui.md`](ui.md#the-shell)).
 Hidden, or two minutes without input, it sends its away by beacon, at once, or once a beat in
 flight is answered, so that it gets out as the page hides. A beat the network lost is a beat
 missed, and the next goes at its time.
@@ -162,7 +164,7 @@ another transaction holds.
 notifications of what it shows, through the service worker's `getNotifications({tag})`: a project's,
 under the project's id, as a page of the project comes to show it, its timeline, one of its
 documents or one of its tabs, every route under the project's address (D155), once the address is
-resolved to the project, and the alarms', under
+resolved to the project and while the Projects screen shows, never behind the dashboard, and the alarms', under
 `alarms`, wherever a page of Pilot loads; each again as the page comes back to the foreground. It
 does so for anyone, a person at the handle step included. Pilot's own address lands on the project
 last open ([`projects.md`](projects.md)), so the alarms' tap, whose `url` is the app, closes that

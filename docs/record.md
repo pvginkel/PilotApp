@@ -429,7 +429,10 @@ read whole
   or `person` (`ck_custom_ratios_origin`), its `system` and its name's uniqueness as a saved view's;
   `key`, unique, what a state names it by after `r:`, a word of lower-case letters, digits and
   underscores (`ck_custom_ratios_key`), beginning `person_` exactly when a person made it
-  (`ck_custom_ratios_key_space`).
+  (`ck_custom_ratios_key_space`); `format_code`, its Number Format, an enum, `usd`, `tokens`,
+  `count`, `seconds` or `share`, which a person's ratio has and a loaded one has not
+  (`ck_custom_ratios_format`). Revision 0056 gave each person's ratio made before it the format its
+  two measures gave it at each read until then.
 
 **The notifications** ([`notifications.md`](notifications.md))
 
@@ -565,5 +568,13 @@ is a record the engine could have produced, and its times are those of the run:
   started.
 
 Each project past the draft has its handbook and an empty journal.
+
+After it the seed's history (`load_history`, run by `load_test_data_hook` after `load_all`) gives
+the dashboard something to read: 63 days of the fleet's work up to the load, today's those
+conversations over by then, some fifteen Calls a weekday, fewer at the weekend, on three open
+projects of its own, `seed-swap`, `tide-table` and `kite-shop`, ada's with ben a member, of every
+kind of session Pilot runs. Each day is drawn by `pilot_scenario.history` from a fixed seed and its
+date, in invented words, and published as a collector would publish it
+([`collection.md`](collection.md#testing-it)).
 
 Tests find its rows by slug, handle and item title.

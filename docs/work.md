@@ -332,8 +332,9 @@ running step's kind as published, null where no step runs or it has none; `ran_s
 time so far in whole seconds, as its row of the figures counts it, which the alert's sentence says;
 and `step_figures` and `run_figures` the figures' rows ([below](#its-figures)). It is null wherever
 the badge shows nothing. `work_status` asks the estimate for the work items whose Session is
-`running` alone, and the estimate reads at most four statements, whatever the number of work items,
-steps and timings. The three settings are `backend/app/app_config.py`'s and reach every reader
+`running` alone, and the estimate reads one statement, whatever the number of work items, steps and
+timings, so that it reads one snapshot of the record: the runs, their lists, their conversations'
+listings and every kind's last timings a run can read. The three settings are `backend/app/app_config.py`'s and reach every reader
 through `StepEstimates`, a singleton of the service container: the 20 and the 60, both counted in
 steps, and `ESTIMATE_RUN_SLOW_FACTOR`, the run's slow over its normal, 1.6 by default and at least
 1, the 90th percentile of past runs' work over their list's price, set from the backtest each time

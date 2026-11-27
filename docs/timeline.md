@@ -238,8 +238,11 @@ from a process that does not hold the browser's stream. A read the event finds u
 predate it, is left to land, and its query is read again once it has: a read made over it would
 cancel it, and events closer together than a read takes would then let none land, nor end what
 awaits the query's read, as Create project's success does ([`projects.md`](projects.md)). A
-page's own write reads every query again once it is answered: its generated mutation hook names the
-page in the request's `X-Sender` header (`SENDER`, `frontend/src/lib/api/generated/hooks.ts`), and
+page's own write reads every query again once it is answered, but those whose `meta` holds
+`WRITES_PASS_OVER`: the dashboard's figures, which the walk's event keeps current, and its values'
+labels, kept once found ([`dashboard-screen.md`](dashboard-screen.md#kept-current)). The filter
+is `READ_AFTER_A_WRITE`, which Auto pilot's flip reads with too. Its generated mutation hook names
+the page in the request's `X-Sender` header (`SENDER`, `frontend/src/lib/api/generated/hooks.ts`), and
 the page skips the event that names it, so a click reads each query once. A caller's `onSuccess`
 runs beside that read, and the hook returns both, so that the write stays pending until the read
 ends; `UNTIL_READ` (`lib/api/until-read.ts`) is the options of a write whose button must take no

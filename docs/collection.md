@@ -320,9 +320,9 @@ is not in the store's tree ([`projection.md`](projection.md)).
 
 ## Testing it
 
-**The scenario.** `backend/packages/pilot-scenario/`, the package `pilot_scenario` beside the block
-DSL's, holds Pilot's one invented scenario and the builder that turns it into what a layer reads,
-and imports nothing but the standard library, so that every layer's suite can take it. The backend
+**The scenarios.** `backend/packages/pilot-scenario/`, the package `pilot_scenario` beside the block
+DSL's, holds Pilot's invented scenarios, the history drawn from a seed and the builder that turns
+each into what a layer reads, and imports nothing but the standard library, so that every layer's suite can take it. The backend
 depends on it by path, editable, the image installs it, and the backend's pytest runs its tests,
 as it does the DSL's ([`block-dsl.md`](block-dsl.md#the-package)). `SCENARIO`, named `supper`, is
 in the dev seed's world, the people `ada` and `ben` and the projects `recipe-box` and `bike-log`,
@@ -333,10 +333,27 @@ model and another answers, a hook and a permission rule each deny it a call, and
 runs out of tokens. `gears` is Ada's, run by hand on no project, with an instruction file loaded
 mid-run, a rewind, a miss past the cache's lifetime, an edit she turns down and two Stop hooks, one
 failing, and names the group `bike-log-first-rides`. The model names are the public ones and
-everything else is invented. `Builder(SCENARIO, until)` lays the scenario's times back from
-`until`: its `publications()` are each thread's whole call as a JSON object, a main thread before
-its sub-agents, and its `turns()` the Turns of Pilot's. A conversation's ids are drawn from the
-scenario's and the session's names, the same in every build.
+everything else is invented.
+
+`TALLY`, named `tally`, is all of it Pilot's work in the same world, so that the projects a load
+puts it on hold it whole, and gives each figure of the dashboard a case: a work item's run on
+`recipe-box` of two Turns, its brief with a sub-agent and a compaction, its continuation more than
+an hour later waiting past the cache's lifetime; between them a Turn each of Ada's and Ben's in the
+project's chat; and a job on `bike-log` whose first Call is the one costing more than a dollar. Its
+16 Calls and 5 Turns of Pilot's span the 4,040 s before its load, and their figures are pinned
+(`TALLY` in `frontend/tests/support/collection.ts`, `backend/tests/dashboard/test_tally.py`).
+
+**The history** (`pilot_scenario.history`) draws days of the fleet's work, each a scenario of the
+same script, from a seed and the day's date, so that a day is the same in every history of that
+seed that holds it: the dev seed's ([`record.md`](record.md#the-seed)) and the engine's timing
+([`dashboard.md`](dashboard.md#the-timing)) are two.
+
+Each session Pilot ran says what Pilot holds of it (`script.Ran`): its project, its Session Kind,
+its Turns, each with its start, its cause and its author, and its work item's or job's title or its
+chat's kind. `Builder(scenario, until)` lays the scenario's times back from `until`: its
+`publications()` are each thread's whole call as a JSON object, a main thread before its
+sub-agents, and its `runs()` the sessions of Pilot's. A conversation's ids are drawn from the
+scenario's name and the session's, the same in every build.
 
 **As files.** `files()` gives the scenario as files of a home, each a `HomeFile` with its path from
 the home's folder, its bytes and its time. They are each thread's transcript in Claude Code's line
@@ -358,20 +375,24 @@ error; a denied call's result in Claude Code's words; a Prompt's Stop hooks' sum
 hook's error; and a plugin's skill's body under the plugin's cache at its Launch's version.
 The files are generated when a suite runs and never committed.
 
-**Its load.** `POST /api/testing/scenarios` `{projects: {"recipe-box": <a project's id>}}`, one of
-the record's testing routes ([`projects.md`](projects.md#testing-it)), loads it, its last moment
-the transaction's `now()` (`ScenarioService.load`, `backend/app/services/scenario_service.py`): the
-Session of kind `work` and the Turn of Pilot's that ran `halving`, on the project given, ended at
-the Turn's end, with no work item, then each thread published whole through
-`PublicationService.publish`. It answers `201` `{transcripts}`, in the builder's order, `halving`,
-`counting`, `gears`, each `{session_id, agent_id, adopted_by}`, `adopted_by` the adopted project's
-`{id, name}` or null. A second load replaces the first: it finds the Session of that
-`conversation_id` again and publishes the same transcripts whole, so the record holds the scenario
-once, as it was loaded last, and the group's project is found by its key. Another set of projects
-than the scenario's that a Turn of Pilot's is on is a `400`, an unknown project a `404`, and a stage
-with no service user a `409` `NO_SERVICE_USER`, each writing nothing. A Playwright spec makes the
-service user with `people.serviceUser()` and loads it with `projects.loadScenario(id)`
-(`frontend/tests/support/`); a backend test takes the `service_user` fixture.
+**Its load.** `POST /api/testing/scenarios` `{scenario, projects}`, one of the record's testing
+routes ([`projects.md`](projects.md#testing-it)), loads `supper` or `tally` on the projects given
+for those the scenario's sessions of Pilot's are on, by the scenario's name of each
+(`{"recipe-box": <a project's id>}`), its last moment the transaction's `now()`
+(`ScenarioService.load`, `backend/app/services/scenario_service.py`): for each session Pilot ran,
+its Session on the project given, over, with its Turns, a run's Work and Item done at its end or a
+chat's Chat closed then, then each thread published whole through `PublicationService.publish`. It
+answers `201` `{transcripts}`, in the builder's order, each `{session_id, agent_id, adopted_by}`,
+`adopted_by` the adopted project's `{id, name}` or null. A load's conversations' ids are drawn from
+the scenario's name and the projects it is loaded on, so a second load on the same projects
+publishes the same transcripts whole and replaces the first, the record holding it once, as it was
+loaded last, and a load on other projects is a scenario of its own beside it; the group's project
+is found by its key. Another set of projects than the scenario's is a `400`, an unknown project or
+a Turn's author the record lacks (the tally's `ada` and `ben`) a `404`, and a stage with no service
+user a `409` `NO_SERVICE_USER`, each writing nothing. The fake collector serves each scenario
+loaded. A Playwright spec makes the service user with `people.serviceUser()` and loads a scenario
+with `collection.loadScenario(scenario, projects)`, then ends a walk with `collection.walk()`
+(`frontend/tests/support/collection.ts`); a backend test takes the `service_user` fixture.
 
 **A walk's end.** `POST /api/testing/walks`, with no body, for a signed-in editor on every stage but
 prd, as the record's testing routes are, ends a walk through the same service and answers `201`
@@ -383,7 +404,8 @@ holds the live stream before it loads and takes the event of either end.
 
 **The guards.** `test_the_scenario_has_no_word_of_the_workflow`
 (`backend/packages/pilot-scenario/tests/test_scenario.py`) fails on a word of the workflow,
-`slice`, `stage` or `phase`, in any string of the scenario. `backend/tests/test_no_transcript_file.py`
+`slice`, `stage` or `phase`, in any string of the scenario, and the histories' places and a day of
+each are held to the same words (`backend/tests/support/workflow_words.py`). `backend/tests/test_no_transcript_file.py`
 fails on a transcript's file in the tree, a `.jsonl` file or one holding a line that carries
 `sessionId` and `parentUuid`, read from the repository's root, the folders no commit holds aside:
 a transcript in a test is generated when the suite runs, and the six invented stream fixtures of
@@ -398,7 +420,8 @@ the placement in `tests/services/test_launch_placement.py`, the adoption in
 `tests/services/test_adoption_service.py`, the load in `tests/services/test_scenario_service.py`
 and the walks' testing route in `tests/api/test_testing_record.py`. The package `pilot-collection`'s
 `tests/test_package.py` pins that it stands without the app, and the builder is pinned in
-`pilot-scenario`'s `tests/test_builder.py` and its files in `tests/test_transcript.py`. A collector's
+`pilot-scenario`'s `tests/test_builder.py`, its files in `tests/test_transcript.py`, and the tally
+and the history in `tests/test_tally.py` and `tests/test_history.py`. A collector's
 walk against these routes is `tests/collector/test_walk.py` ([`collector.md`](collector.md#testing-it)).
 `tests/support/publications.py` makes a call (`whole()`, `sub_agent()`, `appended()`,
 `collector_headers()`), `tests/support/transcripts.py` the rows, and `writes()` in
