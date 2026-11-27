@@ -20,13 +20,13 @@
  * again as the tab is brought into view. Its scroll is kept with it in the browser (F160.10).
  */
 
-import { useLayoutEffect, useRef, useState, type RefObject } from 'react';
+import { useCallback, useLayoutEffect, useRef, useState, type RefObject } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { useDashboardView, type Failure } from '@/hooks/use-dashboard-view';
+import { ReadFailures, useDashboardView, type Failure } from '@/hooks/use-dashboard-view';
 import { ScreenInView } from '@/hooks/use-screens';
 import { keepScroll, scrollOf, useViewTabMoves, useViewTabs, useViewTabsAt, type ViewTab } from '@/hooks/use-view-tabs';
 import { useValueLabels } from '@/hooks/use-value-labels';
-import { Failures } from '@/hooks/use-view-writes';
+import { WriteFailures } from '@/hooks/use-view-writes';
 import { useWalkReads } from '@/hooks/use-walk-reads';
 import { addressQuery, catalogueQuery, knowLabel, rowsQuery, stateOf } from '@/lib/dashboard/queries';
 import { drilled, drills, valuesNamed } from '@/lib/dashboard/scope';
@@ -45,26 +45,41 @@ export function DashboardScreen({ shown }: { shown: boolean }) {
   useViewTabsAt(shown);
   const { tabs, at } = useViewTabs();
   const moves = useViewTabMoves();
-  // A write's failure, or a read's apart from the view's rows, until its banner is closed.
+  // A write's failure, until its banner is closed.
   const [failed, setFailed] = useState<Failure | null>(null);
   const wrote = { failure: failed, close: () => setFailed(null) };
+  // The reads of the tab at hand apart from its rows that stand failed, by their readers.
+  const [reads, setReads] = useState<ReadonlyMap<string, Failure>>(new Map());
+  const stand = useCallback(
+    (reader: string, failure: Failure | null) =>
+      setReads((was) => {
+        if (failure === null ? !was.has(reader) : was.get(reader) === failure) return was;
+        const next = new Map(was);
+        if (failure === null) next.delete(reader);
+        else next.set(reader, failure);
+        return next;
+      }),
+    [],
+  );
   return (
     <ScreenInView value={shown}>
       <section className={shown ? 'dash' : 'dash away'} inert={!shown} aria-label="Dashboard" data-testid="dashboard">
-        {/* eslint-disable-next-line no-restricted-properties -- a real timestamp: when the write or the read failed, set against a view's read's errorUpdatedAt */}
-        <Failures.Provider value={(error, retry) => setFailed({ error, at: Date.now(), retry })}>
-          {at !== null && (
-            <>
-              {tabs.length > 1 && <ViewTabLine tabs={tabs} at={at} moves={moves} />}
-              {at.now === null ? (
-                <ViewsPanel key={at.id} tab={at} moves={moves} wrote={wrote} />
-              ) : (
-                <View key={at.id} tab={at} now={at.now} one={tabs.length === 1} moves={moves} wrote={wrote} />
-              )}
-              {tabs.map((tab) => tab !== at && tab.now !== null && <KeptView key={tab.id} now={tab.now} />)}
-            </>
-          )}
-        </Failures.Provider>
+        {/* eslint-disable-next-line no-restricted-properties -- a real timestamp: when the write failed, set against a read's errorUpdatedAt */}
+        <WriteFailures.Provider value={(error) => setFailed({ error, at: Date.now() })}>
+          <ReadFailures.Provider value={stand}>
+            {at !== null && (
+              <>
+                {tabs.length > 1 && <ViewTabLine tabs={tabs} at={at} moves={moves} />}
+                {at.now === null ? (
+                  <ViewsPanel key={at.id} tab={at} moves={moves} wrote={wrote} />
+                ) : (
+                  <View key={at.id} tab={at} now={at.now} one={tabs.length === 1} moves={moves} wrote={wrote} reads={[...reads.values()]} />
+                )}
+                {tabs.map((tab) => tab !== at && tab.now !== null && <KeptView key={tab.id} now={tab.now} />)}
+              </>
+            )}
+          </ReadFailures.Provider>
+        </WriteFailures.Provider>
       </section>
     </ScreenInView>
   );
@@ -77,9 +92,11 @@ interface ViewProps {
   one: boolean;
   moves: ReturnType<typeof useViewTabMoves>;
   wrote: Wrote;
+  /** The reads of its scope that stand failed. */
+  reads: readonly Failure[];
 }
 
-function View({ tab, now, one, moves, wrote }: ViewProps) {
+function View({ tab, now, one, moves, wrote, reads }: ViewProps) {
   const queryClient = useQueryClient();
   const view = useDashboardView(now);
   const { rows, state } = view;
@@ -112,7 +129,7 @@ function View({ tab, now, one, moves, wrote }: ViewProps) {
         <SaveViewButton tab={tab} now={now} />
         {one && <NewViewButton moves={moves} />}
       </div>
-      <Banner failures={[view.failure, wrote.failure]} onClose={(failure) => failure === wrote.failure && wrote.close()} />
+      <Banner failures={[view.failure, ...reads, wrote.failure]} onClose={(failure) => failure === wrote.failure && wrote.close()} />
       <div ref={main} className="dash-main" data-testid="dashboard.main">
         {state !== null && <Scope state={state} scope={scope!} label={label} onState={place} />}
         <section className={view.changing ? 'dash-card changing' : 'dash-card'} aria-label="View" aria-busy={view.changing} data-testid="dashboard.card">

@@ -2,8 +2,9 @@
  * The words of dimensions' values in a view (F162.3, F162.4): a closed list's value is its name, the
  * value with none its dimension's label of none, and any other its label as the page was told it,
  * else as it is looked up among the values in its scope (`labelQuery`, `valuesNamed`); its key
- * until the label comes, and where the scope holds no such value. A lookup that fails shows in the
- * banner, with its Retry. Not `enabled`, the labels the page holds are kept and none is looked up.
+ * until the label comes, and where the scope holds no such value. A lookup that fails stands in the
+ * banner, with its Retry. Not `enabled`, the labels the page holds are kept, none is looked up and
+ * none of their failures shown.
  */
 
 import { useQueries, useQuery } from '@tanstack/react-query';
@@ -29,7 +30,7 @@ export function useValueLabels(asked: readonly Named[], enabled = true): LabelOf
   const wanted = [...looked.values()];
   const answers = useQueries({ queries: wanted.map(({ dimension, value, scope }) => ({ ...labelQuery(dimension, value, scope), enabled })) });
 
-  useFailureShown(answers.find((answer) => answer.isError));
+  useFailureShown(enabled ? answers.find((answer) => answer.isError) : undefined);
 
   const found = new Map(wanted.map(({ dimension, value }, index) => [keyOf(dimension, value), answers[index].data]));
   return (dimension, value) =>
