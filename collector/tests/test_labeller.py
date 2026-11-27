@@ -970,6 +970,20 @@ class TestWithLabels:
 
         assert labelled(self._fork(tmp_path), line, "1.4.2", {}).checkpoint is None
 
+    def test_a_line_with_a_boundary_and_no_calls_hands_back_none(
+        self, tmp_path: Path
+    ) -> None:
+        """A labels line may leave its Calls out, as `with_labels` reads it:
+        it then names no Segment of its boundary's Call, and hands back no
+        checkpoint rather than failing the walk."""
+        line = _line(transcript=[]) | {
+            "boundary": {"call": "msg_01", "byte": 0},
+            "checkpoint": "1:1.4.2:x",
+        }
+        del line["labels"]["calls"]
+
+        assert labelled(self._fork(tmp_path), line, "1.4.2", {}).checkpoint is None
+
     def test_an_appended_answers_segments_are_placed_by_the_checkpoints_shift(
         self, tmp_path: Path
     ) -> None:

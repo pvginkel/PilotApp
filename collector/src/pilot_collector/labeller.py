@@ -707,7 +707,7 @@ def _checkpoint(
     given = next(
         (
             row.get("segment")
-            for row in line["labels"]["calls"]
+            for row in line["labels"].get("calls", [])
             if row.get("id") == call
         ),
         None,
