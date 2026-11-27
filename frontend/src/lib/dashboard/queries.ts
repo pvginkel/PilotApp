@@ -178,9 +178,9 @@ export const byCountsKey = (scope: string) => [FIGURES, BY_COUNTS, scope] as con
 export const valueText = (key: Values['values'][number]['key']): string | null => (key === null ? null : String(key));
 
 /**
- * The label of `dimension`'s value `value`, looked up among its values in `scope`, a state; none
- * where the scope holds no such value, or the value is its own label. A label found is kept; a
- * value not found is looked up again where a view next shows it.
+ * The label of `dimension`'s value `value`, looked up among its values in `scope`, a state, the
+ * value itself where it has no label of its own; none where the scope holds no such value. A label
+ * found is kept; a value not found is looked up again where a view next shows it.
  */
 export function labelQuery(dimension: string, value: string, scope: string) {
   return queryOptions({
