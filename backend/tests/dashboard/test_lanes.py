@@ -420,14 +420,26 @@ class TestRuns:
         assert values[1].total == pytest.approx(0.85)
         assert [run.color for run in found.lanes[0].runs] == [0, 0, 1, 0, 1]
 
-    @pytest.mark.usefixtures("segmented")
-    def test_a_color_the_calls_do_not_carry_colors_by_the_segments_kind(
-        self, service: LanesService
+    def test_a_colors_values_carry_their_names_in_the_record(
+        self, service: LanesService, worked: Record
     ) -> None:
-        found = _lanes(service, "t=all&p=lanes&col=token_kind")
+        found = _lanes(service, "t=all&p=lanes&col=project")
+
+        assert found.run_color.key == "project"
+        assert [(value.key, value.label) for value in found.run_color.values] == [
+            (worked.project.id, "Recipe box"),
+            (None, "(No project)"),
+        ]
+
+    @pytest.mark.usefixtures("segmented")
+    @pytest.mark.parametrize("color", ["token_kind", "event_kind", "event_error"])
+    def test_a_color_the_calls_do_not_carry_colors_by_the_segments_kind(
+        self, service: LanesService, color: str
+    ) -> None:
+        found = _lanes(service, f"t=all&p=lanes&col={color}")
 
         assert found.color is not None
-        assert found.color.key == "token_kind"
+        assert found.color.key == color
         assert found.run_color.key == "segment_kind"
         assert [value.key for value in found.run_color.values] == ["prep", "cook", None]
 
