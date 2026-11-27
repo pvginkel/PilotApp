@@ -17,6 +17,7 @@ import { projectAddress, type Projects } from '../support/projects';
 
 /** The engine's refusal of a read past its timeout, as the backend words it. */
 const TIMED_OUT = "its read ran past the engine's timeout of 1e-09 s";
+const PANE_TIMED_OUT = "its read ran past the engine's timeout of 2e-09 s";
 
 /** The tally on two projects of the person's, and the chip that names them. */
 async function tally(people: People, projects: Projects, collection: Collection) {
@@ -204,13 +205,17 @@ test.describe('The dashboard’s banner', () => {
     expect((await collection.walk()).announced).toBe(true);
     await expect(dashboard.bannerText).toContainText(TIMED_OUT);
 
+    // The pane's values refused under a timeout of their own, so that its refusal reads apart from the rows'.
+    await dashboardBounds.set({ timeout_seconds: 2 * NONE_LEFT });
     await dashboard.addFilter.click();
     await dashboard.filterGroup('Parts').getByText('Pilot session', { exact: true }).click();
     await expect(dashboard.pane).toContainText('The values did not come.');
+    await expect(dashboard.bannerText).toContainText(PANE_TIMED_OUT);
     await dashboard.addFilter.click();
     await expect(dashboard.pane).toHaveCount(0);
 
     await expect(dashboard.bannerText).toContainText(TIMED_OUT);
+    await expect(dashboard.bannerText).not.toContainText(PANE_TIMED_OUT);
     await dashboardBounds.set({});
     const answered = rowsAnswered(page);
     await dashboard.retry.click();
