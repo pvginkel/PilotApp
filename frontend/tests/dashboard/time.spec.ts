@@ -188,6 +188,14 @@ test.describe('The view’s time', () => {
     await dashboard.to.fill(`${before.day} ${MONTHS[before.month - 1]}`);
     await expect(dashboard.from).toHaveAttribute('aria-invalid', 'false');
     await expect(dashboard.to).toHaveAttribute('aria-invalid', before.year === today.year ? 'true' : 'false');
+    // A range that ends before it starts: Apply refuses it, and so does Enter.
+    await dashboard.to.fill(`${before.day} ${MONTHS[before.month - 1]} ${before.year}`);
+    await expect(dashboard.to).toHaveAttribute('aria-invalid', 'true');
+    await expect(dashboard.apply).toBeDisabled();
+    await dashboard.to.press('Enter');
+    await page.evaluate(() => undefined);
+    expect(timeOf(page)).toBe(`c,${iso},`);
+    await expect(dashboard.apply).toBeVisible();
     await dashboard.from.fill('');
     await dashboard.to.fill('2 Jan 2001 17:45');
     await expect(dashboard.to).toHaveAttribute('aria-invalid', 'false');
