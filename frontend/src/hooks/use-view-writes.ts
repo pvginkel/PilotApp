@@ -3,7 +3,8 @@
  * dimension's in By's list or Color's, the person's own (F155.2), and a saved view's rename and
  * remove, for everyone; Save view, a tab's state saved under
  * a name, for everyone, the tab taking it (F161.5); a quick filter made and removed, for everyone,
- * the counts read again. What went well is a toast, and what failed the
+ * the counts read again; a custom ratio made, changed and removed, for everyone (F163.6). What went
+ * well is a toast, and what failed the
  * banner under the global toolbar alone (F160.8): each write's own failure replaces the query
  * client's toast every failed write has by default. A write reads again what it changed and no
  * more, never the figures, which the generated hooks' success would read again with every other
@@ -17,10 +18,28 @@ import { useViewTabMoves, viewRenamed } from '@/hooks/use-view-tabs';
 import { toApiError } from '@/lib/api/api-error';
 import { api } from '@/lib/api/client';
 import { SENDER } from '@/lib/api/generated/hooks';
-import { catalogueQuery, favouritesQuery, knowNormal, normalFormsChanged, quickFiltersChanged, stateOf, type Catalogue, type Favourites, type QuickFilter, type SavedView } from '@/lib/dashboard/queries';
+import { namesRatio, withoutRatio } from '@/lib/dashboard/measures';
+import {
+  catalogueQuery,
+  favouritesQuery,
+  knowNormal,
+  normalFormsChanged,
+  quickFiltersChanged,
+  ratioChanged,
+  stateOf,
+  type Catalogue,
+  type CustomRatio,
+  type Favourites,
+  type QuickFilter,
+  type SavedView,
+} from '@/lib/dashboard/queries';
+import { readState, StateFormError, writeState } from '@/lib/dashboard/state';
+import type { components } from '@/lib/api/generated/types';
 
 /** By's list or Color's, where a dimension is a favorite. */
 type Menu = keyof Pick<Favourites, 'by' | 'color'>;
+
+type RatioWrite = components['schemas']['CustomRatioWriteSchema.ddf95d6'];
 
 /** Shows what failed in the dashboard's banner. */
 export const WriteFailures = createContext<((error: Error) => void) | null>(null);
@@ -208,4 +227,75 @@ export function useQuickFilterWrites() {
   });
 
   return { add, remove };
+}
+
+/**
+ * `written`, a tab's state, without the ratio `key`. A state the page does not read, a link's text
+ * the server normalises, is left as it is: the server drops a ratio by a key that is gone as it
+ * reads it.
+ */
+function withoutRatioIn(written: string, key: string): string {
+  try {
+    const state = readState(written);
+    return namesRatio(state, key) ? writeState(withoutRatio(state, key)) : written;
+  } catch (error) {
+    if (error instanceof StateFormError) return written;
+    throw error;
+  }
+}
+
+/**
+ * The custom ratios' writes (F163.6), for everyone: one made or changed, its name, its two sides and
+ * the format the person picked; one of a person's removed. Each reads again the catalogue's
+ * measures, whose ratios it changes, and what is stored; a change reads again the figures of every
+ * state that names the ratio, which show it changed. A remove takes the ratio out of every open tab,
+ * now and as it opened, and asks again every normal form the page holds, the server's now dropping it.
+ * A name another person's ratio has is the form's to say, and no banner's.
+ */
+export function useRatioWrites() {
+  const queryClient = useQueryClient();
+  const fail = useContext(WriteFailures)!;
+  const { showSuccess } = useToast();
+  const moves = useViewTabMoves();
+  const stored = () =>
+    Promise.all([queryClient.invalidateQueries({ queryKey: catalogueQuery('measures').queryKey }), queryClient.invalidateQueries({ queryKey: catalogueQuery('stored').queryKey })]);
+
+  const save = useMutation({
+    mutationFn: async ({ ratio, body }: { ratio: CustomRatio | null; body: RatioWrite }) => {
+      const { data, error, response } =
+        ratio === null
+          ? await api.POST('/api/dashboard/custom-ratios', { body, headers })
+          : await api.PUT('/api/dashboard/custom-ratios/{ratio_id}', { params: { path: { ratio_id: ratio.id } }, body, headers });
+      if (error !== undefined) throw toApiError(error, response.status);
+      return data;
+    },
+    // The catalogue's measures read again before the form closes, so that the ratio is named as it is drawn.
+    onSuccess: async (saved, { ratio }) => {
+      await stored();
+      if (ratio !== null) void ratioChanged(queryClient, saved.key);
+      showSuccess(ratio === null ? `Added the ratio "${saved.name}" for everyone` : `Changed the ratio "${saved.name}" for everyone`);
+    },
+    onError: (error) => {
+      if (!isNameTaken(error)) fail(error);
+    },
+  });
+
+  const remove = useMutation({
+    mutationFn: async (ratio: CustomRatio) => {
+      const { error, response } = await api.DELETE('/api/dashboard/custom-ratios/{ratio_id}', { params: { path: { ratio_id: ratio.id } }, headers });
+      if (error !== undefined) throw toApiError(error, response.status);
+    },
+    onSuccess: (_, ratio) => {
+      moves.rewritten((written) => withoutRatioIn(written, ratio.key));
+      void stored();
+      void normalFormsChanged(queryClient);
+      showSuccess(`Removed the ratio "${ratio.name}" for everyone`);
+    },
+    onError: (error) => {
+      fail(error);
+      void stored();
+    },
+  });
+
+  return { save, remove };
 }

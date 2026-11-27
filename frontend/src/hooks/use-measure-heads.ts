@@ -3,7 +3,8 @@
  * `heads.js`): a press on a heading's name sorts by its column, largest first and then the other
  * way; its × removes its measure, the last one having none; its menu's sign opens its panel, which
  * a change in it leaves open, since the panel is held by the measure's place and not by the
- * answer; a change in place sets the measure there.
+ * answer; a change in place sets the measure there. A threshold made in the panel, by Filter…, joins
+ * the scope's chips, a new entry, the panel closed (F162.5).
  *
  * A heading is dragged to move its column: a press and a move of more than 4 px lift it, its name
  * following the pointer, and a line marks where it would drop, between two columns, where that
@@ -22,7 +23,7 @@ import { changed, measureNames, moved, removed } from '@/lib/dashboard/measures'
 import { stateOf } from '@/lib/dashboard/queries';
 import type { Rows } from '@/lib/dashboard/rows-layout';
 import { sortedBy } from '@/lib/dashboard/sorts';
-import { measureKey, readState, type ViewState } from '@/lib/dashboard/state';
+import { measureKey, readState, type Chip, type ViewState } from '@/lib/dashboard/state';
 
 type Measure = ViewState['measures'][number];
 
@@ -61,6 +62,8 @@ export interface Heads {
   remove: (j: number) => void;
   press: (j: number, event: ReactPointerEvent<HTMLElement>) => void;
   change: (j: number, measure: Measure) => void;
+  /** A threshold on a measure joins the scope, a new entry. */
+  filter: (chip: Chip) => void;
 }
 
 /** The answer drawn is of the state's measures, in their order. */
@@ -203,5 +206,9 @@ export function useMeasureHeads(state: ViewState | null, rows: Rows | undefined,
     },
     press,
     change: (j, measure) => place(changed(state, j, measure), true),
+    filter: (chip) => {
+      setOpen(null);
+      place({ ...state, chips: [...state.chips, chip], selected: null });
+    },
   };
 }

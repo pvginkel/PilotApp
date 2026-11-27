@@ -237,6 +237,20 @@ export function useViewTabMoves() {
       const hash = hashOf(href);
       if (screenOf(hash) === 'dashboard' && placeOf(hash).tab === id) router.history.replace(href, entryOf(tabOf(id)!));
     },
+    /**
+     * Every tab's state, now and as it opened, through `change`; where the tab at hand's changes and
+     * the address names it, its entry takes it in place.
+     */
+    rewritten: (change: (written: string) => string) => {
+      const at = kept.seen[0];
+      const was = at === undefined ? null : (tabOf(at)?.now ?? null);
+      const through = (written: string | null) => (written === null ? null : change(written));
+      write({ ...kept, tabs: kept.tabs.map((tab) => ({ ...tab, now: through(tab.now), opened: through(tab.opened) })) });
+      const tab = at === undefined ? null : tabOf(at);
+      if (tab === null || tab.now === was) return;
+      const hash = hashOf(router.history.location.href);
+      if (screenOf(hash) === 'dashboard' && placeOf(hash).tab === tab.id) go(tab, true);
+    },
     close: (id: string) => {
       if (kept.seen[0] !== id) {
         write({ tabs: kept.tabs.filter((tab) => tab.id !== id), seen: kept.seen.filter((each) => each !== id) });

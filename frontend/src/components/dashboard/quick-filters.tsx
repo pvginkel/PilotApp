@@ -7,7 +7,9 @@
  * no chip shown; a second press turns it off; each a new entry (F160.4). One that is on narrows the
  * others' counts. One that counts nothing and is off is muted and takes no press. On hover its × lies
  * over its right end, which removes it for everyone, after the dialog's question. The quick filters
- * are everyone's: read again each time the line shows, as the new tab's panel reads its lists.
+ * are everyone's: read again each time the line shows, as the new tab's panel reads its lists. A
+ * pane's foot names one it makes (`QuickFilterName`), a dimension's pane's or an each-item
+ * threshold's.
  */
 
 import { useState } from 'react';
@@ -21,7 +23,7 @@ import { useQuickFilterWrites } from '@/hooks/use-view-writes';
 import { figure, whole } from '@/lib/dashboard/figures';
 import { catalogueQuery, quickFilterCountsQuery, type QuickFilter } from '@/lib/dashboard/queries';
 import { chipDoes, chipText, chipWords, type LabelOf } from '@/lib/dashboard/scope';
-import { chipOf, type ViewState } from '@/lib/dashboard/state';
+import { chipKey, chipOf, type Chip, type ViewState } from '@/lib/dashboard/state';
 import { cn } from '@/lib/utils';
 
 interface QuickFiltersProps {
@@ -107,6 +109,53 @@ export function QuickFilters({ state, scope, label, onState }: QuickFiltersProps
           testId="dashboard.quick-filter.remove-dialog"
         />
       )}
+    </div>
+  );
+}
+
+/** The longest name a quick filter takes (`backend/app/schemas/dashboard_store.py`, `NAME`). */
+const NAME_LENGTH = 60;
+
+interface QuickFilterNameProps {
+  name: string;
+  /** Whether the pane has a chip to keep. */
+  ready: boolean;
+  chip: () => Chip;
+  onName: (name: string) => void;
+  /** Esc: the foot again, the pane staying open. */
+  onBack: () => void;
+  onSaved: () => void;
+}
+
+/** A pane's foot asking the quick filter's name, filled with its chip's words: Enter or Save makes it, of the chip as the pane has it then. */
+export function QuickFilterName({ name, ready, chip, onName, onBack, onSaved }: QuickFilterNameProps) {
+  const { add } = useQuickFilterWrites();
+  const typed = name.trim();
+  const save = () => {
+    if (typed === '' || !ready || add.isPending) return;
+    add.mutate({ label: typed, chip: chipKey(chip()) }, { onSuccess: onSaved });
+  };
+  return (
+    <div className="row foot">
+      <input
+        type="text"
+        className="field grow"
+        value={name}
+        maxLength={NAME_LENGTH}
+        placeholder="The quick filter’s name"
+        aria-label="The quick filter’s name"
+        autoFocus
+        onFocus={(event) => event.currentTarget.select()}
+        onChange={(event) => onName(event.target.value)}
+        onKeyDown={(event) => {
+          if (event.key === 'Enter') save();
+          else if (event.key === 'Escape') onBack();
+        }}
+        data-testid="dashboard.pane.quick-filter.name"
+      />
+      <button type="button" className="btn btn-primary btn-sm" disabled={typed === '' || !ready || add.isPending} onClick={save} data-testid="dashboard.pane.quick-filter.save">
+        Save
+      </button>
     </div>
   );
 }

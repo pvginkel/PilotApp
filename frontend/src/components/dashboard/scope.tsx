@@ -9,14 +9,17 @@
  * last segment is where the view is, and no button.
  *
  * A chip: its kind's sign, a funnel where it filters and a diamond where it marks, which a press
- * flips; its words, which open a dimension's chip's pane, its values cut before "n more" and every
- * value in its tooltip, of a negated chip only "is not" marked out; its ×. At most 300 px wide.
+ * flips; its words, which open its pane, a dimension's or a threshold's (`threshold-pane.tsx`), its
+ * values cut before "n more" and every value in its tooltip, of a negated chip only "is not" marked
+ * out; its ×. At most 300 px wide; the outliers' words open nothing.
  * The picker lists the parts and the attributes, no time: the time is the global toolbar's. A
  * dimension's pane lists its values in the view's scope without its own chips, each with its cost
  * and its rows, searched by the server; the values picked, Is or Is not, a filter or a mark. Each
  * change is a new entry (F160.4). Under the line the quick filters' (`quick-filters.tsx`, F162.6); a
  * pane's foot keeps the chip as the pane has it as a quick filter under a name, for everyone, no chip
- * joining the scope.
+ * joining the scope. A measure's own filter (`FilterPicker` with `forMeasure`, a custom ratio's side)
+ * is picked in the same pane, Is or Is not, with no mark and no quick filter, its dimensions those
+ * that reach the measure's fact.
  */
 
 import { Fragment, useEffect, useRef, useState, type ReactNode } from 'react';
@@ -25,21 +28,18 @@ import { Diamond, Filter, Plus, X } from 'lucide-react';
 import { Popover } from '@/components/shared/popover';
 import { useFailureShown } from '@/hooks/use-dashboard-view';
 import { useViewWords } from '@/hooks/use-view-words';
-import { useQuickFilterWrites } from '@/hooks/use-view-writes';
 import { dimensionLabel } from '@/lib/dashboard/describe';
 import { figure, whole } from '@/lib/dashboard/figures';
 import { catalogueQuery, knowLabel, valuesQuery, valueText } from '@/lib/dashboard/queries';
 import { chipDoes, chipText, chipWords, pathWords, upTo, type LabelOf } from '@/lib/dashboard/scope';
-import { chipKey, type Chip, type ViewState } from '@/lib/dashboard/state';
+import type { Chip, ViewState } from '@/lib/dashboard/state';
 import { cn } from '@/lib/utils';
 import { useDebouncedValue } from '@/lib/utils/debounce';
-import { QuickFilters } from './quick-filters';
+import { QuickFilterName, QuickFilters } from './quick-filters';
 import { Segmented } from './segmented';
+import { ThresholdPane } from './threshold-pane';
 
 type Pin = Extract<Chip, { kind: 'pin' }>;
-
-/** The longest name a quick filter takes (`backend/app/schemas/dashboard_store.py`, `NAME`). */
-const NAME_LENGTH = 60;
 
 /** What the filter picker lists, in its groups. */
 const GROUPS = [
@@ -142,7 +142,7 @@ interface ChipProps {
   scope: string;
   label: LabelOf;
   onFlip: () => void;
-  onApply: (chip: Pin) => void;
+  onApply: (chip: Chip) => void;
   onRemove: () => void;
 }
 
@@ -181,26 +181,24 @@ function ChipView({ chip, scope, label, onFlip, onApply, onRemove }: ChipProps) 
       </button>
     </span>
   );
-  if (chip.kind !== 'pin') return body(null);
+  if (chip.kind === 'outliers') return body(null);
   return (
     <Popover label={chipText(words)} anchorClassName="dash-chip-anchor" className="dash-pane-pop" testId="dashboard.chip.pane" trigger={body} onOpened={keepInside}>
-      {(close) => (
-        <ValuePane
-          dimension={chip.dimension}
-          chip={chip}
-          scope={scope}
-          label={label}
-          onDone={(next) => {
-            close();
-            onApply(next);
-          }}
-          onClose={close}
-          onRemove={() => {
-            close();
-            onRemove();
-          }}
-        />
-      )}
+      {(close) => {
+        const done = (next: Chip) => {
+          close();
+          onApply(next);
+        };
+        const removed = () => {
+          close();
+          onRemove();
+        };
+        return chip.kind === 'pin' ? (
+          <ValuePane dimension={chip.dimension} chip={chip} scope={scope} label={label} onDone={done} onClose={close} onRemove={removed} />
+        ) : (
+          <ThresholdPane measure={chip.measure} chip={chip} onDone={done} onClose={close} onRemove={removed} />
+        );
+      }}
     </Popover>
   );
 }
@@ -235,11 +233,20 @@ function AddFilter({ scope, label, onAdd }: { scope: string; label: LabelOf; onA
   );
 }
 
+interface PickerProps {
+  scope: string;
+  label: LabelOf;
+  onAdd: (chip: Pin) => void;
+  onClose: () => void;
+  /** A measure's own filter, on a figure of this fact: the dimensions that reach it, Is or Is not alone. */
+  forMeasure?: string;
+}
+
 /** The parts and the attributes, a press on one opening its pane in the picker's place. */
-function FilterPicker({ scope, label, onAdd, onClose }: { scope: string; label: LabelOf; onAdd: (chip: Pin) => void; onClose: () => void }) {
+export function FilterPicker({ scope, label, onAdd, onClose, forMeasure }: PickerProps) {
   const dimensions = useQuery(catalogueQuery('dimensions')).data?.dimensions;
   const [picked, setPicked] = useState<string | null>(null);
-  if (picked !== null) return <ValuePane dimension={picked} chip={null} scope={scope} label={label} onDone={onAdd} onClose={onClose} />;
+  if (picked !== null) return <ValuePane dimension={picked} chip={null} scope={scope} label={label} onDone={onAdd} onClose={onClose} forMeasure={forMeasure !== undefined} />;
   if (dimensions == null) return <p className="empty dash-pane-wait">Loading the dimensions…</p>;
   return (
     <div className="dash-picker" data-testid="dashboard.filter.picker">
@@ -247,7 +254,7 @@ function FilterPicker({ scope, label, onAdd, onClose }: { scope: string; label: 
         <div key={group} role="group" aria-label={heading}>
           <div className="menu-head">{heading}</div>
           {dimensions
-            .filter((dimension) => dimension.group === group)
+            .filter((dimension) => dimension.group === group && (forMeasure === undefined || dimension.facts.includes(forMeasure)))
             .map((dimension) => (
               <button key={dimension.key} type="button" className="menu-item" title={dimension.line} onClick={() => setPicked(dimension.key)} data-testid="dashboard.filter.dimension">
                 {dimension.label}
@@ -270,10 +277,12 @@ interface PaneProps {
   onClose: () => void;
   /** A chip that is edited is removed. */
   onRemove?: () => void;
+  /** A measure's own filter: no mark, no quick filter. */
+  forMeasure?: boolean;
 }
 
 /** A dimension's values in the view's scope, those picked checked; Is or Is not; a filter or a mark. */
-function ValuePane({ dimension, chip, scope, label, onDone, onClose, onRemove }: PaneProps) {
+function ValuePane({ dimension, chip, scope, label, onDone, onClose, onRemove, forMeasure = false }: PaneProps) {
   const queryClient = useQueryClient();
   const words = useViewWords();
   const about = useQuery(catalogueQuery('dimensions')).data?.dimensions?.find((each) => each.key === dimension);
@@ -364,49 +373,53 @@ function ValuePane({ dimension, chip, scope, label, onDone, onClose, onRemove }:
             { value: true, label: 'Is not', testId: 'dashboard.pane.is-not' },
           ]}
         />
-        <Segmented
-          label="Filter or mark"
-          value={marked}
-          onChange={setMarked}
-          options={[
-            {
-              value: false,
-              label: (
-                <>
-                  <Filter className="icon" aria-hidden="true" />
-                  Filter
-                </>
-              ),
-              testId: 'dashboard.pane.filter',
-            },
-            {
-              value: true,
-              label: (
-                <>
-                  <Diamond className="icon" aria-hidden="true" />
-                  Mark
-                </>
-              ),
-              testId: 'dashboard.pane.mark',
-            },
-          ]}
-        />
+        {!forMeasure && (
+          <Segmented
+            label="Filter or mark"
+            value={marked}
+            onChange={setMarked}
+            options={[
+              {
+                value: false,
+                label: (
+                  <>
+                    <Filter className="icon" aria-hidden="true" />
+                    Filter
+                  </>
+                ),
+                testId: 'dashboard.pane.filter',
+              },
+              {
+                value: true,
+                label: (
+                  <>
+                    <Diamond className="icon" aria-hidden="true" />
+                    Mark
+                  </>
+                ),
+                testId: 'dashboard.pane.mark',
+              },
+            ]}
+          />
+        )}
       </div>
       {naming === null ? (
         <div className="row foot">
           <button type="button" className="btn btn-primary btn-sm" disabled={picked.length === 0} onClick={done} data-testid="dashboard.pane.apply">
             {chip === null ? 'Add' : 'Apply'}
           </button>
-          <button
-            type="button"
-            className="btn btn-sm"
-            disabled={picked.length === 0}
-            onClick={() => setNaming(chipText(chipWords(built(), named, words)))}
-            title="Keep it as a quick filter, for everyone: a press on it turns it on, with no chip added"
-            data-testid="dashboard.pane.quick-filter"
-          >
-            Add as quick filter
-          </button>
+          {!forMeasure && (
+            <button
+              type="button"
+              className="btn btn-sm"
+              disabled={picked.length === 0}
+              onClick={() => setNaming(chipText(chipWords(built(), named, words)))}
+              title="Keep it as a quick filter, for everyone: a press on it turns it on, with no chip added"
+              data-testid="dashboard.pane.quick-filter"
+            >
+              Add as quick filter
+            </button>
+          )}
           {onRemove !== undefined && (
             <>
               <span className="grow" />
@@ -419,50 +432,6 @@ function ValuePane({ dimension, chip, scope, label, onDone, onClose, onRemove }:
       ) : (
         <QuickFilterName name={naming} ready={picked.length > 0} chip={built} onName={setNaming} onBack={() => setNaming(null)} onSaved={onClose} />
       )}
-    </div>
-  );
-}
-
-interface QuickFilterNameProps {
-  name: string;
-  /** Whether the pane has a chip to keep. */
-  ready: boolean;
-  chip: () => Pin;
-  onName: (name: string) => void;
-  /** Esc: the foot again, the pane staying open. */
-  onBack: () => void;
-  onSaved: () => void;
-}
-
-/** A pane's foot asking the quick filter's name, filled with its chip's words: Enter or Save makes it, of the chip as the pane has it then. */
-function QuickFilterName({ name, ready, chip, onName, onBack, onSaved }: QuickFilterNameProps) {
-  const { add } = useQuickFilterWrites();
-  const typed = name.trim();
-  const save = () => {
-    if (typed === '' || !ready || add.isPending) return;
-    add.mutate({ label: typed, chip: chipKey(chip()) }, { onSuccess: onSaved });
-  };
-  return (
-    <div className="row foot">
-      <input
-        type="text"
-        className="field grow"
-        value={name}
-        maxLength={NAME_LENGTH}
-        placeholder="The quick filter’s name"
-        aria-label="The quick filter’s name"
-        autoFocus
-        onFocus={(event) => event.currentTarget.select()}
-        onChange={(event) => onName(event.target.value)}
-        onKeyDown={(event) => {
-          if (event.key === 'Enter') save();
-          else if (event.key === 'Escape') onBack();
-        }}
-        data-testid="dashboard.pane.quick-filter.name"
-      />
-      <button type="button" className="btn btn-primary btn-sm" disabled={typed === '' || !ready || add.isPending} onClick={save} data-testid="dashboard.pane.quick-filter.save">
-        Save
-      </button>
     </div>
   );
 }

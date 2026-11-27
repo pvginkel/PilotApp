@@ -152,7 +152,7 @@ interface ChipWords {
 }
 
 /** The noun of one item of a measure's grain, its fact's own where it names none. */
-function eachOf(measure: Extract<Chip, { kind: 'items' }>['measure'], words: Words): string {
+export function eachOf(measure: Extract<Chip, { kind: 'items' }>['measure'], words: Words): string {
   const part = words.measures;
   const grain = measure.grain ?? part?.facts?.find((fact) => fact.key === part.figures?.find((figure) => figure.key === measure.figure)?.fact)?.grain;
   return part?.grains?.find((each) => each.key === grain)?.one ?? grain ?? measure.figure;

@@ -10,6 +10,12 @@
  * (`backend/app/dashboard/catalogue.py`, `aggregates_of`), over its fact's own rows or the items of
  * a part that fact offers (`backend/app/dashboard/reading.py`, `grain`), its fact's own written as
  * none.
+ *
+ * A custom ratio (F163.6) is a numerator over a denominator, each a figure's measure with a filter of
+ * its own, written in the format the person picks: by default the one the engine gives a ratio no one
+ * picked a format for, a share where its two figures have one format, else its numerator's
+ * (`backend/app/dashboard/assembly.py`, `ratio_format`). A ratio removed leaves every state that
+ * names it, as a measure, a threshold or a sort, as the server drops one by a key that is gone.
  */
 
 import { measureWords, type Words } from './describe';
@@ -18,9 +24,13 @@ import type { Rows } from './rows-layout';
 import { measureKey, readState, type ViewState } from './state';
 
 type Measure = ViewState['measures'][number];
-type Simple = Extract<Measure, { kind: 'simple' }>;
+export type Simple = Extract<Measure, { kind: 'simple' }>;
+type Format = NonNullable<Catalogue['ratios']>[number]['format'];
 
 const COUNT = 'count';
+
+/** The heading of + Measure's group of ratios. */
+export const RATIOS = 'Ratios';
 
 interface Entry {
   measure: Measure;
@@ -45,7 +55,7 @@ export function measureMenu(measures: Catalogue | undefined): MenuGroup[] {
         .filter((figure) => figure.fact === fact.key)
         .map((figure): Entry => ({ measure: { kind: 'simple', figure: figure.key, aggregate: figure.aggregate, grain: null, filters: [] }, label: figure.label, line: figure.line })),
     })),
-    { heading: 'Ratios', entries: (measures?.ratios ?? []).map((ratio): Entry => ({ measure: { kind: 'ratio', key: ratio.key }, label: ratio.label, line: ratio.line })) },
+    { heading: RATIOS, entries: (measures?.ratios ?? []).map((ratio): Entry => ({ measure: { kind: 'ratio', key: ratio.key }, label: ratio.label, line: ratio.line })) },
   ].filter((group) => group.entries.length > 0);
 }
 
@@ -111,4 +121,35 @@ export function measureNames(rows: Rows, words: Words): string[] {
   if (words.measures === undefined) return rows.measures.map((measure) => measure.label);
   const { measures } = readState(stateOf(rows.address));
   return rows.measures.map((answered, index) => (measures[index] === undefined ? answered.label : measureWords(measures[index], words)));
+}
+
+/** The formats a person picks a ratio's from, in the order offered (`CustomRatioWriteSchema`'s `format`). */
+export const FORMATS: readonly Format[] = ['usd', 'tokens', 'count', 'seconds', 'share'];
+
+/** The format of a ratio of `numerator` over `denominator` where no one picked one: a share where their figures have one format, else the numerator's. */
+export function ratioFormat(measures: Catalogue | undefined, numerator: Simple, denominator: Simple): Format {
+  const formatOf = (side: Simple) => measures?.figures?.find((figure) => figure.key === side.figure)?.format;
+  const above = formatOf(numerator);
+  return above === undefined || above === formatOf(denominator) ? 'share' : above;
+}
+
+/** A side of a ratio, as a state writes it after `m=`. */
+export const sideOf = (written: string): Simple => readState(`m=${written}`).measures[0] as Simple;
+
+const isRatio = (measure: Measure, key: string) => measure.kind === 'ratio' && measure.key === key;
+
+/** Whether `state` names the ratio `key`: as a measure, or as a threshold's on the By's rows. */
+export function namesRatio(state: ViewState, key: string): boolean {
+  return state.measures.some((measure) => isRatio(measure, key)) || state.chips.some((chip) => chip.kind === 'rows' && isRatio(chip.measure, key));
+}
+
+/** The view without the ratio `key`: its column, its thresholds and a sort on it gone; with no measure left, the one a state with none takes. */
+export function withoutRatio(state: ViewState, key: string): ViewState {
+  const measures = state.measures.filter((measure) => !isRatio(measure, key));
+  return {
+    ...state,
+    measures: measures.length > 0 ? measures : readState('').measures,
+    chips: state.chips.filter((chip) => !(chip.kind === 'rows' && isRatio(chip.measure, key))),
+    sort: state.sort?.column === measureKey({ kind: 'ratio', key }) ? null : state.sort,
+  };
 }

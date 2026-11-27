@@ -18,7 +18,11 @@ export const dashboardAddress = (state: string, tab = 't1') => `#dash/${tab}/${s
  * and CSV (F163.1 to F163.3, F163.7), each list's search, its groups and its entries, each its pick,
  * its count and its star, By's "n hidden"; + Measure and its groups of measures (F163.4); a
  * measure's heading, its name, its arrow, its menu's sign and its ×, its panel with the aggregate
- * and the grain, a heading dragged and the line of its drop; what the By refuses (F163.5); the
+ * and the grain, Filter… and Edit…, a heading dragged and the line of its drop; a threshold's pane,
+ * its way back, what it is on, its operator and number, Is or Is not, Filter or Mark, Add or Apply,
+ * Add as quick filter and Remove (F162.5); + Measure's ratios, a person's pencil and ×, New ratio…,
+ * the dialog the × asks, and the ratio's form, its name, its sides, each its figure, aggregate,
+ * items and filters, its format and Save (F163.6); what the By refuses (F163.5); the
  * legend, the headings' row, the All row and a row per
  * value of the By, each its label, its time where it has one, and a figure per measure; the medians,
  * and the cut past 40 rows; the table, its headings, its All row and its rows, each its label, its
@@ -111,6 +115,28 @@ export class DashboardPage {
   readonly measurePane: Locator;
   readonly measurePaneName: Locator;
   readonly measurePaneClose: Locator;
+  readonly measurePaneFilter: Locator;
+  readonly measurePaneEdit: Locator;
+  readonly threshold: Locator;
+  readonly thresholdBack: Locator;
+  readonly thresholdName: Locator;
+  readonly thresholdRows: Locator;
+  readonly thresholdItems: Locator;
+  readonly thresholdRowsAlone: Locator;
+  readonly thresholdNumber: Locator;
+  readonly thresholdIsNot: Locator;
+  readonly thresholdMark: Locator;
+  readonly thresholdApply: Locator;
+  readonly thresholdQuickFilter: Locator;
+  readonly thresholdRemove: Locator;
+  readonly newRatio: Locator;
+  readonly ratioRemoveDialog: Locator;
+  readonly ratioForm: Locator;
+  readonly ratioName: Locator;
+  readonly ratioTaken: Locator;
+  readonly ratioFormat: Locator;
+  readonly ratioSave: Locator;
+  readonly ratioBack: Locator;
   readonly addMeasure: Locator;
   readonly addMeasureGroups: Locator;
   readonly dragGhost: Locator;
@@ -212,6 +238,28 @@ export class DashboardPage {
     this.measurePane = page.getByTestId('dashboard.measure-pane');
     this.measurePaneName = page.getByTestId('dashboard.measure-pane.name');
     this.measurePaneClose = page.getByTestId('dashboard.measure-pane.close');
+    this.measurePaneFilter = page.getByTestId('dashboard.measure-pane.filter');
+    this.measurePaneEdit = page.getByTestId('dashboard.measure-pane.edit');
+    this.threshold = page.getByTestId('dashboard.threshold');
+    this.thresholdBack = page.getByTestId('dashboard.threshold.back');
+    this.thresholdName = page.getByTestId('dashboard.threshold.name');
+    this.thresholdRows = page.getByTestId('dashboard.threshold.rows');
+    this.thresholdItems = page.getByTestId('dashboard.threshold.items');
+    this.thresholdRowsAlone = page.getByTestId('dashboard.threshold.rows-alone');
+    this.thresholdNumber = page.getByTestId('dashboard.threshold.number');
+    this.thresholdIsNot = page.getByTestId('dashboard.threshold.is-not');
+    this.thresholdMark = page.getByTestId('dashboard.threshold.mark');
+    this.thresholdApply = page.getByTestId('dashboard.threshold.apply');
+    this.thresholdQuickFilter = page.getByTestId('dashboard.threshold.quick-filter');
+    this.thresholdRemove = page.getByTestId('dashboard.threshold.remove');
+    this.newRatio = page.getByTestId('dashboard.add-measure.new-ratio');
+    this.ratioRemoveDialog = page.getByTestId('dashboard.ratio.remove-dialog');
+    this.ratioForm = page.getByTestId('dashboard.ratio-form');
+    this.ratioName = page.getByTestId('dashboard.ratio-form.name');
+    this.ratioTaken = page.getByTestId('dashboard.ratio-form.taken');
+    this.ratioFormat = page.getByTestId('dashboard.ratio-form.format');
+    this.ratioSave = page.getByTestId('dashboard.ratio-form.save');
+    this.ratioBack = page.getByTestId('dashboard.ratio-form.back');
     this.addMeasure = page.getByTestId('dashboard.add-measure');
     this.addMeasureGroups = page.getByTestId('dashboard.add-measure.group');
     this.dragGhost = page.getByTestId('dashboard.drag-ghost');
@@ -257,6 +305,35 @@ export class DashboardPage {
   /** + Measure's entry labelled `label`, which adds it. */
   addMeasureEntry(label: string): Locator {
     return this.page.getByTestId('dashboard.add-measure.list').getByRole('button', { name: label, exact: true });
+  }
+
+  /** + Measure's row of the measure labelled `label`: its pick, and a person's ratio's pencil and ×. */
+  addMeasureRow(label: string): { row: Locator; pick: Locator; edit: Locator; remove: Locator } {
+    const row = this.page.getByTestId('dashboard.add-measure.entry').filter({ has: this.page.getByTestId('dashboard.add-measure.entry.pick').getByText(label, { exact: true }) });
+    return {
+      row,
+      pick: row.getByTestId('dashboard.add-measure.entry.pick'),
+      edit: row.getByTestId('dashboard.add-measure.entry.edit'),
+      remove: row.getByTestId('dashboard.add-measure.entry.remove'),
+    };
+  }
+
+  /** The threshold pane's operator, by its key. */
+  thresholdOperator(operator: 'gt' | 'ge' | 'lt' | 'le'): Locator {
+    return this.page.getByTestId(`dashboard.threshold.op.${operator}`);
+  }
+
+  /** A side of the ratio's form: its figure, its aggregate, its items, its filters, each's ×, and its + Filter. */
+  ratioSide(side: 'numerator' | 'denominator'): { figure: Locator; aggregate: Locator; grain: Locator; filters: Locator; removeFilter: Locator; addFilter: Locator } {
+    const at = `dashboard.ratio-form.${side}`;
+    return {
+      figure: this.page.getByTestId(`${at}.figure`),
+      aggregate: this.page.getByTestId(`${at}.aggregate`),
+      grain: this.page.getByTestId(`${at}.grain`),
+      filters: this.page.getByTestId(`${at}.filter`),
+      removeFilter: this.page.getByTestId(`${at}.filter.remove`),
+      addFilter: this.page.getByTestId(`${at}.add-filter`),
+    };
   }
 
   /** A chip's words, which open its pane where it has one. */

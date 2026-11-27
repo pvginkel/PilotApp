@@ -9,12 +9,14 @@
  * place. A By's sort kept within a tab: a sort picked remembered for the By, a move landing on a
  * By taking the one remembered for it, the first being the state the tab opened with; one on a
  * measure hidden forgotten, the opened one's among them; a measure changed in place taking the
- * sorts on it along. No browser, no backend.
+ * sorts on it along. A custom ratio's format where no one picked one: a share where its two
+ * figures have one format, else its numerator's; a ratio removed leaving a state that names it.
+ * No browser, no backend.
  */
 
 import { expect, test } from '@playwright/test';
 import { measureWords, type Words } from '@/lib/dashboard/describe';
-import { added, aggregatesOf, changed, grainsOf, measureMenu, moved, overGrain, removed } from '@/lib/dashboard/measures';
+import { added, aggregatesOf, changed, grainsOf, measureMenu, moved, namesRatio, overGrain, ratioFormat, removed, sideOf, withoutRatio } from '@/lib/dashboard/measures';
 import type { Catalogue } from '@/lib/dashboard/queries';
 import { drilled, upTo } from '@/lib/dashboard/scope';
 import { settle, sortedBy, type Sorts } from '@/lib/dashboard/sorts';
@@ -195,5 +197,28 @@ test.describe('A heading’s press', () => {
     expect(sortedBy({ direction: 'desc', column: 'cost.sum' }, 'calls.count')).toEqual({ direction: 'desc', column: 'calls.count' });
     expect(sortedBy({ direction: 'desc', column: 'calls.count' }, 'calls.count')).toEqual({ direction: 'asc', column: 'calls.count' });
     expect(sortedBy({ direction: 'asc', column: 'calls.count' }, 'calls.count')).toEqual({ direction: 'desc', column: 'calls.count' });
+  });
+});
+
+test.describe('A custom ratio', () => {
+  const formatted = { ...MEASURES, figures: MEASURES.figures!.map((each) => ({ ...each, format: each.key === 'calls' || each.key === 'turns' ? ('count' as const) : ('usd' as const) })) } as Catalogue;
+
+  test('is written where no one picked a format as a share where its two figures have one format, else in its numerator’s', () => {
+    expect(ratioFormat(formatted, sideOf('calls.count'), sideOf('turns.count'))).toBe('share');
+    expect(ratioFormat(formatted, sideOf('cost.sum'), sideOf('turn_time.sum'))).toBe('share');
+    expect(ratioFormat(formatted, sideOf('cost.sum'), sideOf('calls.count'))).toBe('usd');
+    expect(ratioFormat(formatted, sideOf('calls.count'), sideOf('cost.median.conversation(source=chat)'))).toBe('count');
+  });
+
+  test('removed, leaves a state that names it: its column, its threshold on the By’s rows and a sort on it, the view with no measure left taking the one a state with none takes', () => {
+    const state = readState('t=all&by=project&m=cost.sum&m=r:person_spend&c=@rows,gt,1,r:person_spend&c=~@rows,gt,2,r:per_call&o=desc,r%3Aperson_spend');
+    expect(namesRatio(state, 'person_spend')).toBe(true);
+    expect(namesRatio(state, 'person')).toBe(false);
+    expect(writeState(withoutRatio(state, 'person_spend'))).toBe('t=all&by=project&m=cost.sum&c=~@rows,gt,2,r:per_call&col=none');
+
+    const alone = readState('m=r:person_spend&c=@items,gt,1,cost.sum&o=desc,label');
+    expect(writeState(withoutRatio(alone, 'person_spend'))).toBe('t=qw&by=project&m=cost.sum&c=@items,gt,1,cost.sum&col=none&o=desc,label');
+    expect(namesRatio(readState('c=@rows,lt,2,r:person_spend'), 'person_spend')).toBe(true);
+    expect(namesRatio(readState('m=r:person_spend:cost.sum/calls.count'), 'person_spend')).toBe(false);
   });
 });

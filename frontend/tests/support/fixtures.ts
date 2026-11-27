@@ -20,7 +20,8 @@
  * `storeUpdate` makes the store's update and asks its lift, lifting one a spec left standing, and
  * `waits` adds the brain's waits, fires them, places their runs and closes them. `dashboard` is the
  * dashboard, the screen beside Projects, `dashboardBounds` sets its engine's timeout and
- * `savedViews` saves and removes its views through the API.
+ * `savedViews` saves and removes its views through the API, `customRatios` makes its ratios and
+ * loads the workflow's.
  * `conditions`, the worker's, reads what the gold bar reads, and `warmFrontend` has the worker's dev
  * server serve the app once before the worker's first test. `poolGuard` fails a test where a thread of
  * the worker's backend checked out a second connection of its pool while it held one, and
@@ -34,6 +35,7 @@ import { BrowserPush } from './browser-push';
 import { Chats } from './chats';
 import { Collection } from './collection';
 import { Conversations } from './conversations';
+import { CustomRatios } from './custom-ratios';
 import { Outage } from './connection';
 import { Conditions, Controller } from './controller';
 import { DashboardBounds } from './dashboard-bounds';
@@ -94,6 +96,7 @@ interface DomainFixtures {
   dashboard: DashboardPage;
   dashboardBounds: DashboardBounds;
   savedViews: SavedViews;
+  customRatios: CustomRatios;
   poolGuard: void;
   statementCap: void;
 }
@@ -238,6 +241,11 @@ export const test = infrastructureFixtures.extend<DomainFixtures, DomainWorkerFi
   },
   savedViews: async ({ page, backendUrl }, use) => {
     await use(new SavedViews(page, backendUrl));
+  },
+  customRatios: async ({ page, backendUrl, playwright }, use) => {
+    const customRatios = new CustomRatios(page, backendUrl, playwright);
+    await use(customRatios);
+    await customRatios.dispose();
   },
   // The nestings the backend's pool guard kept (backend/app/utils/pool_guard.py), taken once the
   // test and the fixtures it used are done: the test's, its fixtures', or those of a thread a test

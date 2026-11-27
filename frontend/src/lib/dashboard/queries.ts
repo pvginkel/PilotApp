@@ -37,6 +37,7 @@ export type Catalogue = components['schemas']['CatalogueResponseSchema.b67cf98']
 export type Favourites = components['schemas']['FavouritesSchema.ddf95d6'];
 export type SavedView = components['schemas']['CatalogueResponseSchema.b67cf98.SavedViewSchema'];
 export type QuickFilter = components['schemas']['CatalogueResponseSchema.b67cf98.QuickFilterSchema'];
+export type CustomRatio = components['schemas']['CatalogueResponseSchema.b67cf98.CustomRatioSchema'];
 type CataloguePart = Catalogue['part'];
 
 /** The first part of the key of every query of the record's figures. */
@@ -142,6 +143,16 @@ export function quickFilterCountsQuery(key: string, listen: Listen) {
     retry: false,
     meta: { [OVER_STREAM]: true },
   });
+}
+
+/**
+ * The figures of every state that names the ratio `key`, as a measure or a threshold's, asked again
+ * where they are read: the ratio changed under them.
+ */
+export function ratioChanged(queryClient: QueryClient, key: string): Promise<void> {
+  // A stored ratio's key is lowercase letters, digits and underscores (`backend/app/schemas/dashboard_store.py`, `LOADED_KEY`; `DashboardStoreService._key`).
+  const named = new RegExp(`(^|[=,])r:${key}(?=$|&)`);
+  return queryClient.invalidateQueries({ queryKey: [FIGURES], predicate: (query) => query.queryKey.some((part) => typeof part === 'string' && named.test(part)) });
 }
 
 /** The quick filters' counts asked again in every scope, a quick filter made or removed. */
