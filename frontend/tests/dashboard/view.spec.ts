@@ -151,6 +151,18 @@ test.describe('A view', () => {
     await expect(dashboard.rows.first().getByTestId('dashboard.row.whole')).toHaveCount(0);
   });
 
+  test('opened at a state whose chip value holds an escaped & and %, reads the value whole, as the address writes it', async ({ people, projects, collection, shell, dashboard }) => {
+    const { recipeBox, chip } = await tally(people, projects, collection);
+    const state = `t=all&by=project&m=cost.sum&${chip}&c=effort:x%26y%25z`;
+    const reads = dashboard.addressReads();
+
+    await shell.open(`${projectAddress(recipeBox)}${dashboardAddress(state)}`);
+
+    await expect(dashboard.chipWords(dashboard.chips.last())).toHaveText('Effort: x&y%z');
+    await expect(dashboard.banner).toHaveCount(0);
+    expect(reads()).toContain(state);
+  });
+
   test('of an empty scope keeps its headings and says there is nothing', async ({ people, projects, shell, dashboard }) => {
     const me = await people.signIn();
     const quiet = await projects.make({ name: makeUnique('Quiet'), members: [me.handle!] });
