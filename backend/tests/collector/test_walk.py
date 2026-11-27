@@ -40,7 +40,7 @@ from pilot_collector.settings import Settings
 from pilot_collector.walk import Walker
 from pilot_scenario import SCENARIO, Builder, Scenario, labeller, script
 from pilot_scenario.transcript import stamp
-from sqlalchemy import func, select, update
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.orm import Session as DbSession
 from sqlalchemy.orm import aliased
 from werkzeug.serving import make_server
@@ -1752,6 +1752,34 @@ class TestTheLabels:
             message.startswith(f"The main thread {RIDES} is published with no group: ")
             for message in caplog.messages
         )
+
+    def test_a_stage_with_no_service_user_takes_a_groups_facts_and_walks_on(
+        self,
+        committed_app: Flask,
+        walker: Walker,
+        monkeypatch: pytest.MonkeyPatch,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """No service user makes the project of the group the rides' main
+        thread first names (DB 338): Pilot answers 409 `NO_SERVICE_USER`,
+        which refuses its labels; its facts are published, and the walk goes
+        on to the other transcripts and its end."""
+        with _record(committed_app) as record:
+            record.execute(delete(User).where(User.kind_code == UserKind.SERVICE))
+            record.commit()
+        sent = _sent(walker, monkeypatch)
+
+        with caplog.at_level(logging.WARNING, LOGGER):
+            walked = walker.walk()
+
+        assert (walked.published, walked.labelled, walked.ended) == (3, 2, True)
+        assert set(_held(committed_app)) == SCENARIOS
+        rides = [each for each in sent if _named(each) == RIDES]
+        assert [each.labelling is None for each in rides] == [False, False, True]
+        (refused,) = _refused_labels(caplog)
+        assert refused.startswith(f"Pilot refused the labels of the transcript {RIDES}, ")
+        assert "409: " in refused
+        assert "the stage has no service user to make it" in refused
 
 
 def _files_asked(
