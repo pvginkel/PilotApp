@@ -161,8 +161,10 @@ test.describe('A custom ratio', () => {
     await expect(builtIn.edit).toHaveCount(0);
     await expect(builtIn.remove).toHaveCount(0);
     const mine = dashboard.addMeasureRow(spend.name);
+    // Shown under the pointer alone: toBeVisible holds at opacity 0.
+    for (const act of [mine.edit, mine.remove]) await expect(act).toHaveCSS('opacity', '0');
     await mine.row.hover();
-    await expect(mine.remove).toBeVisible();
+    for (const act of [mine.edit, mine.remove]) await expect(act).toHaveCSS('opacity', '1');
     await mine.edit.click();
 
     await expect(dashboard.ratioName).toHaveValue(spend.name);
@@ -270,8 +272,8 @@ test.describe('A custom ratio', () => {
     await expect(workflows.edit).toHaveCount(0);
     await expect(workflows.remove).toHaveCount(0);
     const persons = dashboard.addMeasureRow(mine.name);
+    for (const act of [persons.edit, persons.remove]) await expect(act).toHaveCSS('opacity', '0');
     await persons.row.hover();
-    await expect(persons.edit).toBeVisible();
-    await expect(persons.remove).toBeVisible();
+    for (const act of [persons.edit, persons.remove]) await expect(act).toHaveCSS('opacity', '1');
   });
 });
