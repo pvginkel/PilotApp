@@ -9,7 +9,7 @@ from dataclasses import replace
 from datetime import date, timedelta
 
 from pilot_scenario import labeller
-from pilot_scenario.history import WEEKEND, billed
+from pilot_scenario.history import WEEKEND, billed, models
 from pilot_scenario.script import Call, Session, Unit
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session as DbSession
@@ -213,15 +213,19 @@ class TestTheUnits:
             } == {configured(role, TUESDAY)}
 
     def test_a_roles_configuration_changes_between_its_stretches(self) -> None:
+        """Whether a role runs on the day's largest model or its middle one
+        is drawn again for each stretch: a new generation of the models
+        changes the model without a draw, so the draw is what is compared."""
         for role, _ in ROLES:
-            models = [
-                configured(role, TUESDAY - timedelta(days=CONFIGURED_DAYS * n))
-                for n in range(12)
-            ]
+            days = [TUESDAY - timedelta(days=CONFIGURED_DAYS * n) for n in range(12)]
+            drawn = [configured(role, day) for day in days]
 
-            assert len(set(models)) > 1
+            largest = {
+                model == models(day)[0] for model, day in zip(drawn, days, strict=True)
+            }
+            assert len(largest) > 1
             assert all(
-                configured(role, TUESDAY - timedelta(days=n)) in models
+                configured(role, TUESDAY - timedelta(days=n)) in drawn
                 for n in range(CONFIGURED_DAYS)
             )
 
