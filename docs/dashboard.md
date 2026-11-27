@@ -448,26 +448,29 @@ a view's band as its state writes it; a part of a view's state a read drops is a
 
 `backend/tools/timing/` times every part of the engine on a generated history, at production's
 database settings: `instance.py` makes a PostgreSQL of its own in the prd cluster's `development`
-namespace and removes it after (`instance.yaml`, run in `cexec iac`); `history.py` writes a history
-of a given number of Calls in the scenario's invented words, a day of `pilot_scenario.history`'s
-at a time, through the app's own publication, each conversation labelled by the stub labeller and
-its vocabularies declared first. Over each day it draws Work Units from a seed of their own
-(`draw`): each work session of Pilot's carries out a leg of its project's errand of the day in one
-of three roles (`ROLES`), under six kinds nested as the workflow's labeller nests its own (`KINDS`,
-`NESTING`), a role's model drawn again every four weeks (`configured`) and a later round now and
-then work done again. `parts.py` reads each part through the app as the page reads it, over all
-time and over a quota week, a collector's call under the collector's bearer, and runs each
-statement again under `EXPLAIN (ANALYZE, BUFFERS)`, writing the file its `--out` names:
-`results/<calls>.json` for the engine's parts, `results/labeller/<calls>.json` for those the
-labels give and the inventory, timed with `--only` and so with no burst. `report.py` prints the
-report's tables from two results, a table with no row left out: `report.md` holds the engine's,
-and in § The labeller's part the labeller's part's. The report gives each part's time at both
-sizes, the size at which it passes two seconds, the record's size on disk and the burst where one
-was read, and the engine's two defaults above are read off it. Its *One walk* prices what the walk's
-event makes one page with the dashboard open read again, the view in view's rows and its quick
-filters' counts ([`dashboard-screen.md`](dashboard-screen.md#kept-current)), summed from the parts
-at both sizes against the walk's 30 s, with an open filter's pane's values beside them (D288); no
-bar is set for it. `tests/tools/` pins the tools.
+namespace (`instance.yaml`, run in `cexec iac`) and keeps it between timings, `stop` ending one with
+the database's volume kept and `down` removing it all; `history.py` writes a history of a given
+number of Calls in the scenario's invented words, a day of `pilot_scenario.history`'s at a time,
+through the app's own publication, each conversation labelled by the stub labeller and its
+vocabularies declared first, ending yesterday and skipping a day already written, so that on a kept
+database it writes only the days since the last timing's and those before them stay. Over each day
+it draws Work Units from a seed of their own (`draw`): each work session of Pilot's carries out a
+leg of its project's errand of the day in one of three roles (`ROLES`), under six kinds nested as
+the workflow's labeller nests its own (`KINDS`, `NESTING`), a role's model drawn again every four
+weeks (`configured`) and a later round now and then work done again. `parts.py` reads each part
+through the app as the page reads it, over all time and over a quota week, a collector's call under
+the collector's bearer, and runs each statement again under `EXPLAIN (ANALYZE, BUFFERS)`, writing
+the file its `--out` names: `results/<calls>.json` for the engine's parts,
+`results/labeller/<calls>.json` for those the labels give and the inventory, timed with `--only` and
+so with no burst. `report.py` prints the report's tables from two results, a table with no row left
+out: `report.md` holds the engine's, and in § The labeller's part the labeller's part's. The report
+gives each part's time at both sizes, the size at which it passes two seconds, the record's size on
+disk and the burst where one was read, and the engine's two defaults above are read off it. Its *One
+walk* prices what the walk's event makes one page with the dashboard open read again, the view in
+view's rows and its quick filters' counts
+([`dashboard-screen.md`](dashboard-screen.md#kept-current)), summed from the parts at both sizes
+against the walk's 30 s, with an open filter's pane's values beside them (D288); no bar is set for
+it. `tests/tools/` pins the tools.
 
 ## Testing it
 

@@ -1,6 +1,6 @@
 # The timing's PostgreSQL (F154.9): production's image and settings, in the
-# prd cluster's `development` namespace, made for a timing and removed after
-# it by `instance.py`. Production's are the CloudNativePG cluster `postgres`
+# prd cluster's `development` namespace, kept between timings by
+# `instance.py`, stopped with its volume kept after each. Production's are the CloudNativePG cluster `postgres`
 # of `postgres-pas-prd`, its parameters as `kubectl get
 # clusters.postgresql.cnpg.io` gives them, ANS-390's guards among them, with a
 # memory limit of 2Gi and three CPUs, the node a failover leaves the primary
