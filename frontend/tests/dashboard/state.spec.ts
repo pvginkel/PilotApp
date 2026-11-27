@@ -139,3 +139,17 @@ test("a threshold's number is written as the server writes it", () => {
     expect(written(threshold), threshold).toBe(form);
   }
 });
+
+test('a value holding ~ ! \' ( ) * is written with each escaped, as the server writes it', () => {
+  const written = 'c=effort:%7E%21%27%28%29%2A,a%27b';
+  const chip = (state: string) => state.split('&').find((part) => part.startsWith('c='));
+  expect(chip(writeState(readState(written)))).toBe(written);
+});
+
+test("a bound typed with :00 seconds is written without them, as the server writes it", () => {
+  const time = (state: string) => state.split('&').find((part) => part.startsWith('t='));
+  expect(time(writeState(readState('t=c,2026-11-01T08%3A30%3A00,')))).toBe('t=c,2026-11-01T08%3A30,');
+  expect(time(writeState(readState('t=c,2026-11-01T08%3A30%3A15,2026-11-02T09%3A00%3A00')))).toBe(
+    't=c,2026-11-01T08%3A30%3A15,2026-11-02T09%3A00',
+  );
+});
