@@ -88,17 +88,36 @@ export function timeWords(time: ViewState['time'], words: Words): string {
   }
 }
 
-/** A measure in a line of them: its figure's label, its aggregate after it where it is not the figure's own; a ratio's name. */
+type Simple = Extract<ViewState['measures'][number], { kind: 'simple' }>;
+
+/**
+ * A measure over a figure: a count of a part's items its part's noun, "Conversations"; else the
+ * figure's label, "per" the part its items are where they are not its fact's own rows, and its
+ * aggregate after it where it is not the figure's own or the items are a part's, "Cost per
+ * conversation (median)"; its own filters after a comma.
+ */
+function simpleWords(measure: Simple, words: Words): string {
+  const part = words.measures;
+  const figure = part?.figures?.find((each) => each.key === measure.figure);
+  if (figure === undefined) return measure.figure;
+  const grain = measure.grain === null ? null : (part?.grains?.find((each) => each.key === measure.grain) ?? { one: measure.grain, many: measure.grain });
+  const aggregate = part?.aggregates?.find((each) => each.key === measure.aggregate)?.label ?? measure.aggregate;
+  const named =
+    grain !== null && measure.aggregate === 'count'
+      ? `${grain.many.charAt(0).toUpperCase()}${grain.many.slice(1)}`
+      : `${figure.label}${grain === null ? '' : ` per ${grain.one}`}${grain === null && measure.aggregate === figure.aggregate ? '' : ` (${aggregate.toLowerCase()})`}`;
+  const filters = measure.filters.map(
+    (filter) => `${dimensionLabel(words.dimensions, filter.dimension)} ${filter.negated ? 'is not' : 'is'} ${filter.values.map((value) => value ?? 'none').join(' or ')}`,
+  );
+  return filters.length === 0 ? named : `${named}, where ${filters.join(' and ')}`;
+}
+
+/** A measure's name, which its heading reads: a figure's in its words (`simpleWords`), a ratio's name. */
 export function measureWords(measure: ViewState['measures'][number], words: Words): string {
   const part = words.measures;
   switch (measure.kind) {
-    case 'simple': {
-      const figure = part?.figures?.find((each) => each.key === measure.figure);
-      if (figure === undefined) return measure.figure;
-      if (measure.aggregate === figure.aggregate) return figure.label;
-      const aggregate = part?.aggregates?.find((each) => each.key === measure.aggregate)?.label ?? measure.aggregate;
-      return `${figure.label} (${aggregate.toLowerCase()})`;
-    }
+    case 'simple':
+      return simpleWords(measure, words);
     case 'ratio':
       return part?.ratios?.find((ratio) => ratio.key === measure.key)?.label ?? measure.key;
     case 'written':

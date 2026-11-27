@@ -41,7 +41,7 @@ function under(levels: readonly Level[], dimensions: Dimensions): string {
 }
 
 /** What was asked on screen: over time its grain, in order its order dimension, else the By. */
-function asked(state: ViewState, dimensions: Dimensions): string {
+export function asked(state: ViewState, dimensions: Dimensions): string {
   if (state.presentation === 'time') return state.axis ?? state.by;
   if (state.presentation === 'order') return state.axis ?? firstOrder(dimensions, state.by) ?? state.by;
   return state.by;

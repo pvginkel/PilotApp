@@ -486,7 +486,49 @@
   .dash .rowheads > svg { left: 0; }
   .dash .rowheads .colhead { display: inline-flex; align-items: baseline; gap: 4px; white-space: nowrap; }
   .dash .rowheads .colhead .t { overflow: hidden; text-overflow: ellipsis; }
-  .dash .rowheads .mcol { height: 20px; }
+  .dash .rowheads .mslot { height: 20px; }
+
+  /* A measure's heading (measure-heads.tsx; the mockup's `.dash-mhead`): its name, which sorts, the
+     arrow of the sort, and at its right the menu's sign, muted, and the ×. In the rows they show
+     under the pointer and while the focus is inside, the name, cut to its column at rest, giving
+     them its room; in a table they keep their room, hidden at rest, the column growing to the name.
+     A refused measure's name reads in the warning's text colour; a heading lifted fades in place. */
+  .dash .dash-mhead { display: inline-flex; align-items: center; min-width: 0; max-width: 100%; vertical-align: top; user-select: none; }
+  .dash .dash-mhead.dragging { opacity: 0.35; }
+  .dash .dash-mhead .name { display: inline-flex; align-items: baseline; gap: 4px; min-width: 0; padding: 0; border: 0; background: none; color: inherit; font: inherit; line-height: inherit; cursor: pointer; }
+  .dash .dash-mhead .name .t { overflow: hidden; white-space: nowrap; }
+  .dash .dash-mhead .arr { flex: none; font-size: 0.85em; }
+  .dash .dash-mhead .name:hover, .dash .dash-mhead.on .name, .dash .dash-mhead.open .name { color: hsl(var(--foreground)); }
+  .dash .dash-mhead.refused .name .t { color: hsl(var(--warning-text)); }
+  .dash .dash-mhead .ctl { flex: none; display: grid; place-items: center; width: 18px; height: 18px; padding: 0; border: 0; border-radius: 4px; background: none; color: hsl(var(--muted-foreground)); cursor: pointer; }
+  .dash .dash-mhead .ctl.menu { margin-left: 3px; }
+  .dash .dash-mhead .ctl.x { margin-left: 2px; }
+  .dash .dash-mhead .ctl:hover, .dash .dash-mhead.open .ctl.menu { background: hsl(var(--foreground) / 0.08); color: hsl(var(--foreground)); }
+  .dash .dash-mhead .ctl.x:hover { color: hsl(var(--destructive-text)); }
+  .dash .dash-mhead .ctl .icon { width: 14px; height: 14px; }
+  .dash .rowheads .dash-mhead .ctl { display: none; }
+  .dash .rowheads .dash-mhead:is(:hover, :focus-within, .open) .ctl { display: grid; }
+  .dash .dash-table .dash-mhead .ctl { visibility: hidden; }
+  .dash .dash-table .dash-mhead:is(:hover, :focus-within, .open) .ctl { visibility: visible; }
+
+  /* A heading's panel, under it, held in the window so that the table's scroll does not cut it: its
+     name and its ×, the aggregate and the grain as segmented choices, what the figure is. */
+  .dash .dash-headpane { position: fixed; top: 0; left: 0; right: auto; z-index: 20; width: 340px; max-width: calc(100vw - 24px); color: hsl(var(--foreground)); font-weight: 400; line-height: 1.5; cursor: auto; user-select: text; }
+  .dash .dash-headpane > .dash-valuepane { padding: 8px 12px 12px; }
+  .dash .dash-headpane .panehead { display: flex; align-items: center; gap: 8px; font-weight: 600; }
+  .dash .dash-headpane .panehead .t { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+  /* A heading dragged: its name following the pointer, and a line in the primary, a dot at each
+     end, where it would drop. */
+  .dash .dash-dragghost { position: fixed; z-index: 30; padding: 1px 8px; border: 1px solid hsl(var(--border)); border-radius: 6px; background: hsl(var(--card)); box-shadow: var(--shadow-lg); font-size: 11.5px; font-weight: 600; line-height: 18px; white-space: nowrap; pointer-events: none; }
+  .dash .dash-dropmark { position: fixed; z-index: 29; width: 2px; background: hsl(var(--primary)); pointer-events: none; }
+  .dash .dash-dropmark::before, .dash .dash-dropmark::after { content: ""; position: absolute; left: -3px; width: 8px; height: 8px; border-radius: 50%; background: hsl(var(--primary)); }
+  .dash .dash-dropmark::before { top: -4px; }
+  .dash .dash-dropmark::after { bottom: -4px; }
+
+  /* What the By refuses of the measures, over the chart. */
+  .dash .dash-refused { margin-bottom: 8px; font-size: var(--text-xs); color: hsl(var(--warning-text)); }
+  .dash .dash-refused p { margin: 0; }
 
   /* The legend's items 10px apart and its lines 4px, each item's margins making the gaps, the
      first at the chart's left edge. */

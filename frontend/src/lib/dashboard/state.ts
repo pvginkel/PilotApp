@@ -503,7 +503,7 @@ function simpleKey(simple: Simple): string {
 }
 
 /** A measure as the normal form writes it, and a sort names its column. */
-function measureKey(measure: Measure): string {
+export function measureKey(measure: Measure): string {
   if (measure.kind === 'ratio') return `r:${measure.key}`;
   if (measure.kind === 'written') {
     return `r:${enc(measure.name)}:${simpleKey(measure.numerator)}/${simpleKey(measure.denominator)}`;

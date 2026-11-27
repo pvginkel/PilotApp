@@ -75,8 +75,16 @@ export interface KeptViewTab {
   opened: string | null;
   /** Its state now, as an address carries it; none while it shows the new tab's panel. */
   now: string | null;
+  /** The sort it remembers for what each of its states asks, a By or a series' axis; none where the one it opened with is forgotten (`sorts.ts`). */
+  sorts: Readonly<Record<string, KeptSort | null>>;
   /** Where its main area was scrolled to. */
   scroll: number;
+}
+
+/** A sort a view tab remembers: a direction and the column it is by. */
+interface KeptSort {
+  direction: 'asc' | 'desc';
+  column: string;
 }
 
 /** The dashboard's view tabs as the person left them (F161.1, F160.10). */
@@ -187,7 +195,7 @@ function loadViewTabs(saved: unknown): KeptViewTabs {
 /** The tab as kept, none where it is no tab. */
 function viewTabOf(tab: unknown): KeptViewTab[] {
   if (typeof tab !== 'object' || tab === null) return [];
-  const { id, view, opened, now, scroll } = tab as Partial<Record<keyof KeptViewTab, unknown>>;
+  const { id, view, opened, now, sorts, scroll } = tab as Partial<Record<keyof KeptViewTab, unknown>>;
   if (typeof id !== 'string' || !TAB_ID.test(id)) return [];
   const text = (value: unknown) => (typeof value === 'string' ? value : null);
   const { id: viewId, name } = (typeof view === 'object' && view !== null ? view : {}) as Record<string, unknown>;
@@ -197,9 +205,24 @@ function viewTabOf(tab: unknown): KeptViewTab[] {
       view: typeof viewId === 'string' && typeof name === 'string' ? { id: viewId, name } : null,
       opened: text(opened),
       now: text(now),
+      sorts: loadSorts(sorts),
       scroll: typeof scroll === 'number' && scroll > 0 ? scroll : 0,
     },
   ];
+}
+
+/** A view tab's sorts as kept, those that are no sort left out. */
+function loadSorts(saved: unknown): Record<string, KeptSort | null> {
+  if (typeof saved !== 'object' || saved === null) return {};
+  const sorts: Record<string, KeptSort | null> = {};
+  for (const [asked, sort] of Object.entries(saved as Record<string, unknown>)) {
+    if (sort === null) sorts[asked] = null;
+    else if (typeof sort === 'object') {
+      const { direction, column } = sort as Partial<Record<keyof KeptSort, unknown>>;
+      if ((direction === 'asc' || direction === 'desc') && typeof column === 'string') sorts[asked] = { direction, column };
+    }
+  }
+  return sorts;
 }
 
 let state = load();

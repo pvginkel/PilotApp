@@ -5,7 +5,8 @@
  * elements over the chart's columns, in sight while the rows scroll; the All row; a row per value
  * of the By, its label cut to its column and whole in its tooltip where it is cut, its time under
  * it where the By's values have one; each measure's bar, split by the color, and figure; the
- * peers' median per column. Past 40 rows, Show all draws up to 1,000 until what is shown changes.
+ * peers' median per column. A measure's heading is its column's (`measure-heads.tsx`), its slot
+ * the column's width. Past 40 rows, Show all draws up to 1,000 until what is shown changes.
  * A row is a button where the view drills into its value (`onDrill`, by its place in the answer).
  */
 
@@ -14,6 +15,8 @@ import type { Measure } from '@/lib/dashboard/clip';
 import { figure, percent, whole } from '@/lib/dashboard/figures';
 import { layOut, SHOW_ALL, type Layout, type Rows } from '@/lib/dashboard/rows-layout';
 import { cn } from '@/lib/utils';
+import type { Heads } from '@/hooks/use-measure-heads';
+import { MeasureHead } from './measure-heads';
 
 const measures = new Map<string, Measure>();
 
@@ -49,24 +52,25 @@ function useBox(ref: RefObject<HTMLDivElement | null>): { width: number; measure
 
 interface RowsChartProps {
   rows: Rows;
+  heads: Heads;
   relative: boolean;
   onDrill: ((index: number) => void) | undefined;
 }
 
-export function RowsChart({ rows, relative, onDrill }: RowsChartProps) {
+export function RowsChart({ rows, heads, relative, onDrill }: RowsChartProps) {
   const holder = useRef<HTMLDivElement>(null);
   const { width, measure } = useBox(holder);
   // Show all holds for the answer it was asked on.
   const [allFor, setAllFor] = useState<string | null>(null);
   const all = allFor === rows.address;
-  const layout = width > 0 && measure !== null ? layOut(rows, { width, relative, all, measure }) : null;
+  const layout = width > 0 && measure !== null ? layOut(rows, { width, relative, all, measure, names: heads.names }) : null;
   return (
     <>
-      <Legend rows={rows} />
+      <Legend rows={rows} names={heads.names} />
       <div ref={holder} className="bars">
         {layout !== null && (
           <>
-            <Headings layout={layout} />
+            <Headings layout={layout} heads={heads} />
             {layout.rows.length === 0 ? (
               <div className="empty" data-testid="dashboard.empty">
                 Nothing in this scope
@@ -97,7 +101,7 @@ export function RowsChart({ rows, relative, onDrill }: RowsChartProps) {
 }
 
 /** The color's values, with the first stacked measure's amounts and their shares of All. */
-function Legend({ rows }: { rows: Rows }) {
+function Legend({ rows, names }: { rows: Rows; names: readonly string[] }) {
   const color = rows.color;
   if (color === null) return null;
   const stacked = rows.measures.findIndex((measure) => measure.stacks);
@@ -113,7 +117,7 @@ function Legend({ rows }: { rows: Rows }) {
   return (
     <div className="legend" data-testid="dashboard.legend">
       <span className="lbl">
-        {color.label}, by {measure.label}
+        {color.label}, by {names[stacked]}
       </span>
       {color.values.map((value, index) => (
         <span key={value.others > 0 ? '…' : String(value.key)} className="lg" data-testid="dashboard.legend.value">
@@ -130,7 +134,7 @@ function Legend({ rows }: { rows: Rows }) {
 }
 
 /** The headings' row: the By and n, each measure's heading at its column's start, the columns' rules through it. */
-function Headings({ layout }: { layout: Layout }) {
+function Headings({ layout, heads }: { layout: Layout; heads: Heads }) {
   const { head } = layout;
   return (
     <div className="dash-heads rowheads" style={{ width: layout.width, height: head.height }} data-testid="dashboard.heads">
@@ -146,9 +150,9 @@ function Headings({ layout }: { layout: Layout }) {
         <span className="t">n</span>
       </span>
       {head.columns.map((column, index) => (
-        <span key={index} className="colhead mcol" style={{ left: column.x, maxWidth: column.width }} data-testid="dashboard.heads.measure">
-          <span className="t">{column.words}</span>
-        </span>
+        <div key={index} className="mslot" style={{ left: column.x, width: column.width }} data-slot={index}>
+          <MeasureHead heads={heads} j={index} cut={column} />
+        </div>
       ))}
     </div>
   );

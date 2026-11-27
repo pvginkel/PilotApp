@@ -160,6 +160,9 @@ test.describe('A pick in the head', () => {
   });
 });
 
+/** The names of `answer()`'s measures, as the page builds them. */
+const NAMES = ['Cost', 'Calls'];
+
 /** An answer of the rows route, as much of it as the table reads. */
 function answer(more: Partial<Rows> = {}): Rows {
   return {
@@ -194,7 +197,7 @@ function answer(more: Partial<Rows> = {}): Rows {
 
 test.describe('The table’s text', () => {
   test('holds every row, the All row first: each measure’s figure and its n, the share where the first measure sums, the first stacked measure split by the color', () => {
-    expect(tableText(answer(), '\t').split('\n')).toEqual([
+    expect(tableText(answer(), NAMES, '\t').split('\n')).toEqual([
       'Project\tCost\tn\tCalls\tn\tShare\tChat\tpilot',
       'All\t2\t4\t4\t4\t1\t1.5\t0.5',
       'Recipes, "the box"\t1.5\t3\t3\t3\t0.75\t1.5\t0',
@@ -204,13 +207,13 @@ test.describe('The table’s text', () => {
 
   test('quotes a cell with a comma or a quote in a CSV, and puts a tab or a line break in a cell as a space for the clipboard', () => {
     const rows = answer({ color: null, rows: [{ ...answer().rows[0], label: 'Tab\there\nand there' }, answer().rows[1]] });
-    expect(tableText(answer({ color: null }), ',').split('\n')[2]).toBe('"Recipes, ""the box""",1.5,3,3,3,0.75');
-    expect(tableText(rows, '\t').split('\n')[2]).toBe('Tab here and there\t1.5\t3\t3\t3\t0.75');
+    expect(tableText(answer({ color: null }), NAMES, ',').split('\n')[2]).toBe('"Recipes, ""the box""",1.5,3,3,3,0.75');
+    expect(tableText(rows, NAMES, '\t').split('\n')[2]).toBe('Tab here and there\t1.5\t3\t3\t3\t0.75');
   });
 
   test('has no share where the first measure neither sums nor counts, and the instant after the label where the By’s values have one', () => {
     const median = answer().measures.map((measure, j) => (j === 0 ? { ...measure, aggregate: 'median' as const, stacks: false } : measure));
     const rows = answer({ measures: median, color: null, rows: answer().rows.map((row, i) => ({ ...row, at: i === 0 ? '2026-11-07T08:52:00Z' : null })) });
-    expect(tableText(rows, ',').split('\n')).toEqual(['Project,At,Cost,n,Calls,n', 'All,,2,4,4,4', '"Recipes, ""the box""",2026-11-07T08:52:00Z,1.5,3,3,3', 'p2,,0.5,1,1,1']);
+    expect(tableText(rows, NAMES, ',').split('\n')).toEqual(['Project,At,Cost,n,Calls,n', 'All,,2,4,4,4', '"Recipes, ""the box""",2026-11-07T08:52:00Z,1.5,3,3,3', 'p2,,0.5,1,1,1']);
   });
 });

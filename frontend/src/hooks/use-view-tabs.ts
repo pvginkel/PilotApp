@@ -1,6 +1,6 @@
 /**
  * The dashboard's view tabs (F161): each holds its view whole, its saved view, the state it opened
- * with, its state now and its scroll (F161.1), kept in the browser (`browser-state.ts`), read once
+ * with, its state now, the sorts it remembers by By (`sorts.ts`) and its scroll (F161.1), kept in the browser (`browser-state.ts`), read once
  * as the dashboard first opens in the page and written whole on every change, so that two windows
  * are never kept in step and a new build's reload finds the tabs as they were left (F160.10). The
  * order the tabs showed in is kept beside them, the latest first: the first is the tab at hand,
@@ -77,7 +77,7 @@ function newId(): string {
 
 /** A tab opened last in the line and brought to the front: on the panel, or on `now`; `id` taken where it is free. */
 function add(id: string | null, now: string | null, view: OpenedView | null = null, opened: string | null = now): ViewTab {
-  const tab: ViewTab = { id: id !== null && TAB_ID.test(id) && tabOf(id) === null ? id : newId(), view, opened, now, scroll: 0 };
+  const tab: ViewTab = { id: id !== null && TAB_ID.test(id) && tabOf(id) === null ? id : newId(), view, opened, now, sorts: {}, scroll: 0 };
   write({ tabs: [...kept.tabs, tab], seen: [tab.id, ...kept.seen] });
   return tab;
 }
@@ -202,9 +202,12 @@ export function useViewTabMoves() {
     const back = seen[0];
     return back === undefined ? add(null, null) : tabOf(back)!;
   };
-  /** The tab at hand, `id`, on the state `now`: a new entry, or the entry in place where `replace`, a selection's and a look's (F160.4). */
-  const set = (id: string, now: string, replace = false) => {
-    change(id, { now });
+  /**
+   * The tab at hand, `id`, on the state `now`: a new entry, or the entry in place where `replace`, a
+   * selection's, a look's, a sort's and a measure's (F160.4); with `sorts`, those it remembers then.
+   */
+  const set = (id: string, now: string, replace = false, sorts?: ViewTab['sorts']) => {
+    change(id, sorts === undefined ? { now } : { now, sorts });
     go(tabOf(id)!, replace);
   };
   return {
@@ -217,12 +220,12 @@ export function useViewTabMoves() {
     open: () => go(add(null, null)),
     /** A view opened in the tab `id` from its panel, a saved view or, with none, the start from scratch. */
     openView: (id: string, view: OpenedView | null, state: string) => {
-      change(id, { view, opened: state, now: state, scroll: 0 });
+      change(id, { view, opened: state, now: state, sorts: {}, scroll: 0 });
       go(tabOf(id)!);
     },
     set,
-    /** The tab `id` back to what it opened with (F161.5). */
-    reset: (id: string) => set(id, tabOf(id)!.opened!),
+    /** The tab `id` back to what it opened with (F161.5), the sorts it remembered forgotten but the one that holds. */
+    reset: (id: string) => set(id, tabOf(id)!.opened!, false, {}),
     /**
      * The tab `id` saved as `view`, which holds `opened`: its name and what Reset goes back to. Its
      * entry takes them in place, where the address still names it.

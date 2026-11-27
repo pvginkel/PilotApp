@@ -9,7 +9,9 @@
  * time in the engine's zone.
  *
  * Its coordinates are the chart's own, under the headings' row, which the page draws over the
- * columns from `head`.
+ * columns from `head`: each measure's heading its name (`measures.ts`), the arrow of the sort
+ * after it where the rows are sorted by its column, cut to its column at rest and short of its
+ * controls, the menu's sign and the ×, under the pointer.
  */
 
 import type { components } from '@/lib/api/generated/types';
@@ -19,6 +21,7 @@ import { figure, multiple, percent, whole, type Format } from './figures';
 
 export type Rows = components['schemas']['RowsResponseSchema.b67cf98'];
 type Answered = Rows['measures'][number];
+type Sort = Rows['sort'];
 
 /** The rows drawn until Show all. */
 const MAX_ROWS = 40;
@@ -31,6 +34,13 @@ const SERIES = 20;
 const UNSPLIT = 'var(--series-other)';
 
 const HEAD_HEIGHT = 22;
+/** A heading's text: its size and weight (dashboard.css, `.rowheads`). */
+const HEAD_SIZE = 11.5;
+const HEAD_WEIGHT = 600;
+/** The arrow's gap before it, and the controls' room: the menu's sign, with the × after it where a heading has one (dashboard.css, `.dash-mhead`). */
+const ARROW_GAP = 4;
+const MENU = 21;
+const REMOVE = 20;
 const N_WIDTH = 52;
 const ROW = 26;
 /** A row with its time on a second line. */
@@ -68,6 +78,18 @@ interface RowLine {
   cells: Cell[];
 }
 
+/** A measure's heading over its column. */
+interface Heading {
+  x: number;
+  width: number;
+  /** Its name whole; cut to the column at rest, and short of its controls under the pointer. */
+  name: string;
+  rest: string;
+  hover: string;
+  /** The way the rows are sorted by its column; none where they are not. */
+  sorted: Sort['direction'] | null;
+}
+
 interface Median {
   x: number;
   labelX: number;
@@ -86,7 +108,7 @@ export interface Layout {
     height: number;
     by: { words: string; room: number };
     nRight: number;
-    columns: { x: number; width: number; words: string }[];
+    columns: Heading[];
   };
   /** The columns' rules. */
   rules: number[];
@@ -123,10 +145,12 @@ interface Options {
   /** Show all: up to SHOW_ALL rows. */
   all: boolean;
   measure: Measure;
+  /** Each measure's name, in the answer's order. */
+  names: readonly string[];
 }
 
 /** The rows of `answer` laid out at `width`. */
-export function layOut(answer: Rows, { width: wide, relative, all, measure }: Options): Layout {
+export function layOut(answer: Rows, { width: wide, relative, all, measure, names }: Options): Layout {
   const measures = answer.measures;
   const rows = answer.rows.slice(0, all ? SHOW_ALL : MAX_ROWS);
   const one = measures.length === 1;
@@ -246,7 +270,20 @@ export function layOut(answer: Rows, { width: wide, relative, all, measure }: Op
       height: HEAD_HEIGHT,
       by: { words: answer.by.label, room: labelWidth - 12 },
       nRight: width - nX,
-      columns: columns.map((column) => ({ x: column.x0, width: columnWidth - 12, words: column.measure.label })),
+      columns: columns.map((column): Heading => {
+        const name = names[column.j];
+        const sorted = answer.sort.column === column.measure.key ? answer.sort.direction : null;
+        const room = columnWidth - 12 - (sorted === null ? 0 : ARROW_GAP + measure(sorted === 'asc' ? '▲' : '▼', HEAD_SIZE * 0.85, HEAD_WEIGHT));
+        const controls = MENU + (measures.length > 1 ? REMOVE : 0);
+        return {
+          x: column.x0,
+          width: columnWidth - 12,
+          name,
+          rest: clip(name, room, measure, HEAD_SIZE, HEAD_WEIGHT),
+          hover: clip(name, room - controls, measure, HEAD_SIZE, HEAD_WEIGHT),
+          sorted,
+        };
+      }),
     },
     rules: columns.map((column) => column.x0 - 8),
     all: {

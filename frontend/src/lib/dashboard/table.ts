@@ -15,6 +15,8 @@ type Line = Pick<Rows['all'], 'values' | 'n' | 'split'>;
 
 export interface Column {
   kind: 'measure' | 'n' | 'share' | 'split';
+  /** A measure's figure and its n: the measure's place in the answer, the column its heading moves; none for the others. */
+  slot: number | null;
   /** Its heading. */
   label: string;
   title: string | null;
@@ -30,27 +32,28 @@ const SERIES = 20;
 
 const SUMS = new Set(['sum', 'count']);
 
-/** The columns after the By's label. */
-export function columnsOf(rows: Rows): Column[] {
+/** The columns after the By's label, each measure headed by its name in `names`. */
+export function columnsOf(rows: Rows, names: readonly string[]): Column[] {
   const columns: Column[] = [];
   rows.measures.forEach((measure, j) => {
-    columns.push({ kind: 'measure', label: measure.label, title: null, swatch: null, value: (line) => line.values[j] ?? null, words: (value) => figure(measure.format, value) });
-    columns.push({ kind: 'n', label: 'n', title: `The items behind ${measure.label}`, swatch: null, value: (line) => line.n[j] ?? null, words: whole });
+    columns.push({ kind: 'measure', slot: j, label: names[j], title: null, swatch: null, value: (line) => line.values[j] ?? null, words: (value) => figure(measure.format, value) });
+    columns.push({ kind: 'n', slot: j, label: 'n', title: `The items behind ${names[j]}`, swatch: null, value: (line) => line.n[j] ?? null, words: whole });
   });
   const first = rows.measures[0];
   const total = rows.all.values[0] ?? null;
   if (first !== undefined && first.aggregate !== null && SUMS.has(first.aggregate)) {
-    columns.push({ kind: 'share', label: 'Share', title: `Each row’s ${first.label} as a share of All`, swatch: null, value: (line) => (total ? (line.values[0] ?? 0) / total : null), words: percent });
+    columns.push({ kind: 'share', slot: null, label: 'Share', title: `Each row’s ${names[0]} as a share of All`, swatch: null, value: (line) => (total ? (line.values[0] ?? 0) / total : null), words: percent });
   }
   const stacked = rows.measures.findIndex((measure) => measure.stacks);
   if (stacked >= 0 && rows.color !== null) {
-    const { label, format } = rows.measures[stacked];
+    const { format } = rows.measures[stacked];
     for (const [k, value] of rows.color.values.entries()) {
       const name = value.label ?? String(value.key);
       columns.push({
         kind: 'split',
+        slot: null,
         label: name,
-        title: `${rows.color.label}: ${name} (${label})`,
+        title: `${rows.color.label}: ${name} (${names[stacked]})`,
         swatch: value.others > 0 ? 'var(--series-other)' : `var(--series-${k % SERIES})`,
         value: (line) => line.split?.[stacked]?.[k] ?? null,
         words: (amount) => (amount === null ? '' : figure(format, amount)),
@@ -61,8 +64,8 @@ export function columnsOf(rows: Rows): Column[] {
 }
 
 /** Every row of the answer as text, its headings first, then the All row: separated by tabs, or by commas, quoted where it must be. */
-export function tableText(rows: Rows, separator: '\t' | ','): string {
-  const columns = columnsOf(rows);
+export function tableText(rows: Rows, names: readonly string[], separator: '\t' | ','): string {
+  const columns = columnsOf(rows, names);
   const timed = rows.rows.some((row) => row.at !== null);
   const cell = (text: string) =>
     separator === '\t' ? text.replace(/[\t\r\n]+/g, ' ') : /[",\r\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;

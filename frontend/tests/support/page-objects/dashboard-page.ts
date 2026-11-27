@@ -16,7 +16,10 @@ export const dashboardAddress = (state: string, tab = 't1') => `#dash/${tab}/${s
  * count, its amount and its ×, and the dialog its × asks (F162.6); and the view's card: its head, By
  * and its list, the presentation's Rows and Table, Color and its list, Relative, and the table's Copy
  * and CSV (F163.1 to F163.3, F163.7), each list's search, its groups and its entries, each its pick,
- * its count and its star, By's "n hidden"; the legend, the headings' row, the All row and a row per
+ * its count and its star, By's "n hidden"; + Measure and its groups of measures (F163.4); a
+ * measure's heading, its name, its arrow, its menu's sign and its ×, its panel with the aggregate
+ * and the grain, a heading dragged and the line of its drop; what the By refuses (F163.5); the
+ * legend, the headings' row, the All row and a row per
  * value of the By, each its label, its time where it has one, and a figure per measure; the medians,
  * and the cut past 40 rows; the table, its headings, its All row and its rows, each its label, its
  * time and its cells.
@@ -105,6 +108,14 @@ export class DashboardPage {
   readonly legendValues: Locator;
   readonly byHeading: Locator;
   readonly measureHeadings: Locator;
+  readonly measurePane: Locator;
+  readonly measurePaneName: Locator;
+  readonly measurePaneClose: Locator;
+  readonly addMeasure: Locator;
+  readonly addMeasureGroups: Locator;
+  readonly dragGhost: Locator;
+  readonly dropMark: Locator;
+  readonly refused: Locator;
   readonly all: Locator;
   readonly allValues: Locator;
   readonly rows: Locator;
@@ -198,6 +209,14 @@ export class DashboardPage {
     this.legendValues = page.getByTestId('dashboard.legend.value');
     this.byHeading = page.getByTestId('dashboard.heads.by');
     this.measureHeadings = page.getByTestId('dashboard.heads.measure');
+    this.measurePane = page.getByTestId('dashboard.measure-pane');
+    this.measurePaneName = page.getByTestId('dashboard.measure-pane.name');
+    this.measurePaneClose = page.getByTestId('dashboard.measure-pane.close');
+    this.addMeasure = page.getByTestId('dashboard.add-measure');
+    this.addMeasureGroups = page.getByTestId('dashboard.add-measure.group');
+    this.dragGhost = page.getByTestId('dashboard.drag-ghost');
+    this.dropMark = page.getByTestId('dashboard.drop-mark');
+    this.refused = page.getByTestId('dashboard.refused');
     this.all = page.getByTestId('dashboard.all');
     this.allValues = page.getByTestId('dashboard.all.value');
     this.rows = page.getByTestId('dashboard.row');
@@ -211,6 +230,33 @@ export class DashboardPage {
   /** The row whose label is `label`. */
   row(label: string): Locator {
     return this.rows.filter({ has: this.page.getByTestId('dashboard.row.label').getByText(label, { exact: true }) });
+  }
+
+  /** The heading of the measure named `name`: the heading, its name's button, which sorts, its arrow, its menu's sign and its ×. */
+  measure(name: string): { head: Locator; sort: Locator; arrow: Locator; menu: Locator; remove: Locator } {
+    const head = this.page.getByTestId('dashboard.measure').filter({ has: this.page.getByTestId('dashboard.heads.measure').getByText(name, { exact: true }) });
+    return {
+      head,
+      sort: head.getByTestId('dashboard.measure.sort'),
+      arrow: head.getByTestId('dashboard.measure.arrow'),
+      menu: head.getByTestId('dashboard.measure.menu'),
+      remove: head.getByTestId('dashboard.measure.remove'),
+    };
+  }
+
+  /** A choice of the heading's panel: an aggregate or a grain, by its key. */
+  paneChoice(of: 'aggregate' | 'grain', key: string): Locator {
+    return this.page.getByTestId(`dashboard.measure-pane.${of}.${key}`);
+  }
+
+  /** The labels of the choices of the heading's panel's aggregates or grains, in their order. */
+  paneChoices(of: 'Aggregate' | 'Grain'): Locator {
+    return this.measurePane.getByRole('group', { name: of }).getByRole('button');
+  }
+
+  /** + Measure's entry labelled `label`, which adds it. */
+  addMeasureEntry(label: string): Locator {
+    return this.page.getByTestId('dashboard.add-measure.list').getByRole('button', { name: label, exact: true });
   }
 
   /** A chip's words, which open its pane where it has one. */
@@ -382,6 +428,14 @@ export class DashboardPage {
     return this.page.evaluate(() =>
       (JSON.parse(localStorage.getItem('pilot') ?? '{}').viewTabs?.tabs ?? []).map((each: { id: string; now: string | null }) => ({ id: each.id, now: each.now })),
     );
+  }
+
+  /** The sorts the tab at hand keeps in the browser, by what was asked (F161.1). */
+  keptSorts(): Promise<Record<string, { direction: string; column: string } | null>> {
+    return this.page.evaluate(() => {
+      const { tabs, seen } = JSON.parse(localStorage.getItem('pilot') ?? '{}').viewTabs ?? {};
+      return (tabs ?? []).find((each: { id: string }) => each.id === seen?.[0])?.sorts ?? {};
+    });
   }
 
   /** The main area's scroll. */

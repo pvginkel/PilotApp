@@ -1,7 +1,7 @@
 /**
  * The view's card's head, its toolbar (F163.1; the mockup's `view.js`, `renderView`, and `by.js`):
- * By and the presentation at the left; at the right Color, Relative and, with a table, its Copy and
- * CSV, each an icon named by its tooltip.
+ * By and the presentation at the left; at the right + Measure (`measure-heads.tsx`), Color, Relative
+ * and, with a table, its Copy and CSV, each an icon named by its tooltip.
  *
  * By names the By at hand and opens its list (`head.ts`): the parts and the attributes, each with
  * its count of values in the view's scope, asked as the list opens and each shown as it arrives
@@ -15,22 +15,25 @@
  * Relative, a look, the entry in place (F160.4).
  */
 
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { ChevronDown, Download, Star } from 'lucide-react';
 import { CopyButton } from '@/components/shared/copy-button';
 import { Popover } from '@/components/shared/popover';
 import { useByCounts } from '@/hooks/use-by-counts';
 import { useFailureShown } from '@/hooks/use-dashboard-view';
+import { useViewWords } from '@/hooks/use-view-words';
 import { useFavouriteWrites } from '@/hooks/use-view-writes';
 import { dimensionLabel } from '@/lib/dashboard/describe';
 import { whole } from '@/lib/dashboard/figures';
 import { byList, byPicked, colored, colorList, colorWords, presented, type Group } from '@/lib/dashboard/head';
+import { measureNames } from '@/lib/dashboard/measures';
 import { catalogueQuery, favouritesQuery } from '@/lib/dashboard/queries';
 import type { Rows } from '@/lib/dashboard/rows-layout';
 import type { ViewState } from '@/lib/dashboard/state';
 import { tableText } from '@/lib/dashboard/table';
 import { cn } from '@/lib/utils';
+import { AddMeasure } from './measure-heads';
 import { Segmented } from './segmented';
 
 interface CardHeadProps {
@@ -77,6 +80,7 @@ export function CardHead({ state, rows, onState }: CardHeadProps) {
         />
       </div>
       <div className="dash-cardbar-part end">
+        <AddMeasure state={state} onState={onState} />
         <Picker
           kind="Color"
           words={colorWords(dimensions, state.color)}
@@ -283,9 +287,10 @@ function DimensionList({ menu, testId, searchLabel, search, onSearch, groups, on
 
 /** The table's Copy and CSV: every row of the answer, tab-separated to the clipboard, comma-separated to a file. */
 function TableTools({ rows }: { rows: Rows }) {
-  const copied = useMemo(() => tableText(rows, '\t'), [rows]);
+  const names = measureNames(rows, useViewWords());
+  const copied = tableText(rows, names, '\t');
   const download = () => {
-    const url = URL.createObjectURL(new Blob([tableText(rows, ',')], { type: 'text/csv' }));
+    const url = URL.createObjectURL(new Blob([tableText(rows, names, ',')], { type: 'text/csv' }));
     const link = document.createElement('a');
     link.href = url;
     link.download = `dashboard-${rows.by.key}.csv`;

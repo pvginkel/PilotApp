@@ -11,7 +11,9 @@
  * the banner, what failed; the main area, which scrolls, holding the view's scope (`scope.tsx`) and
  * its card: its head, the view's toolbar (`card-head.tsx`), then the view as rows, a row of which
  * drills into its value (`scope.ts`), or as a table (`rows-table.tsx`), which scrolls inside the
- * card, the main area then standing still at the room it has. The tabs follow
+ * card, the main area then standing still at the room it has; in both the measures are the columns,
+ * each changed in its heading (`measure-heads.tsx`). Each move of the view keeps the sorts the tab
+ * remembers by By (`sorts.ts`), the state the tab opened with read for the first of them. The tabs follow
  * the address (`use-view-tabs.ts`), read off the hash as the browser holds it; `#dash` names none
  * and shows the tab at hand as it was left, the panel at the first opening. The toolbar's left
  * holds the view's time after the one view's tab (`time-picker.tsx`), its right Reset and Save
@@ -27,6 +29,7 @@ import { useCallback, useState, type RefCallback } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useSseContext } from '@/contexts/sse-context';
 import { ReadFailures, useDashboardView, type Failure } from '@/hooks/use-dashboard-view';
+import { useMeasureHeads } from '@/hooks/use-measure-heads';
 import { ScreenInView } from '@/hooks/use-screens';
 import { keepScroll, scrollOf, useViewTabMoves, useViewTabs, useViewTabsAt, type ViewTab } from '@/hooks/use-view-tabs';
 import { useValueLabels } from '@/hooks/use-value-labels';
@@ -34,10 +37,12 @@ import { WriteFailures } from '@/hooks/use-view-writes';
 import { useWalkReads } from '@/hooks/use-walk-reads';
 import { addressQuery, catalogueQuery, knowLabel, quickFilterCountsQuery, rowsQuery, stateOf } from '@/lib/dashboard/queries';
 import { drilled, drills, valuesNamed } from '@/lib/dashboard/scope';
+import { settle } from '@/lib/dashboard/sorts';
 import { readState, withoutLook, writeState, type ViewState } from '@/lib/dashboard/state';
 import { cn } from '@/lib/utils';
 import { Banner, type Wrote } from './banner';
 import { CardHead } from './card-head';
+import { DragLayer, Refused } from './measure-heads';
 import { RowsChart } from './rows-chart';
 import { RowsTable } from './rows-table';
 import { ResetButton, SaveViewButton } from './save-view';
@@ -114,7 +119,13 @@ function View({ tab, now, one, moves, wrote, reads }: ViewProps) {
   const window = rows !== undefined && state !== null && JSON.stringify(readState(stateOf(rows.address)).time) === JSON.stringify(state.time) ? rows.window : undefined;
   const kept = useKeptScroll(tab.id);
   const table = state?.presentation === 'table';
-  const place = (next: ViewState, replace = false) => moves.set(tab.id, writeState(next), replace);
+  const openedRead = useQuery({ ...addressQuery(queryClient, tab.opened ?? ''), enabled: tab.opened !== null });
+  const opened = openedRead.data === undefined ? null : readState(stateOf(openedRead.data.address));
+  const place = (next: ViewState, replace = false) => {
+    const settled = settle({ sorts: tab.sorts, opened }, state!, next, dimensions);
+    moves.set(tab.id, writeState(settled.state), replace, settled.sorts);
+  };
+  const heads = useMeasureHeads(state, rows, place);
   // A row drills where the rows drawn are the By's at hand, the label it was drawn with known.
   const drill =
     state !== null && rows !== undefined && rows.by.key === state.by && drills(state, dimensions)
@@ -143,16 +154,18 @@ function View({ tab, now, one, moves, wrote, reads }: ViewProps) {
         <section className={view.changing ? 'dash-card changing' : 'dash-card'} aria-label="View" aria-busy={view.changing} data-testid="dashboard.card">
           {state !== null && <CardHead state={state} rows={rows} onState={place} />}
           <div className="dash-chart">
-            {rows === undefined ? (
+            {heads === null ? (
               <p className="empty">Loading the view…</p>
-            ) : table ? (
-              <RowsTable rows={rows} scrollRef={kept} />
             ) : (
-              <RowsChart rows={rows} relative={view.relative} onDrill={drill} />
+              <>
+                <Refused heads={heads} />
+                {table ? <RowsTable rows={heads.rows} heads={heads} scrollRef={kept} /> : <RowsChart rows={heads.rows} heads={heads} relative={view.relative} onDrill={drill} />}
+              </>
             )}
           </div>
         </section>
       </div>
+      <DragLayer heads={heads} />
     </>
   );
 }

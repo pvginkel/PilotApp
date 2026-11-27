@@ -59,7 +59,7 @@ const counted = (dashboard: DashboardPage, page: Page) =>
 const headings = (dashboard: DashboardPage, of: 'by' | 'color') => dashboard.listGroups(of).evaluateAll((groups) => groups.map((group) => group.querySelector('.menu-head')?.textContent ?? null));
 
 test.describe('The card’s head', () => {
-  test('holds By and the presentation, at the right Color and Relative, and nothing a later slice brings', async ({ people, projects, collection, shell, dashboard }) => {
+  test('holds By and the presentation, at the right + Measure, Color and Relative, and nothing a later slice brings', async ({ people, projects, collection, shell, dashboard }) => {
     const { recipeBox, chip } = await tally(people, projects, collection);
     await shell.open(`${projectAddress(recipeBox)}${dashboardAddress(`t=all&by=project&m=cost.sum&${chip}&col=psession`)}`);
 
@@ -68,7 +68,7 @@ test.describe('The card’s head', () => {
     await expect(dashboard.tablePresentation).toHaveAttribute('aria-pressed', 'false');
     await expect(dashboard.colorWords).toHaveText('Pilot session');
     await expect(dashboard.relative).toHaveAttribute('aria-pressed', 'false');
-    await expect(dashboard.cardHead.getByRole('button')).toHaveText(['ByProject', 'Rows', 'Table', 'ColorPilot session', 'Relative']);
+    await expect(dashboard.cardHead.getByRole('button')).toHaveText(['ByProject', 'Rows', 'Table', 'Measure', 'ColorPilot session', 'Relative']);
     await expect(dashboard.copy).toHaveCount(0);
     await expect(dashboard.csv).toHaveCount(0);
   });
