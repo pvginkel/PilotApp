@@ -7,12 +7,13 @@
  * no chip shown; a second press turns it off; each a new entry (F160.4). One that is on narrows the
  * others' counts. One that counts nothing and is off is muted and takes no press. On hover its × lies
  * over its right end, which removes it for everyone, after the dialog's question. The quick filters
- * are everyone's: read again each time the line shows, as the new tab's panel reads its lists. A
- * pane's foot names one it makes (`QuickFilterName`), a dimension's pane's or an each-item
- * threshold's.
+ * are everyone's: read again each time the line shows, as the new tab's panel reads its lists, and
+ * their counts asked again once for the line's list where their answer lacks one it lists, which
+ * another person made meanwhile. A pane's foot names one it makes (`QuickFilterName`), a dimension's
+ * pane's or an each-item threshold's.
  */
 
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { keepPreviousData, useQuery } from '@tanstack/react-query';
 import { Diamond, Trash2, X } from 'lucide-react';
 import { ConfirmDialog } from '@/components/shared/dialog';
@@ -44,6 +45,17 @@ export function QuickFilters({ state, scope, label, onState }: QuickFiltersProps
   const writes = useQuickFilterWrites();
   const [removing, setRemoving] = useState<QuickFilter | null>(null);
   const offered = held?.filter((each) => each.offered) ?? [];
+  // A quick filter another person made since the counts were read is not in their answer: the counts are asked again, once for the line's list.
+  const listed = offered.map((each) => each.key).join(',');
+  const answered = counts.isSuccess && !counts.isFetching && !counts.isPlaceholderData ? counts.data.quick_filters : null;
+  const lacking = answered !== null && offered.some((each) => !answered.some((count) => count.key === each.key));
+  const askedFor = useRef<string | null>(null);
+  const readCounts = counts.refetch;
+  useEffect(() => {
+    if (!lacking || askedFor.current === listed) return;
+    askedFor.current = listed;
+    void readCounts();
+  }, [lacking, listed, readCounts]);
   if (offered.length === 0) return null;
   const counted = new Map(counts.data?.quick_filters.map((each) => [each.key, each]));
   const formatOf = (amount: string) => words.measures?.figures?.find((each) => each.key === amount)?.format;

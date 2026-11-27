@@ -6,9 +6,10 @@
  * dimension's pane, makes one under a name, for everyone, its amount the cost, no chip joining the
  * scope; its × removes it after a dialog. On the walk's event the counts are read again with the
  * rows (F160.6), and a count whose answer the stream lost, as it dropped or before it first stood,
- * is asked again as it comes up. The figures are the tally's (`backend/tests/dashboard/test_tally.py`),
- * on projects of the spec's own; the quick filters are everyone's in the worker's record, so each is
- * found by its name.
+ * is asked again as it comes up; the counts are asked again where their answer lacks a quick filter
+ * another person made since they were read. The figures are the tally's
+ * (`backend/tests/dashboard/test_tally.py`), on projects of the spec's own; the quick filters are
+ * everyone's in the worker's record, so each is found by its name.
  */
 
 import type { Page, Request } from '@playwright/test';
@@ -199,7 +200,7 @@ test.describe('The quick filters', () => {
     await expectSeeded(dashboard);
   });
 
-  test('are everyone’s: one another person made meanwhile shows as the line shows again', async ({ page, backendUrl, people, projects, collection, shell, dashboard }) => {
+  test('are everyone’s: one another person made meanwhile shows as the line shows again, its count asked again', async ({ page, backendUrl, people, projects, collection, shell, dashboard }) => {
     const { first, chip } = await tally(people, projects, collection);
     await shell.open(`${projectAddress(first)}${dashboardAddress(`t=all&by=call&m=cost.sum&${chip}`)}`);
     await expectSeeded(dashboard);
@@ -215,6 +216,9 @@ test.describe('The quick filters', () => {
 
     await stored;
     await expect(dashboard.quickFilter(name).item).toHaveCount(1);
+    // The counts were read before it was made: their answer lacks it, so the line asks them again.
+    await expect(dashboard.quickFilter(name).count).toHaveText('3');
+    await expect(dashboard.quickFilter(name).amount).toHaveText('$0.25');
     await expect(dashboard.panel).toHaveCount(0);
   });
 

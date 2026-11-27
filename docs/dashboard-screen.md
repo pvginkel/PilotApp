@@ -139,10 +139,11 @@ quick filters'. The global toolbar holds the view's time after the one view's ta
   it comes.
 - **The quick filters** (`quick-filters.tsx`): everyone's, in the order made, each a toggle in a
   chip's form, a diamond first where it marks, with its name, its count and its amount in its
-  figure's format, read again each time the line shows. A press puts it in the view's `b=` or takes
-  it out, filtering or marking as it was made, with no chip shown; one that is on narrows the
-  others' counts; one off that counts nothing is muted and takes no press; its × on hover removes it
-  for everyone after a dialog. The counts are a task's answer over the stream (`taskAnswer`,
+  figure's format, read again each time the line shows, the counts asked again once where their
+  answer lacks one the line lists, which another person made meanwhile. A press puts it in the
+  view's `b=` or takes it out, filtering or marking as it was made, with no chip shown; one that is
+  on narrows the others' counts; one off that counts nothing is muted and takes no press; its × on
+  hover removes it for everyone after a dialog. The counts are a task's answer over the stream (`taskAnswer`,
   `lib/dashboard/task.ts`), heard before the task starts, a superseded read ceasing to listen while
   the task runs on, and never retried by itself. "Add as quick filter", at a dimension's pane's
   foot or an each-item threshold's, names one, its name filled with the chip's words, and makes it
