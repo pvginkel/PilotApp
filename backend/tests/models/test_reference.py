@@ -15,6 +15,7 @@ from app.models import (
     TokenKind,
 )
 from app.models.reference import ENUM_TYPES, AnswerChannel, BlockKind, NumberFormat
+from app.schemas.dashboard import Format as WrittenFormat
 from tests.support.database import violated_constraint
 
 
@@ -65,8 +66,10 @@ class TestEnumTypes:
 
     def test_the_number_formats_are_the_catalogues(self) -> None:
         """Decision 86: a person picks a Custom Ratio's from the formats the
-        catalogue writes its figures and ratios in."""
+        catalogue writes its figures and ratios in, and the write route
+        takes the same list it converts to NumberFormat."""
         assert [str(one) for one in NumberFormat] == list(get_args(Format))
+        assert [str(one) for one in NumberFormat] == list(get_args(WrittenFormat))
 
 
 class TestTheBlockDsl:
