@@ -37,7 +37,7 @@ from tests.support.dashboard import GAP, ZONE
 from tests.support.dashboard import read as read_paths
 from tests.support.labels import declared
 from tests.support.transcripts import reference
-from tests.support.vocabularies import vocabularies
+from tests.support.vocabularies import listed, lists, nesting, vocabularies
 
 
 def _codes(catalogue: Catalogue, dimension: str) -> list[str]:
@@ -639,3 +639,26 @@ class TestADeclaration:
         assert {"planned_dishes", "tastings"} <= {
             figure.key for figure in after.figures
         }
+
+    def test_a_kind_several_sit_in_drills_to_the_first_by_its_place(
+        self, session: DbSession, container: ServiceContainer
+    ) -> None:
+        # A dish sits in the menu and in the course, and its list places it
+        # ahead of the course: the menu drills to it by its place, not by the
+        # nestings' order nor the codes'.
+        container.vocabulary_service().declare(
+            vocabularies(
+                lists=lists(work_unit_kind=listed("menu", "dish", "course")),
+                nesting=nesting(
+                    ("course", "menu"), ("dish", "menu"), ("dish", "course")
+                ),
+            )
+        )
+
+        catalogue = assemble(session, ZONE, GAP)
+
+        assert [
+            (dimension.key, dimension.next)
+            for dimension in catalogue.dimensions
+            if dimension.key in ("menu", "dish", "course")
+        ] == [("menu", "dish"), ("dish", "conversation"), ("course", "dish")]
