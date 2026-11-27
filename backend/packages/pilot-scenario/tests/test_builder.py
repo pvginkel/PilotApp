@@ -1119,6 +1119,29 @@ class TestItsLabels:
             ],
         }
 
+    def test_a_units_role_round_and_rework_kind_are_its_rows(self) -> None:
+        dumplings = replace(
+            SCENARIO.units[2], role="taster", round=2, rework_kind=labeller.RECOOKED
+        )
+        scenario = replace(SCENARIO, units=(*SCENARIO.units[:2], dumplings))
+
+        rows = Builder(scenario, UNTIL).records()["units"]
+
+        assert rows[2] == {
+            "key": "recipe-box|Scale the recipes|Halve the dumplings",
+            "kind": "leg",
+            "title": "Halve the dumplings",
+            "part_of": "recipe-box|Scale the recipes",
+            "role": "taster",
+            "round": 2,
+            "rework_kind": "recooked",
+        }
+        assert all(
+            fact not in row
+            for row in rows[:2]
+            for fact in ("role", "round", "rework_kind")
+        )
+
     def test_they_are_written_where_the_stub_reads_them(self, tmp_path: Path) -> None:
         builder = Builder(SCENARIO, UNTIL)
 

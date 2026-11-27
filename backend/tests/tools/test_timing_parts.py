@@ -5,12 +5,14 @@ to disk is named with the node that did."""
 from datetime import UTC, datetime, timedelta
 
 import pytest
+from flask import Flask
 from flask.testing import FlaskClient
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session as DbSession
 
 from app.models.call import Call
 from app.services.container import ServiceContainer
+from tests.support.publications import collector_headers
 from tools.timing.history import _Writer, draw
 from tools.timing.parts import (
     EACH_ITEM,
@@ -18,6 +20,7 @@ from tools.timing.parts import (
     PARTS,
     RUNS,
     Part,
+    Timing,
     explained,
     timed_runs,
 )
@@ -52,6 +55,11 @@ def test_every_part_reads_over_each_of_its_ranges(
 ) -> None:
     for range_ in part.ranges:
         state = part.state.format(t=range_, x="0")
+        if part.collector:
+            assert part.route is not None
+            answer = client.get(part.route, headers=collector_headers())
+            assert answer.status_code == 200, answer.get_json()
+            continue
         if part.route is None:
             view = container.address_service().view(state)
             counts = container.counts_service()
@@ -67,6 +75,16 @@ def test_every_part_reads_over_each_of_its_ranges(
             query_string=[("state", state), *part.query],
         )
         assert answer.status_code == 200, answer.get_json()
+
+
+def test_the_inventory_is_read_under_the_collectors_bearer(
+    written: str, app: Flask
+) -> None:
+    inventory = next(part for part in PARTS if part.key == "inventory")
+
+    found = Timing(app)._reader(inventory, "")()
+
+    assert found["transcripts"] and found["conversations"]
 
 
 def test_the_parts_have_keys_of_their_own() -> None:

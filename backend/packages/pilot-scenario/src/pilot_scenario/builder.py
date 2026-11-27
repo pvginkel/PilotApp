@@ -586,8 +586,9 @@ class Builder:
 
     def records(self) -> dict[str, Any]:
         """The stub labeller's run records of the scenario: its kinds of work;
-        its units, each named by its key, a unit its session ran with that
-        session's times and served, one cut into parts with their count; the
+        its units, each named by its key with its role, round and rework kind
+        where it has them, a unit its session ran with that session's times
+        and served, one cut into parts with their count; the
         unit each session ran, by its conversation; and each group with the
         conversations it adopts."""
         units = {unit.name: unit for unit in self.scenario.units}
@@ -611,6 +612,9 @@ class Builder:
                 "title": unit.name,
                 "part_of": None if unit.within is None else key(units[unit.within]),
             }
+            for fact in ("role", "round", "rework_kind"):
+                if getattr(unit, fact) is not None:
+                    row[fact] = getattr(unit, fact)
             session = ran.get(unit.name)
             if session is not None:
                 moments = list(_session_moments(session))

@@ -18,7 +18,13 @@ collected, their Turns standing in with their own cost and tokens.
 
 Its shape is the fleet's as `architecture.md` *The sizes* has it: some nine
 thousand Calls a day (`CALLS_A_DAY`), fewer at the weekend, about thirty a
-transcript, a third of the conversations with sub-agents. A day already
+transcript, a third of the conversations with sub-agents. Each work session
+of Pilot's carries out a leg of its project's errand of the day, in one of
+the `ROLES`, its round the role's count in the errand, a later round now and
+then work cooked again; a role's legs run on the model its configuration
+gives for each four weeks (`configured`), so that a role's configuration
+changes between its units. They are drawn from a seed of their own, so the
+rest of a day is drawn as before they were. A day already
 written, its first conversation published, is skipped, so a history is
 grown by running the command again with more Calls. A day is one
 transaction, tried again where another worker wrote a vocabulary's row or
@@ -46,7 +52,7 @@ from zoneinfo import ZoneInfo
 
 from pilot_collection.publication import PublicationSchema
 from pilot_collection.vocabularies import VocabulariesSchema
-from pilot_scenario import Builder
+from pilot_scenario import Builder, labeller
 from pilot_scenario.script import (
     Call,
     Carried,
@@ -62,6 +68,7 @@ from pilot_scenario.script import (
     Tokens,
     ToolUse,
     Turn,
+    Unit,
 )
 from pilot_scenario.transcript import MANAGED
 from psycopg.errors import DeadlockDetected, UniqueViolation
@@ -178,6 +185,20 @@ ERRANDS = (
     "Mend the lines",
 )
 
+ROLES = (("cook", 60), ("taster", 30), ("porter", 10))
+"""The roles a leg is done in, by weight."""
+
+_LARGEST = {"cook": 0.8, "taster": 0.5, "porter": 0.2}
+"""How often a role's configuration is the day's largest model, else the
+middle one."""
+
+CONFIGURED_DAYS = 28
+"""How long a role's configuration stands before it is drawn again."""
+
+REWORK = 0.25
+"""The share of a role's later rounds in an errand that are work cooked
+again."""
+
 _MODELS = (
     (
         date(2026, 6, 1),
@@ -206,6 +227,22 @@ _TASK = "Find where the {word} are counted"
 
 def _models(day: date) -> tuple[str, str, str]:
     return next(models for before, models in _MODELS if day < before)
+
+
+def configured(role: str, day: date) -> str:
+    """The model a role's legs run on that day: the day's largest or its
+    middle one, drawn for each `CONFIGURED_DAYS` from the role and the
+    stretch."""
+    large, middle, _ = _models(day)
+    stretch = day.toordinal() // CONFIGURED_DAYS
+    rng = random.Random(f"{SEED}/{role}/{stretch}")
+    return large if rng.random() < _LARGEST[role] else middle
+
+
+def errand(place: Place, day: date) -> str:
+    """The name of a project's errand of a day, which its work sessions'
+    legs are parts of."""
+    return f"{place.name} errands of {day.isoformat()}"
 
 
 def _version(day: date) -> str:
@@ -245,7 +282,7 @@ class _Pilots:
     standing_in: bool
     chat: ChatKind | None = None
     trigger: WorkTrigger | None = None
-    title: str | None = None
+    title: str = ""
     tokens: Tokens = field(default_factory=Tokens)
 
 
@@ -522,9 +559,11 @@ def draw(day: date, calls: int | None = None) -> Day:
     least, or the `calls` given."""
     drawn = _Drawn(day)
     rng = drawn.rng
+    units = random.Random(f"{SEED}/{day.isoformat()}/units")
     goal = target(day) if calls is None else calls
     sessions: list[Session] = []
     pilots: dict[str, _Pilots] = {}
+    legs: dict[str, list[Unit]] = {}
     calls = 0
     while calls < goal:
         name = f"s{len(sessions):04}"
@@ -541,6 +580,13 @@ def draw(day: date, calls: int | None = None) -> Day:
                 ("work", "job", "chat", "conversation"), (55, 20, 20, 5)
             )[0]
             turns = rng.choices((1, 2, 3), (70, 20, 10))[0] if kind != "job" else 1
+            role = (
+                units.choices([r for r, _ in ROLES], [w for _, w in ROLES])[0]
+                if kind == "work"
+                else None
+            )
+            if role is not None:
+                model = configured(role, day)
             spans = _spans(rng, main_calls, turns)
             launches = []
             runs = []
@@ -618,6 +664,23 @@ def draw(day: date, calls: int | None = None) -> Day:
                 title=f"{rng.choice(ERRANDS)} {len(sessions) + 1}",
             )
             in_store = kind != "work"
+            leg: str | None = None
+            if role is not None:
+                done = legs.setdefault(place.slug, [])
+                round_ = 1 + sum(unit.role == role for unit in done)
+                leg = plan.title
+                done.append(
+                    Unit(
+                        "leg",
+                        leg,
+                        within=errand(place, day),
+                        role=role,
+                        round=round_,
+                        rework_kind=labeller.RECOOKED
+                        if round_ > 1 and units.random() < REWORK
+                        else None,
+                    )
+                )
             session = Session(
                 name=name,
                 directory=STORE if in_store else place.directory,
@@ -629,6 +692,7 @@ def draw(day: date, calls: int | None = None) -> Day:
                     place.slug, plan.title or "", runs[0].started, runs[-1].ended
                 ),
                 launches=tuple(launches),
+                unit=leg,
                 sub_agents=tuple(agents),
             )
             if plan.standing_in:
@@ -694,8 +758,16 @@ def draw(day: date, calls: int | None = None) -> Day:
         name=f"timing/{day.isoformat()}",
         people=tuple(p for p, _ in PEOPLE),
         projects=tuple(p.slug for p in PLACES),
-        kinds=("errand",),
-        units=(),
+        kinds=("errand", "leg"),
+        units=tuple(
+            unit
+            for place in PLACES
+            if place.slug in legs
+            for unit in (
+                Unit("errand", errand(place, day), project=place.slug),
+                *legs[place.slug],
+            )
+        ),
         sessions=tuple(sessions),
     )
     midnight = datetime.combine(day, datetime.min.time(), ZONE).astimezone(UTC)

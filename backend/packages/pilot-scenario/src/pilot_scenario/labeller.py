@@ -75,6 +75,9 @@ RECORDS = "records.json"
 SERVED = "served"
 """The Unit Outcome of a unit done as it should be."""
 
+RECOOKED = "recooked"
+"""The Rework Kind of work cooked again."""
+
 _FORMAT = "1"
 """The format of a stamp, a checkpoint and an index: their text's first field."""
 
@@ -125,7 +128,7 @@ _LISTS: dict[str, list[dict[str, Any]]] = {
         _value(SERVED, "Served", "Done as it should be."),
         _value("sent_back", "Sent back", "Done, and sent back to be done again."),
     ],
-    "rework_kind": [_value("recooked", "Recooked", "Work cooked again.")],
+    "rework_kind": [_value(RECOOKED, "Recooked", "Work cooked again.")],
     "unit_measure": [
         _value("parts", "Parts", "The units it was cut into.", unit="parts"),
     ],

@@ -2,11 +2,12 @@
 same from its seed every time, in the scenario's words, and written as a
 collector's publication and Pilot's own record write it."""
 
+from collections import Counter
 from dataclasses import fields, is_dataclass
 from datetime import date, timedelta
 from typing import Any
 
-from pilot_scenario import Builder
+from pilot_scenario import Builder, labeller
 from pilot_scenario.script import Call, Session
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session as DbSession
@@ -14,15 +15,20 @@ from sqlalchemy.orm import Session as DbSession
 from app.models import Launch, TokenCount, Transcript, Turn
 from app.models import Session as AgentSession
 from app.models.call import Call as CallRow
+from app.models.label import WorkUnit
 from app.services.container import ServiceContainer
 from tools.timing.history import (
+    CONFIGURED_DAYS,
     LONG_CALLS,
     PLACES,
+    ROLES,
     Day,
     _tokens,
     _Writer,
+    configured,
     days,
     draw,
+    errand,
     in_lock_order,
     target,
 )
@@ -110,6 +116,75 @@ class TestTheDays:
         assert _words(day.scenario) & WORKFLOW == set()
         assert _words(list(day.pilots.values())) & WORKFLOW == set()
         assert _words(list(PLACES)) & WORKFLOW == set()
+
+
+class TestTheUnits:
+    def test_each_work_session_carries_out_a_leg_of_its_projects_errand(
+        self,
+    ) -> None:
+        day = draw(TUESDAY)
+        units = {unit.name: unit for unit in day.scenario.units}
+        work = {name for name, plan in day.pilots.items() if plan.kind == "work"}
+
+        assert work and day.scenario.kinds == ("errand", "leg")
+        for session in day.scenario.sessions:
+            if session.name not in work:
+                assert session.unit is None
+                continue
+            assert session.unit is not None
+            leg = units[session.unit]
+            place = day.pilots[session.name].place
+            assert (leg.kind, leg.within) == ("leg", errand(place, day.day))
+            assert leg.role in dict(ROLES)
+            assert units[leg.within].project == place.slug
+
+    def test_a_legs_round_counts_its_role_in_the_errand_and_a_later_one_may_be_redone(
+        self,
+    ) -> None:
+        seen: Counter[tuple[str | None, str | None]] = Counter()
+        redone = 0
+        for day in (TUESDAY, TUESDAY + timedelta(days=1)):
+            for unit in draw(day).scenario.units:
+                if unit.kind == "errand":
+                    assert (unit.role, unit.round, unit.rework_kind) == (None,) * 3
+                    continue
+                seen[(unit.within, unit.role)] += 1
+                assert unit.round == seen[(unit.within, unit.role)]
+                if unit.rework_kind is not None:
+                    assert unit.rework_kind == labeller.RECOOKED
+                    assert unit.round > 1
+                    redone += 1
+
+        assert redone
+
+    def test_a_roles_legs_run_on_its_configuration(self) -> None:
+        day = draw(TUESDAY)
+        units = {unit.name: unit for unit in day.scenario.units}
+
+        for session in day.scenario.sessions:
+            if session.unit is None:
+                continue
+            role = units[session.unit].role
+            assert role is not None
+            first = next(
+                step
+                for step in session.launches[0].prompts[0].steps
+                if isinstance(step, Call)
+            )
+            assert first.model == configured(role, TUESDAY)
+
+    def test_a_roles_configuration_changes_between_its_stretches(self) -> None:
+        for role, _ in ROLES:
+            models = [
+                configured(role, TUESDAY - timedelta(days=CONFIGURED_DAYS * n))
+                for n in range(12)
+            ]
+
+            assert len(set(models)) > 1
+            assert all(
+                configured(role, TUESDAY - timedelta(days=n)) in models
+                for n in range(CONFIGURED_DAYS)
+            )
 
 
 class TestTheLockOrder:
@@ -205,3 +280,21 @@ class TestTheWrite:
             select(Turn.cost).join(AgentSession).where(AgentSession.id != stood_in.id)
         ).all()
         assert all(cost is not None for cost in reported)
+        legs = {
+            unit.title: unit
+            for unit in session.scalars(
+                select(WorkUnit).where(WorkUnit.kind_code == "leg")
+            )
+        }
+        drawn = {unit.name: unit for unit in day.scenario.units if unit.kind == "leg"}
+        collected = {
+            day.pilots[n].title
+            for n in day.pilots
+            if day.pilots[n].kind == "work" and not day.pilots[n].standing_in
+        }
+        assert collected and set(legs) == collected
+        assert all(
+            (legs[title].role, legs[title].round, legs[title].rework_kind_code)
+            == (drawn[title].role, drawn[title].round, drawn[title].rework_kind)
+            for title in legs
+        )

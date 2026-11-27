@@ -12,7 +12,9 @@ statements are then read once more, each run again under `EXPLAIN (ANALYZE,
 BUFFERS)`, so that a sort, a hashed grouping, a hash or a window that went
 to disk at the cluster's `work_mem` is named with the statement that did. A burst reads the Projects view over all time from one
 to `BURST` clients at once. The record's size on disk is the database's,
-with its largest tables.
+with its largest tables. A collector's call, Pilot's inventory, is read
+under the collector's bearer, its token drawn for the timing where none is
+set.
 
 The each-item quick filter of R24 is added first where the record has none:
 a conversation's cost over five dollars, coarser than the call.
@@ -21,6 +23,7 @@ a conversation's cost over five dollars, coarser than the call.
 import argparse
 import json
 import os
+import secrets
 import statistics
 import threading
 import time
@@ -37,6 +40,7 @@ from sqlalchemy import event, text
 from sqlalchemy.engine import Connection, Engine
 
 from app.exceptions import QueryRefusedException
+from app.services.publication_service import COLLECTOR_PROTOCOL_MAX
 
 RUNS = 3
 """The timed reads of a part; its time is their median."""
@@ -64,7 +68,9 @@ EACH_ITEM_LABEL = "Costly conversations"
 class Part:
     """A part as the page asks it: a route and its query, or a task's
     count (`attributes`, `quick_filters`), on `state`, whose `{t}` is the
-    range read and `{x}` the threshold that keeps fewer rows than all."""
+    range read and `{x}` the threshold that keeps fewer rows than all; or,
+    where `collector`, a collector's call of the route, which takes no
+    state."""
 
     key: str
     label: str
@@ -72,6 +78,7 @@ class Part:
     route: str | None = None
     query: tuple[tuple[str, str], ...] = ()
     ranges: tuple[str, ...] = RANGES
+    collector: bool = False
 
 
 PARTS = (
@@ -197,6 +204,52 @@ PARTS = (
         "A conversation's calls: the longest thread's",
         "t={t}&by=conversation&m=cost.sum",
         "/api/dashboard/conversations/{conversation}/calls",
+    ),
+    Part(
+        "kind_rows",
+        "Rows by the widest kind of work: its units, their measure and the cost",
+        "t={t}&by=errand&m=cost.sum&m=units.count&m=parts.sum",
+        "/api/dashboard/rows",
+    ),
+    Part(
+        "kind_color",
+        "Rows by project, colored by the widest kind of work",
+        "t={t}&by=project&m=cost.sum&col=errand",
+        "/api/dashboard/rows",
+    ),
+    Part(
+        "roles",
+        "Rows by a unit's role, with the share of work done again",
+        "t={t}&by=role&m=cost.sum&m=units.count&m=r:rework_share",
+        "/api/dashboard/rows",
+    ),
+    Part(
+        "kind_order",
+        "In order: each leg by its start, its outliers judged among its role,"
+        " with the marker of a role's configuration",
+        "t={t}&by=leg&p=order&m=cost.sum",
+        "/api/dashboard/series",
+    ),
+    Part(
+        "kind_dots",
+        "In order: each errand by its start, its conversations as dots, each"
+        " with its role",
+        "t={t}&by=errand&p=order&m=cost.median.conversation",
+        "/api/dashboard/series",
+    ),
+    Part(
+        "lanes_model",
+        "The lanes by conversation, their runs colored by model",
+        "t={t}&by=conversation&p=lanes&m=cost.sum&col=model",
+        "/api/dashboard/lanes",
+    ),
+    Part(
+        "inventory",
+        "Pilot's inventory with what it hands the labeller, a collector's call",
+        "",
+        "/api/collector/inventory",
+        ranges=("all",),
+        collector=True,
     ),
 )
 
@@ -332,6 +385,12 @@ class Timing:
             self.engine: Engine = self.container.db_session().get_bind()
         self.captured = _Captured(self.engine)
         self.client = app.test_client()
+        self.thresholds: dict[str, str] = {}
+        token = self.container.app_config().collector_token
+        self.collector = {
+            "Authorization": f"Bearer {token}",
+            "X-Pilot-Collector-Protocol": str(COLLECTOR_PROTOCOL_MAX),
+        }
 
     def _scalar(self, sql: str) -> Any:
         with self.engine.connect() as connection:
@@ -368,6 +427,8 @@ class Timing:
                     "compactions",
                     "sessions",
                     "turns",
+                    "work_units",
+                    "segments",
                 )
             }
             span = connection.execute(
@@ -416,7 +477,17 @@ class Timing:
             )
         )
 
+    def _collector(self, route: str) -> Any:
+        answer = self.client.get(route, headers=self.collector)
+        if answer.status_code != 200:
+            raise RuntimeError(f"{answer.status_code}: {answer.get_json()}")
+        return answer.get_json()
+
     def _reader(self, part: Part, state: str) -> Callable[[], Any]:
+        if part.collector:
+            assert part.route is not None
+            route = part.route
+            return lambda: self._collector(route)
         if part.route is not None:
             route = part.route.format(conversation=self.conversation_id)
             return lambda: self._get(route, state, part.query)
@@ -523,6 +594,7 @@ def main(argv: Sequence[str] | None = None) -> None:
 
     os.environ["DASHBOARD_STATEMENT_TIMEOUT_SECONDS"] = str(TIMEOUT_SECONDS)
     os.environ["OIDC_ENABLED"] = "false"
+    os.environ.setdefault("COLLECTOR_TOKEN", secrets.token_hex(16))
     from app import create_app
 
     timing = Timing(create_app(skip_background_services=True))

@@ -235,12 +235,17 @@ class Session:
 class Unit:
     """A unit of the scenario's work, of one of its kinds; `within` names the
     unit it is a part of, `project` the project of one that is part of
-    none."""
+    none. `role` is the role that did it, `round` its round among that
+    role's, and `rework_kind` the Rework Kind's code where it is work done
+    again, each none where it has none."""
 
     kind: str
     name: str
     project: str | None = None
     within: str | None = None
+    role: str | None = None
+    round: int | None = None
+    rework_kind: str | None = None
 
 
 @dataclass(frozen=True)
