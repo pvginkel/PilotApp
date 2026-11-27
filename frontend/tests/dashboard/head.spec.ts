@@ -76,19 +76,32 @@ test.describe('By', () => {
     shell,
     dashboard,
     testEvents,
+    dashboardBounds,
   }) => {
     const { recipeBox, chip } = await tally(people, projects, collection);
     await shell.open(`${projectAddress(recipeBox)}${dashboardAddress(`t=all&by=project&m=cost.sum&${chip}`)}`);
     await expect(dashboard.rows).toHaveCount(2);
     const asked = dashboard.byCountsAnswered();
     await testEvents.clearEvents();
+    // The engine holds By's counts after their first fact: the task stands between that fact's progress update and its end.
+    await dashboardBounds.set({ hold: true });
 
     await dashboard.by.click();
 
-    // Each progress update carries one fact's counts, which the page takes as it comes.
+    // Each progress update carries one fact's counts, drawn as it comes, the facts after it counting none yet.
     const update = await waitForSseEvent(page, { streamId: 'task', event: 'progress_update' });
-    const counted = extractSseData<{ data: { counts: { dimension: string }[] } }>(update)!.data.counts;
-    expect(counted.length).toBeGreaterThan(0);
+    const counted = extractSseData<{ data: { counts: { dimension: string; count: number }[] } }>(update)!.data.counts;
+    expect(counted).toEqual(expect.arrayContaining([{ dimension: 'project', count: 2 }, { dimension: 'call', count: TALLY.calls }]));
+    await expect(dashboard.entry('by', 'Project').count).toHaveText('2');
+    await expect(dashboard.entry('by', 'Call').count).toHaveText(String(TALLY.calls));
+    const uncounted = await dashboard
+      .listGroups('by')
+      .getByTestId('dashboard.by.entry')
+      .filter({ hasNot: page.getByTestId('dashboard.by.entry.count') })
+      .evaluateAll((entries) => entries.map((entry) => entry.getAttribute('data-key')));
+    expect(uncounted.length).toBeGreaterThan(0);
+    expect(uncounted.filter((key) => counted.some(({ dimension }) => dimension === key))).toEqual([]);
+    await dashboardBounds.set({});
     await expect(dashboard.entry('by', 'Project').count).toHaveText('2');
     await expect(dashboard.entry('by', 'Pilot session').count).toHaveText('3');
     await expect(dashboard.entry('by', 'Pilot turn').count).toHaveText(String(TALLY.turns));

@@ -3989,8 +3989,18 @@
         "type": "object"
       },
       "DashboardBoundsSchema.467cb1a": {
-        "description": "The dashboard engine's timeout (F154.5); left out or null, the one\nthe app booted with.",
+        "description": "The dashboard engine's timeout (F154.5); left out or null, the one\nthe app booted with. And its hold, for a spec that sees a task between\nits progress and its end.",
         "properties": {
+          "hold": {
+            "default": false,
+            "description": "Whether the reads that may be held, By's counts after their first fact, wait until the bounds are set again or their deadline passes",
+            "examples": [
+              true,
+              false
+            ],
+            "title": "Hold",
+            "type": "boolean"
+          },
           "timeout_seconds": {
             "anyOf": [
               {
@@ -34848,7 +34858,7 @@
     },
     "/api/testing/dashboard-bounds": {
       "put": {
-        "description": "Returns:     200: The engine's timeout as the app now holds it     400: A timeout that is not above zero",
+        "description": "Returns:     200: The engine's timeout and hold as the app now holds them     400: A timeout that is not above zero, or a hold not true or false",
         "operationId": "put__api_testing_dashboard-bounds",
         "parameters": [],
         "requestBody": {
@@ -34888,7 +34898,7 @@
             "BearerAuth": []
           }
         ],
-        "summary": "Set the engine's timeout; left out, the one the app booted with. The reads that start from here on take it.",
+        "summary": "Set the engine's timeout; left out, the one the app booted with. The reads that start from here on take it. And its hold: held, By's counts wait after their first fact until the next PUT; left out, none waits.",
         "tags": [],
         "x-required-role": "editor"
       }

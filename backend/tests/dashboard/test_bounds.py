@@ -1,7 +1,8 @@
 """The bounds every statement of the dashboard's engine runs under (F154.5):
 a read-only transaction of its own under the timeout, which bounds the read
 whole, its wait for a slot and its statements together, the reads of one
-answer sharing one deadline, `work_mem` never
+answer sharing one deadline, a holdable read waiting while a spec holds it,
+`work_mem` never
 raised, a statement past the timeout or the limit on temporary files refused
 with a reason told apart by PostgreSQL's code, and the statements at once
 bounded below the app's pool."""
@@ -211,6 +212,42 @@ class TestBounds:
 
         with bounds.read(session) as db:
             assert db.execute(text("SELECT 1")).scalar_one() == 1
+
+    def test_held_a_holdable_read_waits_for_the_hold_to_end_and_another_goes_on(
+        self, session: DbSession, other: DbSession
+    ) -> None:
+        bounds = Bounds(timeout_seconds=5, at_once=1, pool=5)
+        bounds.hold(True)
+        with bounds.read(session) as db:
+            assert db.execute(text("SELECT 1")).scalar_one() == 1
+        entered = threading.Event()
+
+        def held() -> None:
+            with bounds.read(other, holdable=True):
+                entered.set()
+
+        waiting = threading.Thread(target=held)
+        waiting.start()
+        try:
+            assert not entered.wait(0.3)
+            bounds.hold(False)
+            assert entered.wait(2)
+        finally:
+            bounds.hold(False)
+            waiting.join()
+
+    def test_a_held_read_past_its_deadline_is_refused_as_one(
+        self, session: DbSession, bounds: Bounds
+    ) -> None:
+        bounds.hold(True)
+
+        with (
+            pytest.raises(QueryRefusedException) as refused,
+            bounds.read(session, holdable=True),
+        ):
+            pass
+
+        assert refused.value.reason == "timeout"
 
     @pytest.mark.parametrize("at_once", [5, 6])
     def test_as_many_at_once_as_the_pool_holds_is_refused(self, at_once: int) -> None:

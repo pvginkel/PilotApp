@@ -1,6 +1,8 @@
 """A testing endpoint that sets the dashboard engine's timeout (F154.5) on
 the running app, so that a spec meets the engine's refusal of a read: outside
-the tests only its environment sets it, at boot (TEST-6)."""
+the tests only its environment sets it, at boot (TEST-6). It also holds By's
+counts after their first fact, so that a spec sees the task between its
+progress and its end."""
 
 from typing import Any
 
@@ -42,14 +44,18 @@ def put_dashboard_bounds(
     bounds: Bounds = Provide[ServiceContainer.dashboard_bounds],
 ) -> Any:
     """Set the engine's timeout; left out, the one the app booted with. The
-    reads that start from here on take it.
+    reads that start from here on take it. And its hold: held, By's counts
+    wait after their first fact until the next PUT; left out, none waits.
 
     Returns:
-        200: The engine's timeout as the app now holds it
-        400: A timeout that is not above zero
+        200: The engine's timeout and hold as the app now holds them
+        400: A timeout that is not above zero, or a hold not true or false
     """
     data = DashboardBoundsSchema.model_validate(request.get_json())
     bounds.timeout_seconds = (
         data.timeout_seconds or app_config.dashboard_statement_timeout_seconds
     )
-    return DashboardBoundsSchema(timeout_seconds=bounds.timeout_seconds).model_dump()
+    bounds.hold(data.hold)
+    return DashboardBoundsSchema(
+        timeout_seconds=bounds.timeout_seconds, hold=data.hold
+    ).model_dump()

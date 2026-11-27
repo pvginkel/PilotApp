@@ -1,7 +1,8 @@
 /**
- * The dashboard engine's timeout (F154.5), for a spec: set on the worker's backend through
- * PUT /api/testing/dashboard-bounds, for the reads that start from then on. The fixture gives the
- * backend back the timeout it booted with after the spec, so every other spec meets it.
+ * The dashboard engine's timeout (F154.5) and its hold, for a spec: set on the worker's backend
+ * through PUT /api/testing/dashboard-bounds, for the reads that start from then on. The fixture gives
+ * the backend back the timeout it booted with and no hold after the spec, so every other spec meets
+ * them.
  */
 
 import { expect, type Page } from '@playwright/test';
@@ -18,7 +19,7 @@ export class DashboardBounds {
     private readonly backendUrl: string,
   ) {}
 
-  /** The engine's timeout; left out, the one the backend booted with. */
+  /** The engine's timeout, left out the one the backend booted with; and its hold, By's counts waiting after their first fact until the next `set`. */
   async set(bounds: Bounds): Promise<void> {
     const response = await this.page.request.put(`${this.backendUrl}/api/testing/dashboard-bounds`, { data: bounds });
     expect(response.status(), await response.text()).toBe(200);
