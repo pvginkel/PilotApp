@@ -8,7 +8,7 @@
  * banner under the global toolbar alone (F160.8): each write's own failure replaces the query
  * client's toast every failed write has by default. A write reads again what it changed and no
  * more, the figures among it only where it changed them, where the generated hooks' success reads
- * again every query but the figures (`READ_AFTER_A_WRITE`).
+ * again every query but the figures and the labels (`KEPT_FROM_WRITES`).
  */
 
 import { createContext, useContext } from 'react';
