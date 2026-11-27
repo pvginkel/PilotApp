@@ -20,6 +20,15 @@ A dimension's key is the mockup's where the mockup has the dimension
 (`design/mockup/dashboard/state.js`), so that a state written there reads
 here. The local time's three are derived in the zone given, and a sitting
 ends at the gap the joins were made with (DB decision 80.3).
+
+A Pilot session, a Pilot turn, a conversation and a Call are named from
+what Pilot records, each with its time: a Session its work item's or job's
+number and title, "#12 Rework the tabs", else its kind's name, a chat's by
+the chat's kind, "Project chat", from its start; a Turn its number and why
+it was sent, "Turn 3 · brief", from its start; a thread a sub-agent's type
+and the task it was given, "code-writer · Review phase 3", or "Main
+thread", at its first Call; a Call its place in its thread, "Call 12", at
+its end.
 """
 
 import re
@@ -66,11 +75,13 @@ SOURCES = (
     ),
 )
 
+
+def _chat_name(kind: ChatKind) -> str:
+    return f"{kind.value.capitalize()} chat"
+
+
 WORK_TYPES = (
-    *(
-        Value(f"chat:{kind.value}", f"{kind.value.capitalize()} chat")
-        for kind in ChatKind
-    ),
+    *(Value(f"chat:{kind.value}", _chat_name(kind)) for kind in ChatKind),
     Value("conversation", "Conversation"),
     *(
         Value(f"job:{trigger.value}", f"Job: {trigger.value.replace('_', ' ')}")
@@ -141,6 +152,45 @@ def _source(row: Row) -> ColumnElement[Any]:
     )
 
 
+def _words(first: str, *rest: ColumnElement[Any] | str) -> ColumnElement[Any]:
+    """The words one after the other, none where any is none."""
+    written: ColumnElement[Any] = literal(first, Text)
+    for part in rest:
+        written = written + (part if isinstance(part, str) else cast(part, Text))
+    return written
+
+
+def _session_name(row: Row) -> ColumnElement[Any]:
+    item = row.to("item")
+    chat = cast(row.to("chat").c.kind_code, Text)
+    return case(
+        (
+            item.c.id.is_not(None),
+            func.concat_ws(" ", _words("#", item.c.seq), item.c.title),
+        ),
+        *((chat == kind.value, _chat_name(kind)) for kind in ChatKind),
+        else_=row.to("session_kind").c.name,
+    )
+
+
+def _turn_name(row: Row) -> ColumnElement[Any]:
+    turn = row.to("turn")
+    cause = func.replace(cast(turn.c.cause_code, Text), "_", " ")
+    return _words("Turn ", turn.c.seq, " · ", cause)
+
+
+def _conversation_name(row: Row) -> ColumnElement[Any]:
+    thread = row.to("thread")
+    given = func.concat_ws(" · ", thread.c.agent_type, thread.c.description)
+    return case(
+        (
+            thread.c.agent_id.is_not(None),
+            func.coalesce(func.nullif(given, ""), "Sub-agent"),
+        ),
+        (thread.c.id.is_not(None), "Main thread"),
+    )
+
+
 def own_dimensions(zone: str) -> tuple[Dimension, ...]:
     """Pilot's own dimensions and the collector's, the local time's derived
     in `zone`."""
@@ -173,6 +223,8 @@ def own_dimensions(zone: str) -> tuple[Dimension, ...]:
             group="part",
             line="A Session Pilot ran: a chat, a conversation, a job or a work item's run",
             path=lambda row: row["session_id"],
+            name=_session_name,
+            at=lambda row: row.to("session").c.started_at,
             null="(No Pilot session)",
             one="Pilot session",
             many="Pilot sessions",
@@ -187,6 +239,8 @@ def own_dimensions(zone: str) -> tuple[Dimension, ...]:
             group="part",
             line="A Turn of a Session of Pilot's: one message sent and what it set off",
             path=lambda row: row.to("turn").c.id,
+            name=_turn_name,
+            at=lambda row: row.to("turn").c.started_at,
             null="(No Pilot turn)",
             one="Pilot turn",
             many="Pilot turns",
@@ -214,6 +268,8 @@ def own_dimensions(zone: str) -> tuple[Dimension, ...]:
             group="part",
             line="One transcript: a main thread, or one sub-agent's",
             path=lambda row: row["transcript_id"],
+            name=_conversation_name,
+            at=lambda row: row.to("thread").c.first_call_at,
             null="(No transcript)",
             one="conversation",
             many="conversations",
@@ -226,6 +282,8 @@ def own_dimensions(zone: str) -> tuple[Dimension, ...]:
             group="part",
             line="One billed call to the model",
             path=lambda row: row["call_id"],
+            name=lambda row: _words("Call ", row["position"]),
+            at=lambda row: row["completed_at"],
             null="(Estimate: no transcript)",
             one="call",
             many="calls",

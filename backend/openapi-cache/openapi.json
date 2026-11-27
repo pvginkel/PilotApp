@@ -1835,6 +1835,22 @@
             "description": "`stored`: every quick filter, in the order they were made",
             "title": "Quick Filters"
           },
+          "quota_weeks": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/CatalogueResponseSchema.b67cf98.QuotaWeekSchema"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "`time`: every quota week the record holds, newest first, the running one first",
+            "title": "Quota Weeks"
+          },
           "ranges": {
             "anyOf": [
               {
@@ -1961,6 +1977,28 @@
             "title": "Denominator",
             "type": "string"
           },
+          "format": {
+            "anyOf": [
+              {
+                "enum": [
+                  "usd",
+                  "tokens",
+                  "count",
+                  "seconds",
+                  "share"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "How its numbers are written, as the person picked it; null for a loaded one, written in the format its two measures give: a share where their figures have one format, else its numerator's",
+            "examples": [
+              "count"
+            ],
+            "title": "Format"
+          },
           "id": {
             "format": "uuid",
             "title": "Id",
@@ -2036,6 +2074,7 @@
           "name",
           "numerator",
           "denominator",
+          "format",
           "note",
           "saved_at",
           "offered"
@@ -2530,6 +2569,90 @@
           "offered"
         ],
         "title": "QuickFilterSchema",
+        "type": "object"
+      },
+      "CatalogueResponseSchema.b67cf98.QuotaWeekSchema": {
+        "description": "A quota week, from one reset of the subscription's seven-day window\nto the next. It is labelled by the ISO week of its Thursday, the first\nin UTC it holds a moment of; a week cut short with no Thursday in it, by\nthe date in UTC it starts on. Two weeks may share a label.",
+        "properties": {
+          "ends_at": {
+            "description": "When it ends, exclusive: where the next starts, or for the running week the reset its latest reading names",
+            "examples": [
+              "2026-11-19T10:00:00Z"
+            ],
+            "format": "date-time",
+            "title": "Ends At",
+            "type": "string"
+          },
+          "running": {
+            "description": "Whether it is the running week, the latest",
+            "title": "Running",
+            "type": "boolean"
+          },
+          "starts_at": {
+            "description": "When it starts: its key, which a state names it by",
+            "examples": [
+              "2026-11-12T10:00:00Z"
+            ],
+            "format": "date-time",
+            "title": "Starts At",
+            "type": "string"
+          },
+          "starts_on": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The date in UTC it starts on, for a week cut short with no Thursday in it, which that date labels; null for a week labelled by `week`",
+            "examples": [
+              null
+            ],
+            "title": "Starts On"
+          },
+          "week": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The ISO week it is labelled by; null for a week labelled by `starts_on`",
+            "examples": [
+              46
+            ],
+            "title": "Week"
+          },
+          "year": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The ISO year of the week it is labelled by; null with `week`",
+            "examples": [
+              2026
+            ],
+            "title": "Year"
+          }
+        },
+        "required": [
+          "starts_at",
+          "ends_at",
+          "year",
+          "week",
+          "starts_on",
+          "running"
+        ],
+        "title": "QuotaWeekSchema",
         "type": "object"
       },
       "CatalogueResponseSchema.b67cf98.RatioSchema": {
@@ -3696,6 +3819,28 @@
             "title": "Denominator",
             "type": "string"
           },
+          "format": {
+            "anyOf": [
+              {
+                "enum": [
+                  "usd",
+                  "tokens",
+                  "count",
+                  "seconds",
+                  "share"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "How its numbers are written, as the person picked it; null for a loaded one, written in the format its two measures give: a share where their figures have one format, else its numerator's",
+            "examples": [
+              "count"
+            ],
+            "title": "Format"
+          },
           "id": {
             "format": "uuid",
             "title": "Id",
@@ -3771,6 +3916,7 @@
           "name",
           "numerator",
           "denominator",
+          "format",
           "note",
           "saved_at",
           "offered"
@@ -3788,6 +3934,21 @@
             ],
             "minLength": 1,
             "title": "Denominator",
+            "type": "string"
+          },
+          "format": {
+            "description": "How its numbers are written: `usd` a dollar amount, `tokens`, `count`, `seconds` a duration, `share` a percentage",
+            "enum": [
+              "usd",
+              "tokens",
+              "count",
+              "seconds",
+              "share"
+            ],
+            "examples": [
+              "count"
+            ],
+            "title": "Format",
             "type": "string"
           },
           "name": {
@@ -3828,9 +3989,45 @@
         "required": [
           "name",
           "numerator",
-          "denominator"
+          "denominator",
+          "format"
         ],
         "title": "CustomRatioWriteSchema",
+        "type": "object"
+      },
+      "DashboardBoundsSchema.467cb1a": {
+        "description": "The dashboard engine's timeout (F154.5); left out or null, the one\nthe app booted with. And its hold, for a spec that sees a task between\nits progress and its end.",
+        "properties": {
+          "hold": {
+            "default": false,
+            "description": "Whether the reads that may be held, By's counts after their first fact, wait until the bounds are set again or their deadline passes",
+            "examples": [
+              true,
+              false
+            ],
+            "title": "Hold",
+            "type": "boolean"
+          },
+          "timeout_seconds": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Seconds a read of the engine takes at most before it is refused, its wait for a slot and its statements together",
+            "examples": [
+              1e-9,
+              null
+            ],
+            "title": "Timeout Seconds"
+          }
+        },
+        "title": "DashboardBoundsSchema",
         "type": "object"
       },
       "DebriefSchema.1fdd8ae": {
@@ -5431,14 +5628,14 @@
         "type": "object"
       },
       "InventedScenarioCreateSchema.6d6b324": {
-        "description": "The invented scenario to load (F122.6).",
+        "description": "An invented scenario to load (F122.6).",
         "properties": {
           "projects": {
             "additionalProperties": {
               "format": "uuid",
               "type": "string"
             },
-            "description": "The project that stands for each of the scenario's projects a Turn of Pilot's is on, by the scenario's name of it",
+            "description": "The project that stands for each of the scenario's projects Pilot ran a session on, by the scenario's name of it",
             "examples": [
               {
                 "recipe-box": "5e7f9a10-1c2d-4e3f-8a4b-6c7d8e9f0a1b"
@@ -5446,9 +5643,22 @@
             ],
             "title": "Projects",
             "type": "object"
+          },
+          "scenario": {
+            "description": "The scenario: `supper`, the invented story, or `tally`, all of it Pilot's, whose figures the dashboard's specs know",
+            "enum": [
+              "supper",
+              "tally"
+            ],
+            "examples": [
+              "tally"
+            ],
+            "title": "Scenario",
+            "type": "string"
           }
         },
         "required": [
+          "scenario",
           "projects"
         ],
         "title": "InventedScenarioCreateSchema",
@@ -10657,6 +10867,19 @@
       "LanesResponseSchema.b67cf98.LaneSchema": {
         "description": "A lane: a row of the By that holds Calls in the window and the scope.",
         "properties": {
+          "at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The instant its value is at, where the By's values have one: a Pilot session's or a Pilot turn's start, a conversation's first Call, a Call's end; null for another By and on the row of none",
+            "title": "At"
+          },
           "ends_at": {
             "anyOf": [
               {
@@ -10834,6 +11057,7 @@
           "marks",
           "key",
           "label",
+          "at",
           "focus",
           "marked",
           "starts_at",
@@ -19263,6 +19487,19 @@
       "RowsResponseSchema.b67cf98.ByRowSchema": {
         "description": "A row of the By.",
         "properties": {
+          "at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The instant its value is at, where the By's values have one: a Pilot session's or a Pilot turn's start, a conversation's first Call, a Call's end; null for another By and on the row of none",
+            "title": "At"
+          },
           "focus": {
             "description": "Whether it holds the view's focus",
             "title": "Focus",
@@ -19390,6 +19627,7 @@
           "marks",
           "key",
           "label",
+          "at",
           "focus",
           "marked"
         ],
@@ -20453,6 +20691,19 @@
       "SeriesResponseSchema.b67cf98.ByRowSchema": {
         "description": "A row of the By.",
         "properties": {
+          "at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The instant its value is at, where the By's values have one: a Pilot session's or a Pilot turn's start, a conversation's first Call, a Call's end; null for another By and on the row of none",
+            "title": "At"
+          },
           "focus": {
             "description": "Whether it holds the view's focus",
             "title": "Focus",
@@ -20580,6 +20831,7 @@
           "marks",
           "key",
           "label",
+          "at",
           "focus",
           "marked"
         ],
@@ -21056,6 +21308,19 @@
       "SeriesResponseSchema.b67cf98.PointSchema": {
         "description": "A point of a series, a row of the dimension it asks.",
         "properties": {
+          "at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The instant its value is at, where the By's values have one: a Pilot session's or a Pilot turn's start, a conversation's first Call, a Call's end; null for another By and on the row of none",
+            "title": "At"
+          },
           "axis": {
             "anyOf": [
               {
@@ -21222,6 +21487,7 @@
           "marks",
           "key",
           "label",
+          "at",
           "focus",
           "marked",
           "axis",
@@ -29578,7 +29844,7 @@
             "BearerAuth": []
           }
         ],
-        "summary": "Read one part of what a view of the dashboard may name: its dimensions, each with its closed list of values where it has one; its measures, the facts, figures, aggregates, grains and ratios, built in and stored; its time, the ranges, the zone and the sitting's gap; or what it stores, the saved views, each with its address, the quick filters and the stored ratios, each with whether the catalogue offers it.",
+        "summary": "Read one part of what a view of the dashboard may name: its dimensions, each with its closed list of values where it has one; its measures, the facts, figures, aggregates, grains and ratios, built in and stored; its time, the ranges, the quota weeks as the record holds them at the call, the zone and the sitting's gap; or what it stores, the saved views, each with its address, the quick filters and the stored ratios, each with whether the catalogue offers it.",
         "tags": [],
         "x-required-role": "editor"
       }
@@ -30216,7 +30482,7 @@
     },
     "/api/dashboard/custom-ratios": {
       "post": {
-        "description": "Returns:     201: The ratio     400: No name, or a side missing; or a side has faults: the error         names every one of both, and ends on a correct example     401: No one is signed in     403: The caller lacks the editor role     409: A ratio a person made has the name",
+        "description": "Returns:     201: The ratio     400: No name, a side or the format missing, or a format not among         them; or a side has faults: the error names every one of both,         and ends on a correct example     401: No one is signed in     403: The caller lacks the editor role     409: A ratio a person made has the name",
         "operationId": "post__api_dashboard_custom-ratios",
         "parameters": [],
         "requestBody": {
@@ -30286,7 +30552,7 @@
             "BearerAuth": []
           }
         ],
-        "summary": "Make a ratio of two measures for everyone, its key made from its name in a space no built-in or loaded ratio's key is in, and kept (F155.3).",
+        "summary": "Make a ratio of two measures for everyone, its key made from its name in a space no built-in or loaded ratio's key is in, and kept (F155.3), its numbers written in the format the person picked (DB 640).",
         "tags": [],
         "x-required-role": "editor"
       }
@@ -30372,7 +30638,7 @@
         "x-required-role": "editor"
       },
       "put": {
-        "description": "Returns:     200: The ratio, changed     400: No name, or a side missing; or a side has faults: the error         names every one of both, and ends on a correct example     401: No one is signed in     403: The caller lacks the editor role     404: No stored ratio has the id     409: The ratio was loaded, which no one changes; or another ratio a         person made has the name",
+        "description": "Returns:     200: The ratio, changed     400: No name, a side or the format missing, or a format not among         them; or a side has faults: the error names every one of both,         and ends on a correct example     401: No one is signed in     403: The caller lacks the editor role     404: No stored ratio has the id     409: The ratio was loaded, which no one changes; or another ratio a         person made has the name",
         "operationId": "put__api_dashboard_custom-ratios_{ratio_id}",
         "parameters": [
           {
@@ -37177,6 +37443,53 @@
         "x-required-role": "editor"
       }
     },
+    "/api/testing/dashboard-bounds": {
+      "put": {
+        "description": "Returns:     200: The engine's timeout and hold as the app now holds them     400: A timeout that is not above zero, or a hold not true or false",
+        "operationId": "put__api_testing_dashboard-bounds",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DashboardBoundsSchema.467cb1a"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DashboardBoundsSchema.467cb1a"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponseSchema.c2a0d71"
+                }
+              }
+            },
+            "description": "Bad Request"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "summary": "Set the engine's timeout; left out, the one the app booted with. The reads that start from here on take it. And its hold: held, By's counts wait after their first fact until the next PUT; left out, none waits.",
+        "tags": [],
+        "x-required-role": "editor"
+      }
+    },
     "/api/testing/deployments/version": {
       "post": {
         "description": "",
@@ -39633,7 +39946,7 @@
     },
     "/api/testing/scenarios": {
       "post": {
-        "description": "Returns:     201: The scenario's transcripts, each with the project that adopted it     400: The projects given are not the scenario's that a Turn of         Pilot's is on, or the stage is prd     404: No project has an id given     409: The stage has no service user to make the group's adopted project",
+        "description": "Returns:     201: The scenario's transcripts, each with the project that adopted it     400: The projects given are not the scenario's that Pilot ran a         session on, or the stage is prd     404: No project has an id given, or no person the handle a Turn's         author is     409: The stage has no service user to make the group's adopted project",
         "operationId": "post__api_testing_scenarios",
         "parameters": [],
         "requestBody": {
@@ -39693,7 +40006,7 @@
             "BearerAuth": []
           }
         ],
-        "summary": "Load the invented scenario: its conversations, each published whole through the service a collector's publication writes through, its last moment now, and the Session and Turn of Pilot's that ran one of them, on the project given for the scenario's (F122.6). The conversation the scenario names a group for is adopted by the group's adopted project, made where the record has none (F152.8). A second load replaces the first: the record holds the scenario once, as it was loaded last.",
+        "summary": "Load an invented scenario: its conversations, each published whole through the service a collector's publication writes through, its last moment now, and what Pilot holds of those it ran, each on the project given for the scenario's: its Session and Turns, and its work item, job or chat (F122.6). The conversation the scenario names a group for is adopted by the group's adopted project, made where the record has none (F152.8). A second load on the same projects replaces the first, the record holding the scenario there once, as it was loaded last; a load on other projects is a scenario of its own beside it.",
         "tags": [],
         "x-required-role": "editor"
       }

@@ -12,6 +12,7 @@ from datetime import timedelta
 from pathlib import Path
 
 import pytest
+from pilot_scenario import SCENARIO
 from sqlalchemy import select
 from sqlalchemy.orm import Session as DbSession
 
@@ -439,7 +440,7 @@ class TestTheScenariosReadings:
         fake_collector: ServedFakeCollector,
         readings_service: ReadingsService,
     ) -> None:
-        loaded = container.scenario_service().load({"recipe-box": project.id})
+        loaded = container.scenario_service().load(SCENARIO, {"recipe-box": project.id})
 
         for thread in loaded:
             read = readings_service.read(thread)

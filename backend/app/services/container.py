@@ -751,6 +751,7 @@ class ServiceContainer(containers.DeclarativeContainer):
         publication_service=publication_service,
         vocabulary_service=vocabulary_service,
         fake_collector=fake_collector,
+        record_service=record_service,
     )
 
     testing_sync_service = providers.Factory(
@@ -1050,6 +1051,7 @@ class ServiceContainer(containers.DeclarativeContainer):
         view_service=view_service,
         wait_service=wait_service,
         job_service=job_service,
+        scenario_service=scenario_service,
     )
 
 

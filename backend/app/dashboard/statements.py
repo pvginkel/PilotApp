@@ -466,6 +466,8 @@ class _Builder:
                 columns.append(dimension.name(self.row).label("c_name"))
         if by.name is not None:
             columns.append(by.name(self.row).label("b_name"))
+        if by.at is not None:
+            columns.append(by.at(self.row).label("b_at"))
         order = ordered(self.catalogue, by)
         if order is not None and order.axis is not None:
             columns.append(order.axis(self.row).label("axis"))
@@ -517,6 +519,8 @@ class _Builder:
                 outer.append(func.max(inner.c.c_name).label("c_name"))
         if "b_name" in inner.c:
             outer.append(func.max(inner.c.b_name).label("b_name"))
+        if "b_at" in inner.c:
+            outer.append(func.min(inner.c.b_at).label("b_at"))
         if "axis" in inner.c:
             outer.append(func.min(inner.c.axis).label("axis"))
         if "focus" in inner.c:

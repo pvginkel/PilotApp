@@ -15,9 +15,9 @@
  * under `interactive-widget=resizes-content`, a window made shorter — keeps its scroll offset, which
  * leaves its end below the view, so it is pinned again; a view not pinned keeps its place.
  *
- * Only the reader's own input lets go of the bottom: the wheel or a key moving up, a scroll while
- * a finger or pointer is down (a drag on the scrollbar, a selection), or an open that takes the
- * end out of reach. The drawn scrollbar stands beside the container: a press on it comes as its
+ * Only the reader's own input lets go of the bottom: the wheel or a key moving up, a key only while
+ * its screen is in view (F160.5), a scroll while a finger or pointer is down (a drag on the
+ * scrollbar, a selection), or an open that takes the end out of reach. The drawn scrollbar stands beside the container: a press on it comes as its
  * `BAR_PRESS`, the wheel over it as the container's own wheel (scroll-bar.tsx). A scroll event alone is not taken as the reader's: when the content shrinks —
  * a table's columns rebalancing as a reply streams — the browser clamps the view, and the event
  * for that comes a frame later, often after the next delta has grown the content again, when it
@@ -31,6 +31,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useOwnGrowth } from '@/hooks/use-own-growth';
+import { useScreenInView } from '@/hooks/use-screens';
 import { isTestMode } from '@/lib/config/test-mode';
 import { BAR_PRESS } from '@/lib/scroll-bar';
 import { endUiState } from '@/lib/test/ui-state';
@@ -55,6 +56,11 @@ export function useStickyBottom(
   const pinnedRef = useRef(false);
   const [stuckNow, setStuckNow] = useState(true);
   const own = useOwnGrowth(containerRef);
+  const inView = useScreenInView();
+  const inViewRef = useRef(inView);
+  useEffect(() => {
+    inViewRef.current = inView;
+  });
 
   const setStuck = useCallback(
     (stuck: boolean) => {
@@ -115,7 +121,7 @@ export function useStickyBottom(
     // A key scrolls the chat only from inside it, or with nothing focused once it was clicked.
     const onKey = (e: KeyboardEvent) => {
       const t = e.target;
-      if (editable(t) || !(t === document.body || (t instanceof Node && container.contains(t)))) return;
+      if (!inViewRef.current || editable(t) || !(t === document.body || (t instanceof Node && container.contains(t)))) return;
       if (UP_KEYS.has(e.key) || (e.key === ' ' && e.shiftKey)) up();
     };
     const press = () => (held += 1);

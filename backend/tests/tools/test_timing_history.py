@@ -1,13 +1,15 @@
-"""The timing's history (`tools/timing/history.py`, F154.9): a day drawn the
-same from its seed every time, in the scenario's words, and written as a
+"""The timing's history (`tools/timing/history.py`, F154.9): the package's
+days (`pilot_scenario.history`) at the fleet's size, a Wednesday opening on
+the long conversation, each work session carrying out a leg of its
+project's errand under kinds nested as the labeller's are, written as a
 collector's publication and Pilot's own record write it."""
 
 from collections import Counter
-from dataclasses import fields, is_dataclass
+from dataclasses import replace
 from datetime import date, timedelta
-from typing import Any
 
-from pilot_scenario import Builder, labeller
+from pilot_scenario import labeller
+from pilot_scenario.history import WEEKEND, billed
 from pilot_scenario.script import Call, Session, Unit
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session as DbSession
@@ -18,42 +20,24 @@ from app.models import Session as AgentSession
 from app.models.call import Call as CallRow
 from app.models.label import WorkUnit
 from app.services.container import ServiceContainer
+from tests.support.workflow_words import workflow_words
 from tools.timing.history import (
     CONFIGURED_DAYS,
+    HISTORY,
     KINDS,
     LONG_CALLS,
     NESTING,
     PLACES,
     PORTER,
     ROLES,
-    Day,
-    _tokens,
     _Writer,
     configured,
-    days,
     draw,
     errand,
     in_lock_order,
-    target,
 )
 
 TUESDAY = date(2026, 11, 17)
-
-WORKFLOW = {"slice", "stage", "phase"}
-
-
-def _words(part: Any) -> set[str]:
-    if isinstance(part, str):
-        return {
-            word.lower() for word in part.replace("/", " ").replace("-", " ").split()
-        }
-    if isinstance(part, tuple | list):
-        return {word for one in part for word in _words(one)}
-    if is_dataclass(part) and not isinstance(part, type):
-        return {
-            word for one in fields(part) for word in _words(getattr(part, one.name))
-        }
-    return set()
 
 
 def _calls(session: Session) -> int:
@@ -64,38 +48,22 @@ def _calls(session: Session) -> int:
     return sum(isinstance(step, Call) for steps in threads for step in steps)
 
 
-def _session(day: Day, name: str) -> Session:
-    return next(session for session in day.scenario.sessions if session.name == name)
-
-
-def _conversation(day: Day, name: str) -> str:
-    return Builder(day.scenario, day.start).conversation(_session(day, name))
+def _session(day_sessions: tuple[Session, ...], name: str) -> Session:
+    return next(session for session in day_sessions if session.name == name)
 
 
 class TestTheDays:
-    def test_a_day_is_drawn_the_same_every_time(self) -> None:
-        assert draw(TUESDAY, 600) == draw(TUESDAY, 600)
-        assert draw(TUESDAY, 600) != draw(TUESDAY + timedelta(days=7), 600)
+    def test_a_weekday_holds_its_share_of_the_fleets_nine_thousand(self) -> None:
+        share = 9_000 * (7 - 2 * WEEKEND) / 5
 
-    def test_a_day_holds_its_target_in_its_conversations_calls(self) -> None:
-        day = draw(TUESDAY)
-
-        assert day.calls >= target(TUESDAY)
-        assert day.calls == sum(_calls(session) for session in day.scenario.sessions)
-
-    def test_a_weekend_day_holds_fewer_than_a_weekday(self) -> None:
-        saturday = TUESDAY + timedelta(days=4)
-
-        for week in range(8):
-            later = timedelta(days=7 * week)
-            assert target(saturday + later) < target(TUESDAY + later)
+        assert 0.75 <= HISTORY.target(TUESDAY) / share <= 1.25
 
     def test_a_wednesday_opens_on_the_long_conversation_by_hand(self) -> None:
-        day = draw(TUESDAY + timedelta(days=1), 600)
+        day = HISTORY.draw(TUESDAY + timedelta(days=1), 600)
         first = day.scenario.sessions[0]
 
         assert first.person is not None
-        assert first.name not in day.pilots
+        assert first.ran is None
         assert (
             _calls(first)
             - sum(
@@ -106,20 +74,27 @@ class TestTheDays:
             == LONG_CALLS
         )
 
-    def test_the_days_run_back_from_the_last_until_their_targets_reach_the_calls(
+    def test_its_places_and_a_day_have_no_word_of_the_workflow(self) -> None:
+        assert workflow_words(HISTORY) == set()
+        assert workflow_words(HISTORY.draw(TUESDAY, 3_000).scenario) == set()
+        assert workflow_words(draw(TUESDAY, 3_000).scenario) == set()
+
+    def test_a_day_is_the_packages_but_for_its_units_and_its_legs_models(
         self,
     ) -> None:
-        held = days(50_000, TUESDAY)
+        drawn, package = draw(TUESDAY, 3_000), HISTORY.draw(TUESDAY, 3_000)
 
-        assert held == [TUESDAY - timedelta(days=n) for n in range(len(held))]
-        assert sum(map(target, held)) >= 50_000 > sum(map(target, held[:-1]))
-
-    def test_a_day_has_no_word_of_the_workflow(self) -> None:
-        day = draw(TUESDAY, 3_000)
-
-        assert _words(day.scenario) & WORKFLOW == set()
-        assert _words(list(day.pilots.values())) & WORKFLOW == set()
-        assert _words(list(PLACES)) & WORKFLOW == set()
+        assert (drawn.calls, drawn.standing) == (package.calls, package.standing)
+        assert [s.name for s in drawn.scenario.sessions] == [
+            s.name for s in package.scenario.sessions
+        ]
+        for mine, theirs in zip(
+            drawn.scenario.sessions, package.scenario.sessions, strict=True
+        ):
+            if mine.unit is None:
+                assert mine == theirs
+            else:
+                assert replace(mine, unit=None, launches=theirs.launches) == theirs
 
 
 def _up(units: dict[str, Unit], unit: Unit) -> list[str]:
@@ -129,6 +104,10 @@ def _up(units: dict[str, Unit], unit: Unit) -> list[str]:
         unit = units[unit.within]
         kinds.append(unit.kind)
     return kinds
+
+
+def _work(session: Session) -> bool:
+    return session.ran is not None and session.ran.kind == "work"
 
 
 class TestTheUnits:
@@ -147,17 +126,17 @@ class TestTheUnits:
     ) -> None:
         day = draw(TUESDAY)
         units = {unit.name: unit for unit in day.scenario.units}
-        work = {name for name, plan in day.pilots.items() if plan.kind == "work"}
+        places = {place.slug: place for place in PLACES}
 
-        assert work
+        assert any(_work(session) for session in day.scenario.sessions)
         chains = set()
         for session in day.scenario.sessions:
-            if session.name not in work:
+            if not _work(session):
                 assert session.unit is None
                 continue
-            assert session.unit is not None
+            assert session.ran is not None and session.unit == session.ran.title
             leg = units[session.unit]
-            place = day.pilots[session.name].place
+            place = places[session.ran.project]
             chain = _up(units, leg)
             chains.add(tuple(chain))
             assert chain == (
@@ -225,12 +204,13 @@ class TestTheUnits:
                 continue
             role = units[session.unit].role
             assert role is not None
-            first = next(
-                step
-                for step in session.launches[0].prompts[0].steps
+            assert {
+                step.model
+                for launch in session.launches
+                for prompt in launch.prompts
+                for step in prompt.steps
                 if isinstance(step, Call)
-            )
-            assert first.model == configured(role, TUESDAY)
+            } == {configured(role, TUESDAY)}
 
     def test_a_roles_configuration_changes_between_its_stretches(self) -> None:
         for role, _ in ROLES:
@@ -273,10 +253,10 @@ class TestTheWrite:
     def test_a_day_whose_first_conversation_stands_in_is_written_once(
         self, session: DbSession, container: ServiceContainer
     ) -> None:
-        day = draw(date(2026, 10, 27), 400)
-        first = day.scenario.sessions[0].name
-        day.pilots[first].standing_in = True
-        day.pilots[first].tokens = _tokens(_session(day, first))
+        day = HISTORY.draw(date(2026, 10, 27), 400)
+        first = day.scenario.sessions[0]
+        assert first.ran is not None
+        day = replace(day, standing={first.name: billed(first)})
         writer = _Writer(container, session)
 
         writer.write(day)
@@ -287,25 +267,27 @@ class TestTheWrite:
         self, session: DbSession, container: ServiceContainer
     ) -> None:
         day = draw(TUESDAY, 400)
-        assert day.pilots
-        name = next(iter(day.pilots))
-        standing = day.pilots[name]
-        standing.standing_in = True
-        standing.tokens = _tokens(_session(day, name))
+        pilots = [s.name for s in day.scenario.sessions if s.ran is not None]
+        assert pilots
+        name = pilots[0]
+        day = replace(
+            day, standing={name: billed(_session(day.scenario.sessions, name))}
+        )
         writer = _Writer(container, session)
 
         assert not writer.written(day)
         writer.write(day)
 
         assert writer.written(day)
+        builder = day.builder()
         calls = session.scalars(select(CallRow)).all()
-        assert len(calls) == day.calls - _calls(_session(day, name))
+        assert len(calls) == day.calls - _calls(_session(day.scenario.sessions, name))
         assert all(
             call.cost is not None and call.launch_id is not None for call in calls
         )
-        pilots = session.scalars(select(AgentSession)).all()
-        assert sorted(s.conversation_id for s in pilots if s.conversation_id) == sorted(
-            _conversation(day, n) for n in day.pilots
+        rows = session.scalars(select(AgentSession)).all()
+        assert sorted(s.conversation_id for s in rows if s.conversation_id) == sorted(
+            builder.conversation(_session(day.scenario.sessions, n)) for n in pilots
         )
         placed = session.scalar(
             select(func.count())
@@ -315,9 +297,8 @@ class TestTheWrite:
             .where(Transcript.agent_id.is_(None), Launch.session_id.is_(None))
         )
         assert placed == 0
-        stood_in = next(
-            s for s in pilots if s.conversation_id == _conversation(day, name)
-        )
+        conversation = builder.conversation(_session(day.scenario.sessions, name))
+        stood_in = next(s for s in rows if s.conversation_id == conversation)
         assert (
             session.scalar(
                 select(func.count())
@@ -347,9 +328,9 @@ class TestTheWrite:
         }
         drawn = {unit.name: unit for unit in day.scenario.units if unit.kind == "leg"}
         collected = {
-            day.pilots[n].title
-            for n in day.pilots
-            if day.pilots[n].kind == "work" and not day.pilots[n].standing_in
+            s.unit
+            for s in day.scenario.sessions
+            if s.unit is not None and s.name not in day.standing
         }
         assert collected and set(legs) == collected
         assert all(

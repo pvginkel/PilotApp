@@ -253,6 +253,22 @@ class Origin(StrEnum):
     """Made by a person and changed by anyone."""
 
 
+class NumberFormat(StrEnum):
+    """A kind of way a measure's numbers are written (DB §2.11; decision
+    86): the catalogue gives each of its figures and ratios one, and a
+    person picks one for a Custom Ratio they make. How each is written is
+    the screen's."""
+
+    USD = "usd"
+    """A dollar amount."""
+    TOKENS = "tokens"
+    COUNT = "count"
+    SECONDS = "seconds"
+    """A duration."""
+    SHARE = "share"
+    """A percentage."""
+
+
 def _enum_type(enum_class: type[StrEnum], name: str) -> Enum:
     # The database holds the values, not the member names.
     return Enum(
@@ -287,6 +303,7 @@ TURN_CAUSE = _enum_type(TurnCause, "turn_cause")
 HOLD_KIND = _enum_type(HoldKind, "hold_kind")
 FAVOURITE_MENU = _enum_type(FavouriteMenu, "favourite_menu")
 ORIGIN = _enum_type(Origin, "origin")
+NUMBER_FORMAT = _enum_type(NumberFormat, "number_format")
 
 # Autogenerate compares no enum type, so the schema tests check these against
 # the database's.
@@ -315,6 +332,7 @@ ENUM_TYPES = (
     HOLD_KIND,
     FAVOURITE_MENU,
     ORIGIN,
+    NUMBER_FORMAT,
 )
 
 

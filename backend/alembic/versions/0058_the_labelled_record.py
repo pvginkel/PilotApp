@@ -10,8 +10,8 @@ marked `labelled` where the labeller gave them; and `work_units`,
 `test_runs`, `test_failures`, `ci_builds` and `ci_waits`. Nothing writes a
 label here: every Event and Context Part held is the collector's.
 
-Revision ID: 0057
-Revises: 0056
+Revision ID: 0058
+Revises: 0057
 Create Date: 2026-11-26
 
 """
@@ -22,8 +22,8 @@ import sqlalchemy as sa
 
 from alembic import op
 
-revision: str = "0057"
-down_revision: str | None = "0056"
+revision: str = "0058"
+down_revision: str | None = "0057"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

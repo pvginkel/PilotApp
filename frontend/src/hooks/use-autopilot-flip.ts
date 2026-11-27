@@ -9,7 +9,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import type { ProjectHead } from '@/hooks/use-projects';
 import { toApiError } from '@/lib/api/api-error';
 import { api } from '@/lib/api/client';
-import { SENDER } from '@/lib/api/generated/hooks';
+import { READ_AFTER_A_WRITE, SENDER } from '@/lib/api/generated/hooks';
 
 interface Flip {
   kind: 'autopilot_on' | 'autopilot_off';
@@ -37,8 +37,8 @@ export function useAutopilotFlip(projectId: string) {
       if (standsAsAsked(queryClient.getQueryData<ProjectHead>(head)!, flip)) return;
       throw toApiError(error, response.status);
     },
-    // The flip stays pending until every query is read again, the head included: until then, a
-    // second flip would ask for the same change.
-    onSuccess: () => queryClient.invalidateQueries(),
+    // The flip stays pending until the queries a write reads again are read, the head included:
+    // until then, a second flip would ask for the same change.
+    onSuccess: () => queryClient.invalidateQueries(READ_AFTER_A_WRITE),
   });
 }

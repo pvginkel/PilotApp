@@ -8,6 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session as DbSession
 
 from app import models
+from app.dashboard.catalogue import Catalogue, Path
 from app.dashboard.dimensions import (
     SOURCES,
     WORK_TYPES,
@@ -54,6 +55,18 @@ def _calls(session: DbSession, *dimensions: str) -> list[tuple[object, ...]]:
     )
 
 
+def _named_and_timed(index: Catalogue, *parts: str) -> tuple[list[Path], list[Path]]:
+    """Each part's name and time, the paths a part of Pilot's work has."""
+    names: list[Path] = []
+    times: list[Path] = []
+    for key in parts:
+        part = index.dimension(key)
+        assert part.name is not None and part.at is not None, key
+        names.append(part.name)
+        times.append(part.at)
+    return names, times
+
+
 class TestEveryDimension:
     def test_it_reads_on_every_fact_that_offers_it(
         self, session: DbSession, held: Record
@@ -67,7 +80,12 @@ class TestEveryDimension:
             for fact in offered:
                 paths = [
                     path
-                    for path in (dimension.path, dimension.name, dimension.axis)
+                    for path in (
+                        dimension.path,
+                        dimension.name,
+                        dimension.axis,
+                        dimension.at,
+                    )
                     if path is not None
                 ]
                 rows = read(session, index, fact, *paths, by=lambda row: row["at"])
@@ -162,6 +180,111 @@ class TestParts:
         )
         assert rows[4] == (held.chat.id, held.chat_turn.id, None, None)
         assert rows[5] == (None, None, held.loose.id, held.calls[4].id)
+
+    def test_pilots_parts_are_named_each_with_its_time(
+        self, session: DbSession, held: Record
+    ) -> None:
+        held.work.started_at = STARTED - timedelta(minutes=2)
+        held.chat.started_at = STARTED + timedelta(hours=2)
+        held.sub_agent.description = "Find the scaling code"
+        session.flush()
+        index = catalogue(session)
+        names, times = _named_and_timed(
+            index, "psession", "pturn", "conversation", "call"
+        )
+
+        named_rows = read(session, index, "call", *names, by=lambda row: row["at"])
+        timed_rows = read(session, index, "call", *times, by=lambda row: row["at"])
+
+        assert named_rows[0] == ("Work", "Turn 1 · brief", "Main thread", "Call 1")
+        assert named_rows[2] == (
+            "Work",
+            "Turn 1 · brief",
+            "Explore · Find the scaling code",
+            "Call 1",
+        )
+        assert named_rows[4] == ("Project chat", "Turn 1 · person", None, None)
+        assert named_rows[5] == (None, None, "Main thread", "Call 1")
+        assert timed_rows[0] == (
+            held.work.started_at,
+            held.work_turn.started_at,
+            held.thread.first_call_at,
+            held.calls[0].completed_at,
+        )
+        assert timed_rows[2][2:] == (
+            held.sub_agent.first_call_at,
+            held.calls[3].completed_at,
+        )
+        assert timed_rows[4][:3] == (
+            held.chat.started_at,
+            held.chat_turn.started_at,
+            None,
+        )
+        assert timed_rows[5] == (
+            None,
+            None,
+            held.loose.first_call_at,
+            held.calls[4].completed_at,
+        )
+
+    def test_a_sub_agent_with_neither_type_nor_task_is_a_sub_agent(
+        self, session: DbSession, held: Record
+    ) -> None:
+        held.sub_agent.agent_type = None
+        session.flush()
+        index = catalogue(session)
+        names, _ = _named_and_timed(index, "conversation")
+
+        assert read(session, index, "call", *names, by=lambda row: row["at"])[2] == (
+            "Sub-agent",
+        )
+
+    @pytest.mark.usefixtures("person")
+    def test_a_session_is_its_work_items_or_jobs_number_and_title_else_its_kind(
+        self, session: DbSession, container: ServiceContainer
+    ) -> None:
+        camp = Camp(container, session)
+        worker = camp.worker()
+        job = camp.job_after(worker)
+        defining, calling = (
+            models.Session(
+                project_id=camp.project.id,
+                kind_code=kind,
+                cwd="/work/PilotProjects",
+                token_hash=hash_ * 64,
+                state_code=SessionState.IDLE,
+            )
+            for kind, hash_ in (("chat", "5"), ("conversation", "4"))
+        )
+        session.add_all([defining, calling])
+        session.flush()
+        session.add(
+            models.Chat(
+                id=defining.id,
+                project_id=camp.project.id,
+                session_kind_code="chat",
+                kind_code=ChatKind.DEFINITION,
+            )
+        )
+        for minute, run in enumerate((worker, job, defining, calling)):
+            turn_at(session, run, STARTED + timedelta(minutes=minute))
+        turn_at(
+            session, worker, STARTED + timedelta(minutes=9)
+        ).cause_code = TurnCause.FOLLOW_UP
+        session.flush()
+        index = catalogue(session)
+        names, _ = _named_and_timed(index, "psession", "pturn")
+
+        rows = read(session, index, "turn", *names, by=lambda row: row["at"])
+
+        working = f"#{camp.line(worker).seq} Building the camp"
+        assert rows == [
+            (working, "Turn 1 · brief"),
+            (f"#{camp.line(job).seq} Pre-ruling", "Turn 1 · brief"),
+            ("Definition chat", "Turn 1 · brief"),
+            ("Conversation", "Turn 1 · brief"),
+            (working, "Turn 2 · follow up"),
+        ]
 
     def test_a_sitting_is_by_its_start(self, session: DbSession, held: Record) -> None:
         rows = _calls(session, "sitting")

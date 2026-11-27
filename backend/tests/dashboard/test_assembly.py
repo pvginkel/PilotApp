@@ -8,6 +8,7 @@ from decimal import Decimal
 
 import pytest
 from flask.testing import FlaskClient
+from pilot_scenario import SCENARIO
 from sqlalchemy import select
 from sqlalchemy.orm import Session as DbSession
 
@@ -29,7 +30,7 @@ from app.models import (
     SessionKind,
     StopReason,
 )
-from app.models.reference import Origin
+from app.models.reference import NumberFormat, Origin
 from app.services.container import ServiceContainer
 from app.services.quota_week_service import quota_weeks
 from app.utils.after_commit import run_after_commit_callbacks
@@ -190,7 +191,9 @@ def _ratio(
     numerator: str,
     denominator: str,
     note: str | None = None,
+    format_: NumberFormat = NumberFormat.SHARE,
 ) -> None:
+    """A stored ratio; a person's in `format_`, a loaded one in none."""
     db.add(
         CustomRatio(
             origin_code=origin,
@@ -198,6 +201,7 @@ def _ratio(
             name=key.replace("_", " ").capitalize(),
             numerator=numerator,
             denominator=denominator,
+            format_code=format_ if origin == Origin.PERSON else None,
             note=note,
             saved_at=LATER,
         )
@@ -290,6 +294,27 @@ class TestTheStoredConfiguration:
                 denominator="cost.sum",
                 origin="person",
             ),
+        ]
+
+    def test_a_persons_ratio_is_in_the_format_picked_a_loaded_ones_its_measures(
+        self, session: DbSession
+    ) -> None:
+        """DB 640: two counts make a share where no person picked a format."""
+        _ratio(
+            session,
+            Origin.PERSON,
+            "person_calls_per_turn",
+            "calls.count",
+            "turns.count",
+            format_=NumberFormat.COUNT,
+        )
+        _ratio(session, Origin.WORKFLOW, "calls_per_turn", "calls.count", "turns.count")
+
+        catalogue = assemble(session, ZONE, GAP)
+
+        assert [(ratio.key, ratio.format) for ratio in _stored_ratios(catalogue)] == [
+            ("calls_per_turn", "share"),
+            ("person_calls_per_turn", "count"),
         ]
 
     def test_a_state_names_each_by_its_key(self, session: DbSession) -> None:
@@ -422,7 +447,7 @@ class TestAPublication:
         before = service.catalogue(session)
         assert "claude_code_version" not in {d.key for d in before.dimensions}
 
-        container.scenario_service().load({"recipe-box": project.id})
+        container.scenario_service().load(SCENARIO, {"recipe-box": project.id})
 
         # Not before its transaction commits: a reader would assemble it
         # from a record that has not the row yet.
@@ -436,12 +461,12 @@ class TestAPublication:
     def test_one_that_writes_none_leaves_it(
         self, session: DbSession, container: ServiceContainer, project: Project
     ) -> None:
-        container.scenario_service().load({"recipe-box": project.id})
+        container.scenario_service().load(SCENARIO, {"recipe-box": project.id})
         run_after_commit_callbacks()
         service = container.catalogue_service()
         held = service.catalogue(session)
 
-        container.scenario_service().load({"recipe-box": project.id})
+        container.scenario_service().load(SCENARIO, {"recipe-box": project.id})
         run_after_commit_callbacks()
 
         assert service.catalogue(session) is held
@@ -453,7 +478,8 @@ class TestAPublication:
         before = client.get(catalogue, query_string={"part": "dimensions"})
 
         loaded = client.post(
-            "/api/testing/scenarios", json={"projects": {"recipe-box": str(project.id)}}
+            "/api/testing/scenarios",
+            json={"scenario": "supper", "projects": {"recipe-box": str(project.id)}},
         )
 
         assert loaded.status_code == 201
@@ -479,7 +505,7 @@ class TestTheLabellersRows:
     def loaded(
         self, session: DbSession, container: ServiceContainer, project: Project
     ) -> Catalogue:
-        container.scenario_service().load({"recipe-box": project.id})
+        container.scenario_service().load(SCENARIO, {"recipe-box": project.id})
         return assemble(session, ZONE, GAP)
 
     def test_each_work_unit_kind_is_a_part_its_nesting_the_drills_order(

@@ -18,7 +18,10 @@
  * the worker's fake push service, `device` the page as its device: the pushes its service worker
  * shows, the notifications standing there and the page's visibility,
  * `storeUpdate` makes the store's update and asks its lift, lifting one a spec left standing, and
- * `waits` adds the brain's waits, fires them, places their runs and closes them.
+ * `waits` adds the brain's waits, fires them, places their runs and closes them. `dashboard` is the
+ * dashboard, the screen beside Projects, `dashboardBounds` sets its engine's timeout and
+ * `savedViews` saves and removes its views through the API, `customRatios` makes its ratios and
+ * loads the workflow's.
  * `conditions`, the worker's, reads what the gold bar reads, and `warmFrontend` has the worker's dev
  * server serve the app once before the worker's first test. `poolGuard` fails a test where a thread of
  * the worker's backend checked out a second connection of its pool while it held one, and
@@ -30,15 +33,19 @@ import { expect } from '@playwright/test';
 
 import { BrowserPush } from './browser-push';
 import { Chats } from './chats';
+import { Collection } from './collection';
 import { Conversations } from './conversations';
+import { CustomRatios } from './custom-ratios';
 import { Outage } from './connection';
 import { Conditions, Controller } from './controller';
+import { DashboardBounds } from './dashboard-bounds';
 import { Device } from './device';
 import { infrastructureFixtures } from './fixtures-infrastructure';
 import { HaltSettings } from './halt-settings';
 import { Links } from './links';
 import { ChatPage } from './page-objects/chat-page';
 import { ConversationsPage } from './page-objects/conversations-page';
+import { DashboardPage } from './page-objects/dashboard-page';
 import { DocTabsPage } from './page-objects/doc-tabs-page';
 import { HandleStepPage } from './page-objects/handle-step-page';
 import { DebriefPage } from './page-objects/debrief-page';
@@ -53,12 +60,14 @@ import { ShellPage } from './page-objects/shell-page';
 import { TimelinePage } from './page-objects/timeline-page';
 import { People } from './people';
 import { Projects } from './projects';
+import { SavedViews } from './saved-views';
 import { StoreUpdate } from './store-update';
 import { Waits } from './waits';
 
 interface DomainFixtures {
   people: People;
   projects: Projects;
+  collection: Collection;
   links: Links;
   controller: Controller;
   haltSettings: HaltSettings;
@@ -84,6 +93,10 @@ interface DomainFixtures {
   device: Device;
   storeUpdate: StoreUpdate;
   waits: Waits;
+  dashboard: DashboardPage;
+  dashboardBounds: DashboardBounds;
+  savedViews: SavedViews;
+  customRatios: CustomRatios;
   poolGuard: void;
   statementCap: void;
 }
@@ -99,6 +112,9 @@ export const test = infrastructureFixtures.extend<DomainFixtures, DomainWorkerFi
   },
   projects: async ({ page, backendUrl }, use) => {
     await use(new Projects(page, backendUrl));
+  },
+  collection: async ({ page, backendUrl }, use) => {
+    await use(new Collection(page, backendUrl));
   },
   links: async ({ page, backendUrl }, use) => {
     const links = new Links(page, backendUrl);
@@ -214,6 +230,22 @@ export const test = infrastructureFixtures.extend<DomainFixtures, DomainWorkerFi
   },
   waits: async ({ page, backendUrl }, use) => {
     await use(new Waits(page, backendUrl));
+  },
+  dashboard: async ({ page }, use) => {
+    await use(new DashboardPage(page));
+  },
+  dashboardBounds: async ({ page, backendUrl }, use) => {
+    const dashboardBounds = new DashboardBounds(page, backendUrl);
+    await use(dashboardBounds);
+    await dashboardBounds.set({});
+  },
+  savedViews: async ({ page, backendUrl }, use) => {
+    await use(new SavedViews(page, backendUrl));
+  },
+  customRatios: async ({ page, backendUrl, playwright }, use) => {
+    const customRatios = new CustomRatios(page, backendUrl, playwright);
+    await use(customRatios);
+    await customRatios.dispose();
   },
   // The nestings the backend's pool guard kept (backend/app/utils/pool_guard.py), taken once the
   // test and the fixtures it used are done: the test's, its fixtures', or those of a thread a test

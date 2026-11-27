@@ -9,8 +9,9 @@ engine's own operations, so the seed is a record the engine could have
 produced. The rows the engine does not write (people, projects with their
 members and transitions, an environment, the session that added the items, and
 the sessions and debriefs of two runs, the second with its debrief's notice,
-placed as the end of its pass places it) are written through the models. Every name and text in it is
-invented: this repository is public.
+placed as the end of its pass places it) are written through the models. Beside it the seed holds
+a history of the fleet's work over the weeks before its load (`load_history`), drawn from a fixed
+seed. Every name and text in it is invented: this repository is public.
 """
 
 import hashlib
@@ -77,6 +78,7 @@ from app.schemas.pilot_work import (
     ProgressStepRequestSchema,
 )
 from app.schemas.testing_record import (
+    OPENING_WORDS,
     InventedFileSchema,
     InventedProjectCreateSchema,
     InventedWaitCreateSchema,
@@ -90,6 +92,7 @@ from app.services.people_service import PeopleService
 from app.services.pilot_server import turn_running
 from app.services.pilot_store_service import JOB, Brain, PilotStoreService
 from app.services.pilot_work_service import PilotWorkService, Worker
+from app.services.scenario_service import HISTORY, ScenarioService
 from app.services.session_scope import STORE_REPO
 from app.services.session_start_service import SessionStartService
 from app.services.start_gate import WORK_KIND
@@ -437,6 +440,7 @@ class TestDataService:
         view_service: ViewService,
         wait_service: WaitService,
         job_service: JobService,
+        scenario_service: ScenarioService,
     ) -> None:
         self.db = db
         self.document_service = document_service
@@ -452,6 +456,7 @@ class TestDataService:
         self.view_service = view_service
         self.wait_service = wait_service
         self.job_service = job_service
+        self.scenario_service = scenario_service
 
     def load_all(self) -> dict[str, int]:
         """Seed the record into an empty database, in the caller's
@@ -627,6 +632,29 @@ class TestDataService:
             "plan notes": self._count(PlanNote),
             "attachments": self._count(Attachment),
         }
+
+    def load_history(self) -> int:
+        """The seed's history (`ScenarioService.history`), in the caller's
+        transaction, after the seed (`load_all`): each of its places a
+        project of its own under the place's slug, open, Ada's with Ben a
+        member, born as a project made with no words of its own is
+        (`project`); and the Calls it holds."""
+        now = self.db.scalar(select(func.now()))
+        assert now is not None
+        ada, ben = (self._invented_member(handle) for handle in ("ada", "ben"))
+        projects: dict[str, uuid.UUID] = {}
+        for place in HISTORY.places:
+            project = self._project(ada, place.slug, now)
+            self.db.add(
+                ProjectMember(project_id=project.id, user_id=ben.id, joined_at=now)
+            )
+            self._transitions(project, ada, now, TransitionKind.OPENED)
+            self.document_service.bear_draft(project, f"# {place.name}\n")
+            self.document_service.bear_handbook(project)
+            self.document_service.bear_journal(project)
+            self.document_service.bear_opening(project, place.name, ada, OPENING_WORDS)
+            projects[place.slug] = project.id
+        return self.scenario_service.history(projects)
 
     def person(self, handle: str, name: str | None) -> User:
         """A person on the record as the handle step puts one, under a

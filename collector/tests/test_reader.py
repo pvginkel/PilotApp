@@ -11,7 +11,7 @@ from typing import Any
 
 import pytest
 from pilot_collection.publication import PublicationSchema, PublishedToolCallSchema
-from pilot_scenario import COLLECTOR, SCENARIO, Builder, Scenario
+from pilot_scenario import COLLECTOR, SCENARIO, TALLY, Builder, Scenario
 from pilot_scenario.script import (
     Call,
     Launch,
@@ -310,8 +310,8 @@ def _events(
 class TestTheScenario:
     @pytest.mark.parametrize(
         "scenario",
-        [SCENARIO, _resumed(), _nested()],
-        ids=["the scenario", "a resumed thread", "a nested sub-agent"],
+        [SCENARIO, TALLY, _resumed(), _nested()],
+        ids=["the scenario", "the tally", "a resumed thread", "a nested sub-agent"],
     )
     def test_each_file_reads_as_the_builders_publication(
         self, scenario: Scenario, tmp_path: Path

@@ -167,6 +167,9 @@ class Dimension:
     """A time dimension's alone: the span of time one of its values is, a
     day in the zone or a quota week; none where its values come round
     again, as the weekday and the hour do, and no time falls on one."""
+    at: Path | None = None
+    """A part's alone: the instant one of its values is at, the same on
+    every row of it, which its row of the By carries beside its name."""
 
 
 @dataclass(frozen=True)
@@ -332,7 +335,7 @@ class Catalogue:
     def _reads(self, fact: Fact, dimension: Dimension) -> bool:
         row = self.row(fact)
         try:
-            for path in (dimension.path, dimension.name, dimension.axis):
+            for path in (dimension.path, dimension.name, dimension.axis, dimension.at):
                 if path is not None:
                     path(row)
         except Unreachable:

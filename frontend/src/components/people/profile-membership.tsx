@@ -3,16 +3,15 @@
  * member of every project a call to Pilot starts.
  */
 
-import { useQueryClient } from '@tanstack/react-query';
 import { usePutPeopleSelfJoinCalls } from '@/lib/api/generated/hooks';
+import { UNTIL_READ } from '@/lib/api/until-read';
 import { trackFormError, trackFormSubmit, trackFormSuccess } from '@/lib/test/form-instrumentation';
 
 const JOIN_CALLS_FORM = 'people.join-calls';
 
 /** The switch, on by default. */
 export function JoinCallsSwitch({ on }: { on: boolean }) {
-  const queryClient = useQueryClient();
-  const turn = usePutPeopleSelfJoinCalls({ onSuccess: () => queryClient.invalidateQueries() });
+  const turn = usePutPeopleSelfJoinCalls(UNTIL_READ);
 
   const toggle = () => {
     if (turn.isPending) return;

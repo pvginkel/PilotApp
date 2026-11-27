@@ -273,6 +273,14 @@ class CustomRatioSchema(BaseModel):
         description="The measure below the line, as a state writes it",
         examples=["turns.count"],
     )
+    format: Format | None = Field(
+        description=(
+            "How its numbers are written, as the person picked it; null for a "
+            "loaded one, written in the format its two measures give: a share "
+            "where their figures have one format, else its numerator's"
+        ),
+        examples=["count"],
+    )
     note: str | None = Field(description="A line of explanation shown with it")
     saved_at: datetime = Field(description="When it was last saved, or loaded")
     offered: bool = Field(
@@ -289,6 +297,43 @@ class TimeRangeSchema(BaseModel):
     key: str = Field(examples=["d7"])
     label: str = Field(examples=["Last 7 days"])
     line: str = Field(description="What it holds")
+
+
+class QuotaWeekSchema(BaseModel):
+    """A quota week, from one reset of the subscription's seven-day window
+    to the next. It is labelled by the ISO week of its Thursday, the first
+    in UTC it holds a moment of; a week cut short with no Thursday in it, by
+    the date in UTC it starts on. Two weeks may share a label."""
+
+    starts_at: datetime = Field(
+        description="When it starts: its key, which a state names it by",
+        examples=["2026-11-12T10:00:00Z"],
+    )
+    ends_at: datetime = Field(
+        description=(
+            "When it ends, exclusive: where the next starts, or for the running "
+            "week the reset its latest reading names"
+        ),
+        examples=["2026-11-19T10:00:00Z"],
+    )
+    year: int | None = Field(
+        description="The ISO year of the week it is labelled by; null with `week`",
+        examples=[2026],
+    )
+    week: int | None = Field(
+        description=(
+            "The ISO week it is labelled by; null for a week labelled by `starts_on`"
+        ),
+        examples=[46],
+    )
+    starts_on: date | None = Field(
+        description=(
+            "The date in UTC it starts on, for a week cut short with no Thursday "
+            "in it, which that date labels; null for a week labelled by `week`"
+        ),
+        examples=[None],
+    )
+    running: bool = Field(description="Whether it is the running week, the latest")
 
 
 class CatalogueResponseSchema(BaseModel):
@@ -314,6 +359,13 @@ class CatalogueResponseSchema(BaseModel):
         description="`measures`: the built-in ratios, then the stored ones",
     )
     ranges: list[TimeRangeSchema] | None = Field(default=None, description="`time`")
+    quota_weeks: list[QuotaWeekSchema] | None = Field(
+        default=None,
+        description=(
+            "`time`: every quota week the record holds, newest first, the running "
+            "one first"
+        ),
+    )
     zone: str | None = Field(
         default=None,
         description="`time`: the zone the day, the weekday and the hour are derived in",
@@ -516,6 +568,13 @@ class ByRowSchema(LineSchema):
     key: Key = Field(description="The By's value, typed as the By reads it")
     label: str | None = Field(
         description="Its label; null where the key is its own, as a date or a time"
+    )
+    at: datetime | None = Field(
+        description=(
+            "The instant its value is at, where the By's values have one: a "
+            "Pilot session's or a Pilot turn's start, a conversation's first "
+            "Call, a Call's end; null for another By and on the row of none"
+        )
     )
     focus: bool = Field(description="Whether it holds the view's focus")
     marked: bool = Field(

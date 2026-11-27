@@ -136,7 +136,11 @@
               []
             ],
             "joins": [
-              "session"
+              "work",
+              "item",
+              "chat",
+              "session",
+              "session_kind"
             ]
           }
         ]
@@ -500,7 +504,11 @@
               []
             ],
             "joins": [
-              "session"
+              "work",
+              "item",
+              "chat",
+              "session",
+              "session_kind"
             ]
           },
           {
@@ -671,7 +679,9 @@
               ],
               []
             ],
-            "joins": []
+            "joins": [
+              "thread"
+            ]
           }
         ]
       }
@@ -701,7 +711,9 @@
               ],
               []
             ],
-            "joins": []
+            "joins": [
+              "thread"
+            ]
           }
         ],
         "lanes": {
@@ -913,8 +925,8 @@
               []
             ],
             "joins": [
-              "session",
               "thread",
+              "session",
               "main",
               "project"
             ]
@@ -950,7 +962,11 @@
               []
             ],
             "joins": [
+              "work",
+              "item",
+              "chat",
               "session",
+              "session_kind",
               "thread",
               "main",
               "project"
@@ -1252,7 +1268,11 @@
               []
             ],
             "joins": [
-              "session"
+              "work",
+              "item",
+              "chat",
+              "session",
+              "session_kind"
             ]
           }
         ]
@@ -1496,7 +1516,11 @@
               []
             ],
             "joins": [
-              "session"
+              "work",
+              "item",
+              "chat",
+              "session",
+              "session_kind"
             ]
           }
         ],
@@ -1677,6 +1701,7 @@
               "measure": "cost.median.conversation",
               "fact": "call",
               "joins": [
+                "thread",
                 "unit"
               ],
               "items": "conversation"
@@ -1792,7 +1817,11 @@
               []
             ],
             "joins": [
-              "session"
+              "work",
+              "item",
+              "chat",
+              "session",
+              "session_kind"
             ]
           },
           {
@@ -1851,6 +1880,7 @@
               "fact": "call",
               "joins": [
                 "session",
+                "thread",
                 "unit"
               ],
               "items": "conversation"
@@ -2486,7 +2516,9 @@
                 "model"
               ]
             ],
-            "joins": []
+            "joins": [
+              "thread"
+            ]
           }
         ],
         "lanes": {

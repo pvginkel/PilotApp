@@ -2,9 +2,10 @@
  * A device's notifications (F94.1 to F94.3, F142): the service worker shows each push under its
  * `tag`, an alert renotifying and an update replacing silently, silent too where nothing stands
  * under its tag any more; and the app closes them where it opens, nothing being dismissed by push:
- * a page of a project closes the project's notification as it comes to show the project, and any
- * page of Pilot the alarms', on a fresh load and on coming back to the foreground. Run in
- * Chromium's full build with the notifications permission granted, where a push shows.
+ * a page of a project closes the project's notification as it comes to show the project, none
+ * behind the dashboard (F160.5), and any page of Pilot the alarms', on a fresh load and on coming
+ * back to the foreground. Run in Chromium's full build with the notifications permission granted,
+ * where a push shows.
  */
 
 import { randomUUID } from 'crypto';
@@ -125,6 +126,29 @@ test.describe("A device's notifications", () => {
       await device.foreground();
 
       await expect.poll(() => device.tags()).toEqual([other]);
+    });
+
+    test("behind the dashboard a project's page closes none of the project's, coming back to the foreground the alarms' alone, and the project's as Projects shows it", async ({
+      page,
+      people,
+      projects,
+      shell,
+      dashboard,
+      device,
+    }) => {
+      const me = await people.signIn();
+      const behind = await projects.make({ name: makeUnique('Behind'), members: [me.handle!] });
+      await shell.open(`${projectAddress(behind)}#dash`);
+      await expect(dashboard.screen).toBeVisible();
+      for (const tag of [behind, ALARMS]) await device.deliver(pushUnder(page, tag));
+      await expect.poll(() => device.tags()).toEqual([behind, ALARMS].sort());
+
+      await device.hide();
+      await device.foreground();
+      await expect.poll(() => device.tags()).toEqual([behind]);
+
+      await shell.projectsTab.click();
+      await expect.poll(() => device.tags()).toEqual([]);
     });
 
     test("a push on a project's page just after its load stands, the page's closing of the project done before it", async ({ page, people, projects, shell, device }) => {

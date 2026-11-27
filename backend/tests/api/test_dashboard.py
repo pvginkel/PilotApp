@@ -21,7 +21,7 @@ from dependency_injector import providers
 from flask import Flask
 from flask.testing import FlaskClient
 from pilot_collection.reading import ReadingSchema
-from sqlalchemy import Engine, text
+from sqlalchemy import Engine, delete, text
 from sqlalchemy.orm import Session as DbSession
 
 from app import models
@@ -35,10 +35,11 @@ from app.models import (
     EventKind,
     Project,
     QuickFilter,
+    QuotaWeek,
     SavedView,
     User,
 )
-from app.models.reference import Origin, SessionState, UserKind
+from app.models.reference import NumberFormat, Origin, SessionState, UserKind
 from app.services.container import ServiceContainer
 from app.services.sse_connection_manager import SSEConnection
 from tests.support import transcripts
@@ -50,6 +51,12 @@ from tests.support.transcripts import OPUS, STARTED, reference
 
 CATALOGUE = "/api/dashboard/catalogue"
 SAVED_AT = datetime(2026, 11, 20, 9, 30, tzinfo=UTC)
+HOUR = timedelta(hours=1)
+DAY = timedelta(days=1)
+# The starts of weeks 44 to 46 of 2026, a Thursday 10:00 UTC each.
+WEEK_44 = datetime(2026, 10, 29, 10, tzinfo=UTC)
+WEEK_45 = WEEK_44 + 7 * DAY
+WEEK_46 = WEEK_45 + 7 * DAY
 
 
 def _part(client: FlaskClient, part: str) -> dict[str, Any]:
@@ -70,7 +77,7 @@ class TestGetCatalogue:
         fields = {
             "dimensions": {"dimensions", "markers"},
             "measures": {"facts", "figures", "aggregates", "grains", "ratios"},
-            "time": {"ranges", "zone", "sitting_gap_seconds"},
+            "time": {"ranges", "quota_weeks", "zone", "sitting_gap_seconds"},
             "stored": {"saved_views", "quick_filters", "custom_ratios"},
         }
 
@@ -174,7 +181,8 @@ class TestGetCatalogue:
         self, client: FlaskClient, project: Project
     ) -> None:
         loaded = client.post(
-            "/api/testing/scenarios", json={"projects": {"recipe-box": str(project.id)}}
+            "/api/testing/scenarios",
+            json={"scenario": "supper", "projects": {"recipe-box": str(project.id)}},
         )
         assert loaded.status_code == 201
 
@@ -388,6 +396,89 @@ class TestGetCatalogue:
             "all",
         ]
 
+    def test_the_quota_weeks_newest_first_each_with_its_label(
+        self, client: FlaskClient, session: DbSession
+    ) -> None:
+        session.execute(delete(QuotaWeek))
+        session.add_all(
+            QuotaWeek(starts_at=starts_at, ends_at=ends_at)
+            for starts_at, ends_at in [
+                # Weeks 44 and 45, Thursday 10:00 UTC to the next.
+                (WEEK_44, WEEK_45),
+                (WEEK_45, WEEK_46),
+                # Resets cut the next two weeks short, each holding Thursday
+                # 12 November, so both are week 46; the one after them,
+                # Friday to Tuesday, holds no Thursday.
+                (WEEK_46, WEEK_46 + 2 * HOUR),
+                (WEEK_46 + 2 * HOUR, WEEK_46 + DAY + 2 * HOUR),
+                (WEEK_46 + DAY + 2 * HOUR, WEEK_46 + 5 * DAY),
+            ]
+        )
+        session.flush()
+
+        weeks = _part(client, "time")["quota_weeks"]
+
+        assert weeks == [
+            {
+                "starts_at": "2026-11-13T12:00:00Z",
+                "ends_at": "2026-11-17T10:00:00Z",
+                "year": None,
+                "week": None,
+                "starts_on": "2026-11-13",
+                "running": True,
+            },
+            {
+                "starts_at": "2026-11-12T12:00:00Z",
+                "ends_at": "2026-11-13T12:00:00Z",
+                "year": 2026,
+                "week": 46,
+                "starts_on": None,
+                "running": False,
+            },
+            {
+                "starts_at": "2026-11-12T10:00:00Z",
+                "ends_at": "2026-11-12T12:00:00Z",
+                "year": 2026,
+                "week": 46,
+                "starts_on": None,
+                "running": False,
+            },
+            {
+                "starts_at": "2026-11-05T10:00:00Z",
+                "ends_at": "2026-11-12T10:00:00Z",
+                "year": 2026,
+                "week": 45,
+                "starts_on": None,
+                "running": False,
+            },
+            {
+                "starts_at": "2026-10-29T10:00:00Z",
+                "ends_at": "2026-11-05T10:00:00Z",
+                "year": 2026,
+                "week": 44,
+                "starts_on": None,
+                "running": False,
+            },
+        ]
+
+    def test_the_quota_weeks_are_read_at_each_call(
+        self, client: FlaskClient, session: DbSession
+    ) -> None:
+        session.execute(delete(QuotaWeek))
+        session.add(QuotaWeek(starts_at=WEEK_44, ends_at=WEEK_45))
+        session.flush()
+        assert [week["week"] for week in _part(client, "time")["quota_weeks"]] == [44]
+
+        # The weeks follow the usage readings, the catalogue held meanwhile.
+        session.add(QuotaWeek(starts_at=WEEK_45, ends_at=WEEK_46))
+        session.flush()
+
+        weeks = _part(client, "time")["quota_weeks"]
+        assert [(week["week"], week["running"]) for week in weeks] == [
+            (45, True),
+            (44, False),
+        ]
+
     def test_what_it_stores(self, client: FlaskClient, session: DbSession) -> None:
         session.add(
             SavedView(
@@ -457,6 +548,7 @@ class TestGetCatalogue:
                 name="Cost per turn",
                 numerator="reported_cost.sum",
                 denominator="turns.count",
+                format_code=NumberFormat.USD,
                 saved_at=SAVED_AT,
             )
         )
@@ -474,6 +566,46 @@ class TestGetCatalogue:
             "origin": "person",
         }
 
+    def test_a_persons_ratio_is_in_the_format_picked_a_loaded_ones_its_measures(
+        self, client: FlaskClient, session: DbSession
+    ) -> None:
+        """DB 640: two counts make a share where no person picked a format."""
+        session.add_all(
+            [
+                CustomRatio(
+                    origin_code=Origin.PERSON,
+                    key="person_calls_per_turn",
+                    name="Calls per turn",
+                    numerator="calls.count",
+                    denominator="turns.count",
+                    format_code=NumberFormat.COUNT,
+                    saved_at=SAVED_AT,
+                ),
+                CustomRatio(
+                    origin_code=Origin.WORKFLOW,
+                    key="calls_per_turn",
+                    name="Calls per turn",
+                    numerator="calls.count",
+                    denominator="turns.count",
+                    saved_at=SAVED_AT,
+                ),
+            ]
+        )
+        session.flush()
+
+        measures = _part(client, "measures")["ratios"]
+        stored = _part(client, "stored")["custom_ratios"]
+
+        assert [
+            (ratio["key"], ratio["format"])
+            for ratio in measures
+            if ratio["origin"] is not None
+        ] == [("calls_per_turn", "share"), ("person_calls_per_turn", "count")]
+        assert [(ratio["key"], ratio["format"]) for ratio in stored] == [
+            ("calls_per_turn", None),
+            ("person_calls_per_turn", "count"),
+        ]
+
     def test_what_it_stores_that_no_longer_reads_is_listed_not_offered(
         self, client: FlaskClient, session: DbSession
     ) -> None:
@@ -487,6 +619,7 @@ class TestGetCatalogue:
                     name="Cost per crate",
                     numerator="cost.sum",
                     denominator="crates.count",
+                    format_code=NumberFormat.USD,
                     saved_at=SAVED_AT,
                 ),
                 QuickFilter(
@@ -662,6 +795,7 @@ class TestGetRows:
         assert body["rows"][0] == {
             "key": str(worked.project.id),
             "label": "Recipe box",
+            "at": None,
             "focus": False,
             "values": [2.6, 2.0],
             "n": [5, 2],
@@ -686,6 +820,21 @@ class TestGetRows:
         assert rows[str(worked.work.id)]["marks"] == [1.0]
         assert rows[str(worked.chat.id)]["marks"] == [0.0]
         assert body["all"]["marks"] == [1.0]
+
+    def test_a_part_of_pilots_work_has_its_name_and_its_time_as_an_instant(
+        self, client: FlaskClient, worked: Record
+    ) -> None:
+        body = client.get(ROWS, query_string={"state": "t=all&by=pturn"}).get_json()
+
+        rows = {row["key"]: row for row in body["rows"]}
+        assert (
+            rows[worked.work_turn.id]["label"],
+            rows[worked.work_turn.id]["at"],
+        ) == (
+            "Turn 1 · brief",
+            "2026-11-12T09:29:00Z",
+        )
+        assert (rows[None]["label"], rows[None]["at"]) == ("(No Pilot turn)", None)
 
     def test_a_time_key_is_an_instant(
         self, client: FlaskClient, worked: Record
@@ -736,6 +885,38 @@ class TestGetRows:
             "temporary disk than the database allows one: a shorter time range or "
             "a narrower scope reads less"
         )
+
+    def test_a_persons_ratio_is_answered_in_the_format_picked(
+        self, client: FlaskClient, session: DbSession, worked: Record
+    ) -> None:
+        """DB 640: calls over turns read as a number, not as a share."""
+        session.add(
+            CustomRatio(
+                origin_code=Origin.PERSON,
+                key="person_calls_per_turn",
+                name="Calls per turn",
+                numerator="calls.count",
+                denominator="turns.count",
+                format_code=NumberFormat.COUNT,
+                saved_at=SAVED_AT,
+            )
+        )
+        session.flush()
+
+        body = client.get(
+            ROWS,
+            query_string={
+                "state": "t=all&m=r:person_calls_per_turn&m=r:per_call&col=none"
+            },
+        ).get_json()
+
+        assert [
+            (measure["key"], measure["label"], measure["format"])
+            for measure in body["measures"]
+        ] == [
+            ("r:person_calls_per_turn", "Calls per turn", "count"),
+            ("r:per_call", "Cost per call", "usd"),
+        ]
 
     def test_no_state_is_refused(self, client: FlaskClient) -> None:
         assert client.get(ROWS).status_code == 400
@@ -801,6 +982,7 @@ class TestGetSeries:
         assert body["points"][0] == {
             "key": "2026-11-12",
             "label": None,
+            "at": None,
             "focus": False,
             "values": [2.6, 1.75],
             "n": [5, 2],
@@ -830,7 +1012,7 @@ class TestGetSeries:
         assert items["dots"][0] == {
             "point": 0,
             "key": str(worked.thread.id),
-            "label": None,
+            "label": "Main thread",
             "value": 1.75,
             "at": "2026-11-12T09:31:00Z",
             "focus": False,
@@ -1236,7 +1418,7 @@ class TestGetItems:
         assert body["total"] == 3
         assert body["items"][0] == {
             "key": str(worked.thread.id),
-            "label": None,
+            "label": "Main thread",
             "first": "2026-11-12T09:31:00Z",
             "last": "2026-11-12T09:33:00Z",
             "values": [3.0, 1.75, 166_488.0, 1.0, 1.0, 52_626.0],

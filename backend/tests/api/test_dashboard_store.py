@@ -416,6 +416,7 @@ class TestCustomRatios:
                 "name": "Cost per turn",
                 "numerator": "reported_cost.sum",
                 "denominator": "turns",
+                "format": "usd",
             },
         )
 
@@ -430,6 +431,7 @@ class TestCustomRatios:
             "name": "Cost per turn",
             "numerator": "reported_cost.sum",
             "denominator": "turns.count",
+            "format": "usd",
             "note": None,
             "offered": True,
         }
@@ -440,7 +442,12 @@ class TestCustomRatios:
     ) -> None:
         response = client.post(
             RATIOS,
-            json={"name": "Broken", "numerator": "cots.sum", "denominator": "turnz"},
+            json={
+                "name": "Broken",
+                "numerator": "cots.sum",
+                "denominator": "turnz",
+                "format": "usd",
+            },
         )
 
         assert response.status_code == 400
@@ -453,7 +460,12 @@ class TestCustomRatios:
     ) -> None:
         made = client.post(
             RATIOS,
-            json={"name": "Cost per turn", "numerator": "cost", "denominator": "turns"},
+            json={
+                "name": "Cost per turn",
+                "numerator": "cost",
+                "denominator": "turns",
+                "format": "usd",
+            },
         ).get_json()
 
         response = client.put(
@@ -462,6 +474,7 @@ class TestCustomRatios:
                 "name": "Cost per turn",
                 "numerator": "cots.sum",
                 "denominator": "turns",
+                "format": "usd",
             },
         )
 
@@ -471,7 +484,12 @@ class TestCustomRatios:
         )
 
     def test_a_persons_name_taken_is_refused(self, client: FlaskClient) -> None:
-        ratio = {"name": "Cost per turn", "numerator": "cost", "denominator": "turns"}
+        ratio = {
+            "name": "Cost per turn",
+            "numerator": "cost",
+            "denominator": "turns",
+            "format": "usd",
+        }
         client.post(RATIOS, json=ratio)
 
         assert client.post(RATIOS, json=ratio).status_code == 409
@@ -479,11 +497,19 @@ class TestCustomRatios:
     @pytest.mark.parametrize(
         "body",
         [
-            {"numerator": "cost.sum", "denominator": "turns.count"},
-            {"name": "Cost per turn", "numerator": "cost.sum"},
+            {"numerator": "cost.sum", "denominator": "turns.count", "format": "usd"},
+            {"name": "Cost per turn", "numerator": "cost.sum", "format": "usd"},
+            {"name": "Cost per turn", "numerator": "cost", "denominator": "turns"},
+            {
+                "name": "Cost per turn",
+                "numerator": "cost",
+                "denominator": "turns",
+                "format": "percent",
+            },
         ],
+        ids=["no name", "a side missing", "no format", "a format not among them"],
     )
-    def test_no_name_or_a_side_missing_is_refused(
+    def test_no_name_a_side_or_a_format_missing_is_refused(
         self, client: FlaskClient, body: dict[str, str]
     ) -> None:
         assert client.post(RATIOS, json=body).status_code == 400
@@ -491,7 +517,12 @@ class TestCustomRatios:
     def test_one_is_changed_under_its_key(self, client: FlaskClient) -> None:
         made = client.post(
             RATIOS,
-            json={"name": "Cost per turn", "numerator": "cost", "denominator": "turns"},
+            json={
+                "name": "Cost per turn",
+                "numerator": "cost",
+                "denominator": "turns",
+                "format": "usd",
+            },
         ).get_json()
 
         response = client.put(
@@ -500,23 +531,63 @@ class TestCustomRatios:
                 "name": "Turn cost",
                 "numerator": "reported_cost.sum",
                 "denominator": "turns.count",
+                "format": "count",
                 "note": "As the turns reported it",
             },
         )
 
         assert response.status_code == 200
         changed = response.get_json()
-        assert (changed["id"], changed["key"], changed["name"], changed["note"]) == (
+        assert (
+            changed["id"],
+            changed["key"],
+            changed["name"],
+            changed["format"],
+            changed["note"],
+        ) == (
             made["id"],
             "person_cost_per_turn",
             "Turn cost",
+            "count",
             "As the turns reported it",
         )
+
+    def test_its_numbers_are_written_in_the_format_the_person_picked(
+        self, client: FlaskClient
+    ) -> None:
+        """DB 640: calls over turns, whose two counts would make a share,
+        picked as a number."""
+        made = client.post(
+            RATIOS,
+            json={
+                "name": "Calls per turn",
+                "numerator": "calls",
+                "denominator": "turns",
+                "format": "count",
+            },
+        ).get_json()
+
+        response = client.get(
+            "/api/dashboard/catalogue", query_string={"part": "measures"}
+        )
+
+        assert made["format"] == "count"
+        (ratio,) = [
+            ratio
+            for ratio in response.get_json()["ratios"]
+            if ratio["key"] == made["key"]
+        ]
+        assert ratio["format"] == "count"
 
     def test_one_is_removed(self, client: FlaskClient) -> None:
         made = client.post(
             RATIOS,
-            json={"name": "Cost per turn", "numerator": "cost", "denominator": "turns"},
+            json={
+                "name": "Cost per turn",
+                "numerator": "cost",
+                "denominator": "turns",
+                "format": "usd",
+            },
         ).get_json()
 
         assert client.delete(f"{RATIOS}/{made['id']}").status_code == 204
@@ -527,7 +598,12 @@ class TestCustomRatios:
         self, client: FlaskClient, session: DbSession, method: str
     ) -> None:
         loaded = _loaded_ratio(session)
-        change = {"name": "Mine", "numerator": "cost", "denominator": "turns"}
+        change = {
+            "name": "Mine",
+            "numerator": "cost",
+            "denominator": "turns",
+            "format": "usd",
+        }
 
         response = getattr(client, method)(f"{RATIOS}/{loaded.id}", json=change)
 
@@ -538,7 +614,12 @@ class TestCustomRatios:
         )
 
     def test_no_ratio_is_not_found(self, client: FlaskClient) -> None:
-        change = {"name": "Mine", "numerator": "cost", "denominator": "turns"}
+        change = {
+            "name": "Mine",
+            "numerator": "cost",
+            "denominator": "turns",
+            "format": "usd",
+        }
 
         assert client.put(f"{RATIOS}/{uuid.uuid4()}", json=change).status_code == 404
         assert client.delete(f"{RATIOS}/{uuid.uuid4()}").status_code == 404
@@ -693,11 +774,15 @@ ROUTES = [
     ("delete", f"{DIMENSIONS}?menu=by&dimension=project", None),
     ("post", QUICK_FILTERS, {"label": "Misses", "chip": "miss:1"}),
     ("delete", f"{QUICK_FILTERS}/{NOWHERE}", None),
-    ("post", RATIOS, {"name": "Mine", "numerator": "cost", "denominator": "turns"}),
+    (
+        "post",
+        RATIOS,
+        {"name": "Mine", "numerator": "cost", "denominator": "turns", "format": "usd"},
+    ),
     (
         "put",
         f"{RATIOS}/{NOWHERE}",
-        {"name": "Mine", "numerator": "cost", "denominator": "turns"},
+        {"name": "Mine", "numerator": "cost", "denominator": "turns", "format": "usd"},
     ),
     ("delete", f"{RATIOS}/{NOWHERE}", None),
     ("put", WORKFLOW, {"views": [], "ratios": []}),

@@ -207,6 +207,28 @@ class TestAttributes:
             key=lambda count: count.dimension,
         ) == sorted(found, key=lambda count: count.dimension)
 
+    def test_held_it_hands_on_its_first_facts_counts_and_waits_before_the_next(
+        self, container: ServiceContainer, service: CountsService
+    ) -> None:
+        bounds = container.dashboard_bounds()
+        booted = bounds.timeout_seconds
+        handed: list[int] = []
+        bounds.timeout_seconds = 0.5
+        bounds.hold(True)
+        try:
+            with pytest.raises(QueryRefusedException) as refused:
+                service.attributes(
+                    _view(container, "t=all"),
+                    NOW,
+                    lambda part, done, facts: handed.append(done),
+                )
+        finally:
+            bounds.hold(False)
+            bounds.timeout_seconds = booted
+
+        assert handed == [1]
+        assert refused.value.reason == "timeout"
+
     def test_each_facts_count_is_a_read_of_its_own(
         self, container: ServiceContainer, service: CountsService, session: DbSession
     ) -> None:

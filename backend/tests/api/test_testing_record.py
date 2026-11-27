@@ -2207,7 +2207,7 @@ ENDPOINTS = [
     (DUE, {}),
     (_wait_run_path(NO_ROW), {}),
     (_wait_close_path(NO_ROW), {"note": "Read"}),
-    (SCENARIOS, {"projects": {"recipe-box": str(NO_ROW)}}),
+    (SCENARIOS, {"scenario": "supper", "projects": {"recipe-box": str(NO_ROW)}}),
     (WALKS, {}),
 ]
 
@@ -4536,7 +4536,8 @@ class TestCreateScenario:
         self, client: FlaskClient, session: Session, project: Project
     ) -> None:
         response = client.post(
-            SCENARIOS, json={"projects": {"recipe-box": str(project.id)}}
+            SCENARIOS,
+            json={"scenario": "supper", "projects": {"recipe-box": str(project.id)}},
         )
 
         assert response.status_code == 201
@@ -4563,13 +4564,70 @@ class TestCreateScenario:
         ).one()
         assert run.project_id == project.id
 
+    def test_the_tally_on_its_two_projects_all_of_it_pilots(
+        self, client: FlaskClient, session: Session, project: Project, person: User
+    ) -> None:
+        bikes = Project(
+            slug="bikes", state_code=ProjectState.OPEN, created_by_user_id=person.id
+        )
+        ben = User(
+            kind_code=UserKind.PERSON,
+            subject="subject-ben",
+            handle="ben",
+            name="Ben Example",
+            avatar_slot=2,
+        )
+        session.add_all([bikes, ben])
+        session.flush()
+
+        response = client.post(
+            SCENARIOS,
+            json={
+                "scenario": "tally",
+                "projects": {"recipe-box": str(project.id), "bike-log": str(bikes.id)},
+            },
+        )
+
+        assert response.status_code == 201
+        threads = response.get_json()["transcripts"]
+        assert [thread["agent_id"] is None for thread in threads] == [
+            True,
+            False,
+            True,
+            True,
+        ]
+        assert [thread["adopted_by"] for thread in threads] == [None] * 4
+        assert sorted(
+            (run.kind_code, run.project_id == project.id)
+            for run in session.scalars(select(models.Session))
+        ) == [("chat", True), ("job", False), ("work", True)]
+
+    def test_a_turn_by_a_person_the_record_has_not_is_not_found(
+        self, client: FlaskClient, session: Session, project: Project
+    ) -> None:
+        response = client.post(
+            SCENARIOS,
+            json={
+                "scenario": "tally",
+                "projects": {
+                    "recipe-box": str(project.id),
+                    "bike-log": str(project.id),
+                },
+            },
+        )
+
+        assert response.status_code == 404
+        assert response.get_json()["error"] == "Person ben was not found"
+        assert _count(session, Transcript) == 0
+
     def test_the_conversation_of_the_scenarios_group_is_adopted_by_its_project(
         self, client: FlaskClient, session: Session, project: Project
     ) -> None:
         """F152.8: what a spec finds the group's project in the Archived list
         by."""
         response = client.post(
-            SCENARIOS, json={"projects": {"recipe-box": str(project.id)}}
+            SCENARIOS,
+            json={"scenario": "supper", "projects": {"recipe-box": str(project.id)}},
         )
 
         halving, counting, gears = response.get_json()["transcripts"]
@@ -4595,7 +4653,8 @@ class TestCreateScenario:
         session.flush()
 
         response = client.post(
-            SCENARIOS, json={"projects": {"recipe-box": str(project.id)}}
+            SCENARIOS,
+            json={"scenario": "supper", "projects": {"recipe-box": str(project.id)}},
         )
 
         assert response.status_code == 409
@@ -4608,7 +4667,7 @@ class TestCreateScenario:
     def test_a_second_load_replaces_the_first(
         self, client: FlaskClient, session: Session, project: Project
     ) -> None:
-        body = {"projects": {"recipe-box": str(project.id)}}
+        body = {"scenario": "supper", "projects": {"recipe-box": str(project.id)}}
 
         first = client.post(SCENARIOS, json=body)
         second = client.post(SCENARIOS, json=body)
@@ -4620,8 +4679,15 @@ class TestCreateScenario:
     @pytest.mark.parametrize(
         "body",
         [
-            pytest.param({}, id="no projects"),
-            pytest.param({"projects": {"recipe-box": "camp"}}, id="no id"),
+            pytest.param({"scenario": "supper"}, id="no projects"),
+            pytest.param({"projects": {"recipe-box": str(NO_ROW)}}, id="no scenario"),
+            pytest.param(
+                {"scenario": "stew", "projects": {"recipe-box": str(NO_ROW)}},
+                id="no scenario of the name",
+            ),
+            pytest.param(
+                {"scenario": "supper", "projects": {"recipe-box": "camp"}}, id="no id"
+            ),
         ],
     )
     def test_a_request_out_of_shape_is_refused(
@@ -4634,13 +4700,14 @@ class TestCreateScenario:
         self, client: FlaskClient, session: Session, project: Project
     ) -> None:
         response = client.post(
-            SCENARIOS, json={"projects": {"bike-log": str(project.id)}}
+            SCENARIOS,
+            json={"scenario": "supper", "projects": {"bike-log": str(project.id)}},
         )
 
         assert response.status_code == 400
         assert response.get_json()["error"] == (
             "Cannot load the scenario because `projects` gives a project for "
-            "`bike-log`, and the scenario's Turns of Pilot's are on `recipe-box`"
+            "`bike-log`, and the scenario's Sessions of Pilot's are on `recipe-box`"
         )
         assert _count(session, Transcript) == 0
 
@@ -4648,7 +4715,8 @@ class TestCreateScenario:
         self, client: FlaskClient, session: Session
     ) -> None:
         response = client.post(
-            SCENARIOS, json={"projects": {"recipe-box": str(NO_ROW)}}
+            SCENARIOS,
+            json={"scenario": "supper", "projects": {"recipe-box": str(NO_ROW)}},
         )
 
         assert response.status_code == 404
@@ -4694,7 +4762,8 @@ class TestCreateWalk:
     ) -> None:
         """F152.14: what a spec that loaded a scenario sees the event by."""
         loaded = client.post(
-            SCENARIOS, json={"projects": {"recipe-box": str(project.id)}}
+            SCENARIOS,
+            json={"scenario": "supper", "projects": {"recipe-box": str(project.id)}},
         )
         assert loaded.status_code == 201
         assert self._events(ada) == []

@@ -1200,8 +1200,8 @@ class TestEstimates:
         session: DbSession,
         environment: Environment,
     ) -> None:
-        """The project, its running work items and the estimate's four
-        statements, whatever stands on its timeline, on its work item's list
+        """The project, its running work items and the estimate's one
+        statement, whatever stands on its timeline, on its work item's list
         and in its kind's history."""
         made = _make(
             container, name="Camp", open_items=3, environment_id=environment.id
@@ -1216,7 +1216,7 @@ class TestEstimates:
             estimates = container.project_service().estimates(made.id)
 
         assert len(estimates.work_items) == 1
-        assert len(each.texts) == 6
+        assert len(each.texts) == 3
 
     def test_an_unknown_project_is_not_found(self, container: ServiceContainer) -> None:
         with pytest.raises(RecordNotFoundException):

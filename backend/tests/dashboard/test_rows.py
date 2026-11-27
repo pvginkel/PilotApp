@@ -282,7 +282,7 @@ class TestColor:
 
         assert found.color is not None
         assert found.color.values[:2] == (
-            ColorValue(worked.thread.id, None, 1.75),
+            ColorValue(worked.thread.id, "Main thread", 1.75),
             ColorValue(None, "(No transcript)", 0.75),
         )
         folded = found.color.values[2]
@@ -290,6 +290,40 @@ class TestColor:
         assert round(folded.total or 0, 6) == 0.15
         assert found.all.split is not None
         assert _round(found.all.split[0] or ()) == (1.75, 0.75, 0.15)
+
+
+class TestNamesAndTimes:
+    def test_a_part_of_pilots_work_names_each_row_with_its_time(
+        self, service: RowsService, session: DbSession, worked: Record
+    ) -> None:
+        worked.work.started_at = STARTED - timedelta(minutes=2)
+        session.flush()
+
+        sessions = _by_key(_rows(service, "t=all&by=psession"))
+        calls = _by_key(_rows(service, "t=all&by=call"))
+
+        assert (sessions[worked.work.id].label, sessions[worked.work.id].at) == (
+            "Work",
+            worked.work.started_at,
+        )
+        assert sessions[worked.chat.id].label == "Project chat"
+        assert (sessions[None].label, sessions[None].at) == ("(No Pilot session)", None)
+        second = worked.calls[1]
+        assert (calls[second.id].label, calls[second.id].at) == (
+            "Call 2",
+            second.completed_at,
+        )
+        assert (calls[None].label, calls[None].at) == (
+            "(Estimate: no transcript)",
+            None,
+        )
+
+    def test_a_by_whose_values_have_no_time_has_none(
+        self, service: RowsService, worked: Record
+    ) -> None:
+        found = _rows(service, "t=all&by=project")
+
+        assert {row.at for row in found.rows} == {None}
 
 
 @pytest.mark.usefixtures("worked")

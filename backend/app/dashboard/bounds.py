@@ -64,6 +64,17 @@ class Bounds:
         self.timeout_seconds = timeout_seconds
         self.at_once = at_once
         self._slots = threading.BoundedSemaphore(at_once)
+        self._unheld = threading.Event()
+        self._unheld.set()
+
+    def hold(self, held: bool) -> None:
+        """For a spec, through `PUT /api/testing/dashboard-bounds`: while
+        held, each read that may be held waits, before its slot, until the
+        hold ends, refused where its deadline passes first."""
+        if held:
+            self._unheld.clear()
+        else:
+            self._unheld.set()
 
     def deadline(self) -> float:
         """The end of the timeout from now, on `time.monotonic()`'s clock,
@@ -71,17 +82,24 @@ class Bounds:
         return time.monotonic() + self.timeout_seconds
 
     @contextmanager
-    def read(self, db: Session, deadline: float | None = None) -> Iterator[Session]:
+    def read(
+        self, db: Session, deadline: float | None = None, holdable: bool = False
+    ) -> Iterator[Session]:
         """`db` in a read-only transaction of its own, once a slot is free,
         for the engine's statements, the wait and the statements together
         before `deadline`, the timeout from now where none is given; the
         caller's transaction committed first, so a caller with writes of its
-        own makes them after. `QueryRefusedException` where the deadline had
+        own makes them after; a `holdable` read waiting first while a spec
+        holds it (`hold`). `QueryRefusedException` where the deadline had
         passed, no slot freed, or a statement ran past what was left of the
         deadline or the limit on temporary files."""
         db.commit()
         if deadline is None:
             deadline = self.deadline()
+        if holdable and not self._unheld.wait(
+            timeout=max(deadline - time.monotonic(), 0)
+        ):
+            raise self._timeout()
         left = deadline - time.monotonic()
         if left <= 0:
             raise self._timeout()

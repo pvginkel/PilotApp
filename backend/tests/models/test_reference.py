@@ -1,9 +1,12 @@
 """The reference entities: the enum types, and the five tables' rows the revisions write."""
 
+from typing import get_args
+
 import pilot_dsl
 from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
+from app.dashboard.catalogue import Format
 from app.models import (
     ConfirmationReason,
     DoneCause,
@@ -11,7 +14,7 @@ from app.models import (
     SessionKind,
     TokenKind,
 )
-from app.models.reference import ENUM_TYPES, AnswerChannel, BlockKind
+from app.models.reference import ENUM_TYPES, AnswerChannel, BlockKind, NumberFormat
 from tests.support.database import violated_constraint
 
 
@@ -28,10 +31,10 @@ class TestEnumTypes:
 
         assert dict(rows) == {enum.name: list(enum.enums) for enum in ENUM_TYPES}
 
-    def test_the_enums_are_twenty_four(self) -> None:
+    def test_the_enums_are_twenty_five(self) -> None:
         """Twenty of DB §2.4, with the five tables its 25 reference
-        entities, and Turn Cause, Hold Kind, Favourite Menu and Origin,
-        Pilot's own of DB §2.11."""
+        entities, and Turn Cause, Hold Kind, Favourite Menu, Origin and
+        Number Format, Pilot's own of DB §2.11."""
         assert {enum.name for enum in ENUM_TYPES} == {
             "user_kind",
             "overrule_kind",
@@ -57,7 +60,13 @@ class TestEnumTypes:
             "hold_kind",
             "favourite_menu",
             "origin",
+            "number_format",
         }
+
+    def test_the_number_formats_are_the_catalogues(self) -> None:
+        """Decision 86: a person picks a Custom Ratio's from the formats the
+        catalogue writes its figures and ratios in."""
+        assert [str(one) for one in NumberFormat] == list(get_args(Format))
 
 
 class TestTheBlockDsl:

@@ -475,7 +475,6 @@ class TestTheScenariosUnits:
     @pytest.fixture
     def loaded(
         self,
-        session: DbSession,
         container: ServiceContainer,
         project: Project,
         monkeypatch: pytest.MonkeyPatch,
@@ -497,13 +496,11 @@ class TestTheScenariosUnits:
             return written
 
         monkeypatch.setattr(builder_module.Builder, "records", given)
-        container.scenario_service().load({"recipe-box": project.id})
-        return session.scalars(
-            select(Transcript).where(
-                Transcript.session_id == Builder(SCENARIO, NOW).conversation(GEARS),
-                Transcript.agent_id.is_(None),
-            )
-        ).one()
+        _, _, gears = container.scenario_service().load(
+            SCENARIO, {"recipe-box": project.id}
+        )
+        assert gears.agent_id is None
+        return gears
 
     def test_the_errands_legs_stand_in_the_order_of_their_start(
         self, loaded: Transcript, container: ServiceContainer

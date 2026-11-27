@@ -9,6 +9,7 @@
  */
 
 import { expect, type CDPSession, type Page } from '@playwright/test';
+import { screenOf } from '@/lib/screens';
 import type { UiStateTestEvent } from '@/lib/test/test-events';
 import { getTestEventBuffer } from './helpers/test-events';
 
@@ -71,11 +72,12 @@ export class Device {
    * its `shell.closing` states is ready (`use-app-page.ts`), each visible load closing the alarms'
    * as it starts. A visible page at a project's address closes the project's too, but only once it
    * has resolved the address, which can come after the alarms' are closed: a closing that read the
-   * project's tag must have started.
+   * project's tag must have started. Behind the dashboard it shows no project (F160.5).
    */
   private async closed(): Promise<void> {
     const { load, visible } = await this.page.evaluate(() => ({ load: performance.timeOrigin, visible: document.visibilityState === 'visible' }));
-    const project = visible ? await this.projectAt() : undefined;
+    const behind = screenOf(new URL(this.page.url()).hash) === 'dashboard';
+    const project = visible && !behind ? await this.projectAt() : undefined;
     const buffer = getTestEventBuffer(this.page);
     const state = () => {
       const states = buffer

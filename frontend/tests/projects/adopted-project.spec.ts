@@ -15,13 +15,14 @@ test.describe('An adopted project', () => {
   test('is listed with the archived projects, its row reading “Adopted”, and its head has no menu', async ({
     people,
     projects,
+    collection,
     projectList,
     projectHead,
   }) => {
     const me = await people.signIn();
     await people.serviceUser();
     const recipeBox = await projects.make({ name: makeUnique('Recipe box'), members: [me.handle!] });
-    const [halving, counting, gears] = await projects.loadScenario(recipeBox);
+    const [halving, counting, gears] = await collection.loadScenario('supper', { 'recipe-box': recipeBox });
     expect([halving.adopted_by, counting.adopted_by]).toEqual([null, null]);
     const adopted = gears.adopted_by!;
     await projectList.open(recipeBox);
@@ -41,13 +42,13 @@ test.describe('An adopted project', () => {
     expect((await projects.head(adopted.id)).state).toBe('adopted');
   });
 
-  test('a second load finds the group’s project again: the Archived list holds it once', async ({ people, projects, projectList }) => {
+  test('a second load finds the group’s project again: the Archived list holds it once', async ({ people, projects, collection, projectList }) => {
     const me = await people.signIn();
     await people.serviceUser();
     const recipeBox = await projects.make({ name: makeUnique('Recipe box'), members: [me.handle!] });
-    const first = (await projects.loadScenario(recipeBox))[2].adopted_by!;
+    const first = (await collection.loadScenario('supper', { 'recipe-box': recipeBox }))[2].adopted_by!;
 
-    const second = (await projects.loadScenario(recipeBox))[2].adopted_by!;
+    const second = (await collection.loadScenario('supper', { 'recipe-box': recipeBox }))[2].adopted_by!;
 
     expect(second).toEqual(first);
     await projectList.open(recipeBox);
@@ -62,6 +63,7 @@ test.describe('An adopted project', () => {
     test('is a row of the Archived view reading “Adopted”, and its head has no menu', async ({
       people,
       projects,
+      collection,
       projectList,
       projectHead,
       shell,
@@ -69,7 +71,7 @@ test.describe('An adopted project', () => {
       const me = await people.signIn();
       await people.serviceUser();
       const recipeBox = await projects.make({ name: makeUnique('Recipe box'), members: [me.handle!] });
-      const adopted = (await projects.loadScenario(recipeBox))[2].adopted_by!;
+      const adopted = (await collection.loadScenario('supper', { 'recipe-box': recipeBox }))[2].adopted_by!;
       await shell.open('/');
       await expect(projectList.tab(adopted.name)).toHaveCount(0);
 

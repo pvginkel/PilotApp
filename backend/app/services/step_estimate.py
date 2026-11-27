@@ -43,21 +43,25 @@ from dataclasses import dataclass
 from datetime import datetime
 from functools import cached_property
 from statistics import fmean, median, quantiles
+from typing import Any
 
 from sqlalchemy import (
     Boolean,
-    DateTime,
-    Text,
+    ColumnElement,
+    Row,
+    Select,
+    Subquery,
     column,
     func,
-    literal,
     literal_column,
+    null,
     or_,
     select,
     true,
+    union,
+    union_all,
     values,
 )
-from sqlalchemy.dialects.postgresql import ARRAY
 from sqlalchemy.orm import Session, aliased
 
 from app.models import Item, ProgressStep, StepTiming, Turn
@@ -245,10 +249,11 @@ def work_estimates(
     `running` the number of those that had ended when a running step began
     that it is read against, `slow_factor` what the run's normal is
     multiplied by for its slow."""
-    runs = {run.id: run for run in _runs(db, work_ids)}
     # At least `OWN` of each listing, so that the ten and the five are counted
     # off rows the settings do not cut.
-    figures = _figures(db, list(runs.values()), max(window, running, OWN), window)
+    read, timings = _read(db, work_ids, max(window, running, OWN))
+    figures = _figures(read, timings, window)
+    runs = {run.id: run for run in read}
     estimates = {}
     for work_id in work_ids:
         if work_id not in runs:
@@ -293,6 +298,18 @@ class StepEstimates:
 
 
 @dataclass(frozen=True)
+class _Step:
+    """A step of a run's list, as the estimate reads it."""
+
+    code: str
+    state_code: ProgressState
+    kind_code: str | None
+    started_at: datetime | None
+    listed_ahead: bool | None
+    marked: bool | None
+
+
+@dataclass(frozen=True)
 class _Run:
     """An open work item whose Session runs, with its list in order, and
     what its run holds beside: the work items on its conversation, the work
@@ -301,7 +318,7 @@ class _Run:
     id: uuid.UUID
     turn_started_at: datetime | None
     repo: str | None
-    steps: tuple[ProgressStep, ...]
+    steps: tuple[_Step, ...]
     started: datetime | None
     """The run's start: the start of its first work item's first turn."""
     timed: int
@@ -311,7 +328,7 @@ class _Run:
     where one knows: the earliest that does."""
 
     @cached_property
-    def left(self) -> list[ProgressStep]:
+    def left(self) -> list[_Step]:
         """The steps left to do: those not begun and those running."""
         return [step for step in self.steps if step.state_code != ProgressState.DONE]
 
@@ -329,7 +346,7 @@ class _Run:
                 last = repeats.get(step.kind_code, step.started_at)
                 repeats[step.kind_code] = max(last, step.started_at)
         owing = []
-        after: ProgressStep | None = None
+        after: _Step | None = None
         for step in reversed(self.steps):
             if step.started_at is None:
                 # Not begun, it stands pending on the list, listed ahead:
@@ -347,9 +364,9 @@ class _Run:
 
     @staticmethod
     def _owes(
-        step: ProgressStep,
+        step: _Step,
         began: datetime,
-        after: ProgressStep | None,
+        after: _Step | None,
         repeat: datetime | None,
     ) -> bool:
         """Whether a step listed ahead, which began at `began`, owes: `after`
@@ -373,11 +390,11 @@ class _Run:
         return kinds
 
     @cached_property
-    def active(self) -> list[ProgressStep]:
+    def active(self) -> list[_Step]:
         """The running steps, in the list's order."""
         return [step for step in self.steps if step.state_code == ProgressState.ACTIVE]
 
-    def began(self, step: ProgressStep) -> "_Read | None":
+    def began(self, step: _Step) -> "_Read | None":
         """The read of the timings the running `step` is read against, those
         of its kind that had ended when it began; none where it has no
         kind."""
@@ -402,7 +419,7 @@ class _Run:
             kinds.append(step.kind_code)
         return kinds
 
-    def _listed(self, step: ProgressStep) -> bool:
+    def _listed(self, step: _Step) -> bool:
         """Whether `step` stood on the run's list ahead: as its listing says,
         a step never begun standing pending; a begun one whose listing this
         work item does not know, one a continuation's first list brings, as
@@ -427,7 +444,7 @@ class _Run:
         reads.update(_Read(kind, self.repo, self.started) for kind in self.priced or ())
         return reads
 
-    def ran(self, step: ProgressStep, now: datetime) -> float:
+    def ran(self, step: _Step, now: datetime) -> float:
         """The seconds the running `step` has run at `now`, by Pilot's clock,
         from the later of its start and the start of the running turn."""
         assert step.started_at is not None
@@ -438,96 +455,6 @@ class _Run:
         """The seconds the run has taken at `now`: its work items' Step
         Timings and its running steps' time run."""
         return self.timed + sum(self.ran(step, now) for step in self.active)
-
-
-def _runs(db: Session, work_ids: Collection[uuid.UUID]) -> list[_Run]:
-    """Those of `work_ids` that are open, whose Session is `running` and has
-    a step left to do, each with its whole list and its run's start, its
-    Step Timings and its other work items' listings."""
-    if not work_ids:
-        return []
-    run, part = aliased(AgentSession), aliased(AgentSession)
-    # A Session with no conversation is a run of its own.
-    of_run = or_(part.id == run.id, part.conversation_id == run.conversation_id)
-    started = (
-        select(func.min(Turn.started_at))
-        .select_from(Turn)
-        .join(part, part.id == Turn.session_id)
-        .where(of_run)
-        .scalar_subquery()
-    )
-    # A seeded timing hangs on the Work that ran the seed: only the live
-    # ones, which hold their step's code, are the run's.
-    timed = (
-        select(func.coalesce(func.sum(StepTiming.duration), 0))
-        .select_from(StepTiming)
-        .join(part, part.id == StepTiming.work_id)
-        .where(of_run, StepTiming.code.is_not(None))
-        .scalar_subquery()
-    )
-    rows = db.execute(
-        select(
-            run.id,
-            run.conversation_id,
-            run.turn_started_at,
-            repo_of_work(run.id).scalar_subquery().label("repo"),
-            started.label("started"),
-            timed.label("timed"),
-        )
-        .join(Item, Item.id == run.id)
-        .where(
-            run.id.in_(list(work_ids)),
-            run.state_code == SessionState.RUNNING,
-            Item.done_at.is_(None),
-        )
-    ).all()
-    if not rows:
-        return []
-    ids = {row.id for row in rows}
-    conversations = [row.conversation_id for row in rows if row.conversation_id]
-    steps: dict[uuid.UUID, list[ProgressStep]] = {}
-    listings: dict[str, dict[str, bool]] = {}
-    for step, conversation in db.execute(
-        select(ProgressStep, AgentSession.conversation_id)
-        .join(AgentSession, AgentSession.id == ProgressStep.work_id)
-        .join(Item, Item.id == ProgressStep.work_id)
-        .where(
-            or_(
-                AgentSession.id.in_(list(ids)),
-                AgentSession.conversation_id.in_(conversations),
-            ),
-            or_(
-                ProgressStep.work_id.in_(list(ids)),
-                ProgressStep.listed_ahead.is_not(None),
-            ),
-        )
-        .order_by(Item.seq, ProgressStep.work_id, ProgressStep.position)
-    ):
-        if step.work_id in ids:
-            steps.setdefault(step.work_id, []).append(step)
-        else:
-            # Another work item's, by its conversation, the earliest first.
-            assert conversation is not None and step.listed_ahead is not None
-            listings.setdefault(conversation, {}).setdefault(
-                step.code, step.listed_ahead
-            )
-    runs = [
-        _Run(
-            row.id,
-            row.turn_started_at,
-            row.repo,
-            tuple(steps.get(row.id, ())),
-            started=row.started,
-            timed=row.timed,
-            listings=(
-                {}
-                if row.conversation_id is None
-                else listings.get(row.conversation_id, {})
-            ),
-        )
-        for row in rows
-    ]
-    return [run for run in runs if run.left]
 
 
 @dataclass(frozen=True)
@@ -544,18 +471,6 @@ class _Read:
     def everywhere(self) -> "_Read":
         """The same read in all repos."""
         return _Read(self.kind, None, self.as_of)
-
-
-def _in_order(reads: Iterable[_Read]) -> list[_Read]:
-    """`reads` in one order, whatever the order given."""
-    return sorted(
-        reads,
-        key=lambda read: (
-            read.kind,
-            read.repo or "",
-            math.inf if read.as_of is None else read.as_of.timestamp(),
-        ),
-    )
 
 
 @dataclass(frozen=True)
@@ -605,21 +520,19 @@ def _lists(timings: tuple[_Timing, ...], window: int) -> bool:
     return any(timing.listed for timing in timings[:window])
 
 
-def _figures(db: Session, runs: Sequence[_Run], last: int, window: int) -> _Figures:
-    asked = {read for run in runs for read in run.reads}
-    own = _last(db, _in_order(read for read in asked if read.repo is not None), last)
-    priced = {read for read in asked if _lists(own.get(read, ()), window)}
-    alone = {read for read in priced if len(own[read]) >= OWN}
-    every = _last(db, _in_order({read.everywhere for read in asked - alone}), last)
+_Timings = dict[_Read, tuple[_Timing, ...]]
+"""The last timings of each read, the newest first: the `last` that were
+listed ahead and the `last` that were not."""
+
+
+def _figures(runs: Sequence[_Run], timings: _Timings, window: int) -> _Figures:
     figures: _Figures = {}
-    for read in asked:
-        mine = own.get(read, ())
-        # All repos' are not read where the repo's own serve both levels:
-        # its `OWN` count for the `FEW` in all repos.
-        everywhere = mine if read in alone else every[read.everywhere]
+    for read in {read for run in runs for read in run.reads}:
+        mine = () if read.repo is None else timings[read]
+        everywhere = timings[read.everywhere]
         figures[read] = (
             _Kind(
-                priced=mine if read in priced else everywhere,
+                priced=mine if _lists(mine, window) else everywhere,
                 read_against=mine if len(mine) >= OWN else everywhere,
             )
             if len(everywhere) >= FEW
@@ -628,34 +541,226 @@ def _figures(db: Session, runs: Sequence[_Run], last: int, window: int) -> _Figu
     return figures
 
 
+_READ_LENGTH = 5_700
+"""The longest `_read()` compiles to for PostgreSQL: one statement over 2,000
+characters, kept whole so that an estimate reads one snapshot of the
+record."""
+
+
+def _read(
+    db: Session, work_ids: Collection[uuid.UUID], last: int
+) -> tuple[list[_Run], _Timings]:
+    """Those of `work_ids` that are open, whose Session is `running` and has
+    a step left to do, each with its whole list and its run's start, its
+    Step Timings and its other work items' listings; and the last timings of
+    every read its estimate can make, in its repo's own and in all repos',
+    each kind on its list as they stand, as they stood at its start and as
+    they stood when each running step began.
+
+    One statement, so that an estimate reads one snapshot of the record: a
+    progress write commits a list's steps and the Step Timings of those it
+    ends at once, and statements of their own read on either side of the
+    commit.
+    """
+    if not work_ids:
+        return [], {}
+    run, part = aliased(AgentSession), aliased(AgentSession)
+    # A Session with no conversation is a run of its own.
+    of_run = or_(part.id == run.id, part.conversation_id == run.conversation_id)
+    started = (
+        select(func.min(Turn.started_at))
+        .select_from(Turn)
+        .join(part, part.id == Turn.session_id)
+        .where(of_run)
+        .scalar_subquery()
+    )
+    # A seeded timing hangs on the Work that ran the seed: only the live
+    # ones, which hold their step's code, are the run's.
+    timed = (
+        select(func.coalesce(func.sum(StepTiming.duration), 0))
+        .select_from(StepTiming)
+        .join(part, part.id == StepTiming.work_id)
+        .where(of_run, StepTiming.code.is_not(None))
+        .scalar_subquery()
+    )
+    running = (
+        select(
+            run.id,
+            run.conversation_id,
+            run.turn_started_at,
+            repo_of_work(run.id).scalar_subquery().label("repo"),
+            started.label("started"),
+            timed.label("timed"),
+        )
+        .join(Item, Item.id == run.id)
+        .where(
+            run.id.in_(list(work_ids)),
+            run.state_code == SessionState.RUNNING,
+            Item.done_at.is_(None),
+        )
+        .cte("runs")
+    )
+    # The runs' work items, and the others on their conversations.
+    member = aliased(AgentSession)
+    members = union(
+        select(running.c.id, running.c.conversation_id),
+        select(member.id, member.conversation_id).join(
+            running, running.c.conversation_id == member.conversation_id
+        ),
+    ).subquery("members")
+    steps = (
+        select(
+            ProgressStep.work_id,
+            ProgressStep.code,
+            ProgressStep.position,
+            ProgressStep.state_code,
+            ProgressStep.kind_code,
+            ProgressStep.started_at,
+            ProgressStep.listed_ahead,
+            ProgressStep.marked,
+            members.c.conversation_id.label("conversation"),
+            Item.seq,
+        )
+        .join(members, members.c.id == ProgressStep.work_id)
+        .join(Item, Item.id == ProgressStep.work_id)
+        .where(
+            or_(
+                ProgressStep.work_id.in_(select(running.c.id)),
+                ProgressStep.listed_ahead.is_not(None),
+            )
+        )
+        .cte("steps")
+    )
+    own_steps = steps.join(running, running.c.id == steps.c.work_id)
+    kind = steps.c.kind_code.label("kind")
+    reads = union(
+        select(kind, running.c.repo, null().label("as_of")).select_from(own_steps),
+        select(kind, running.c.repo, steps.c.started_at)
+        .select_from(own_steps)
+        .where(steps.c.state_code == ProgressState.ACTIVE),
+        select(kind, running.c.repo, running.c.started).select_from(own_steps),
+    ).cte("reads")
+    known = reads.c.kind.is_not(None)
+    own = select(reads).where(known, reads.c.repo.is_not(None)).subquery("own")
+    every = (
+        select(reads.c.kind, reads.c.as_of).where(known).distinct().subquery("every")
+    )
+    rows = union_all(
+        select(
+            steps.c.work_id,
+            steps.c.code,
+            steps.c.state_code,
+            steps.c.kind_code,
+            steps.c.started_at,
+            steps.c.listed_ahead,
+            steps.c.marked,
+            steps.c.conversation,
+            steps.c.seq,
+            steps.c.position,
+            running.c.id.label("run"),
+            running.c.turn_started_at,
+            running.c.repo,
+            running.c.started,
+            running.c.timed,
+            *_NO_TIMING,
+        ).select_from(steps.outerjoin(running, running.c.id == steps.c.work_id)),
+        _last(own, own.c.repo, last),
+        _last(every, None, last),
+    ).subquery("rows")
+    run_rows: dict[uuid.UUID, Row[Any]] = {}
+    lists: dict[uuid.UUID, list[_Step]] = {}
+    listings: dict[str, dict[str, bool]] = {}
+    found: dict[_Read, list[tuple[datetime, int, _Timing]]] = {}
+    for row in db.execute(
+        select(rows)
+        .order_by(rows.c.seq, rows.c.work_id, rows.c.position)
+        .execution_options(max_statement_length=_READ_LENGTH)
+    ):
+        if row.read_kind is not None:
+            # Each read stands once with no timing found for a listing.
+            of_read = found.setdefault(
+                _Read(row.read_kind, row.read_repo, row.read_as_of), []
+            )
+            if row.timing_id is not None:
+                of_read.append(
+                    (
+                        row.timing_ended_at,
+                        row.timing_id,
+                        _Timing(row.duration, row.timing_listed),
+                    )
+                )
+            continue
+        step = _Step(
+            row.code,
+            row.state_code,
+            row.kind_code,
+            row.started_at,
+            row.listed_ahead,
+            row.marked,
+        )
+        if row.run is not None:
+            run_rows.setdefault(row.run, row)
+            lists.setdefault(row.run, []).append(step)
+        else:
+            # Another work item's, by its conversation, the earliest first.
+            assert row.conversation is not None and row.listed_ahead is not None
+            listings.setdefault(row.conversation, {}).setdefault(
+                row.code, row.listed_ahead
+            )
+    runs = [
+        _Run(
+            work_id,
+            row.turn_started_at,
+            row.repo,
+            tuple(lists[work_id]),
+            started=row.started,
+            timed=row.timed,
+            listings=(
+                {} if row.conversation is None else listings.get(row.conversation, {})
+            ),
+        )
+        for work_id, row in run_rows.items()
+    ]
+    timings = {
+        read: tuple(
+            timing
+            for *_, timing in sorted(
+                of_read, key=lambda each: (each[0], each[1]), reverse=True
+            )
+        )
+        for read, of_read in found.items()
+    }
+    return [run for run in runs if run.left], timings
+
+
+_NO_TIMING = tuple(
+    null().label(name)
+    for name in (
+        "read_kind",
+        "read_repo",
+        "read_as_of",
+        "timing_id",
+        "timing_ended_at",
+        "duration",
+        "timing_listed",
+    )
+)
+"""A step's row's columns of a timing's."""
+
+
 def _last(
-    db: Session, reads: Sequence[_Read], last: int
-) -> dict[_Read, tuple[_Timing, ...]]:
-    """The last timings of each read, the newest first: the `last` that were
-    listed ahead and the `last` that were not. `reads` name a repo each, or
-    none does.
+    reads: Subquery, repo: ColumnElement[str] | None, last: int
+) -> Select[*tuple[Any, ...]]:
+    """The rows of the last timings of each of `reads`, kinds as they stood at
+    an `as_of` or as they stand, in the repo `repo` names, or in all repos
+    where it is none: the `last` that were listed ahead and the `last` that
+    were not, and each read once with none for a listing with none.
 
     A kind's listed and unlisted timings are read apart, so that each read
     ends at its `last` rows of an index, however long the kind's history
     and however few of them the repo's, of one listing or ended by its
     `as_of`.
     """
-    if not reads:
-        return {}
-    kinds = (
-        func.unnest(
-            literal([read.kind for read in reads], ARRAY(Text)),
-            literal([read.repo for read in reads], ARRAY(Text)),
-            literal([read.as_of for read in reads], ARRAY(DateTime(timezone=True))),
-        )
-        .table_valued(
-            column("kind", Text),
-            column("repo", Text),
-            column("as_of", DateTime(timezone=True)),
-            with_ordinality="read",
-        )
-        .render_derived(name="kinds")
-    )
     began = values(column("listed", Boolean), name="began").data([(True,), (False,)])
     of_kind = (
         select(
@@ -665,40 +770,57 @@ def _last(
             StepTiming.listed_ahead,
         )
         .where(
-            StepTiming.kind_code == kinds.c.kind,
+            StepTiming.kind_code == reads.c.kind,
             StepTiming.listed_ahead == began.c.listed,
             # A timing that ended at the instant a step began had ended when
             # it began: one publication ends a step and begins the next.
             StepTiming.ended_at
-            <= func.coalesce(kinds.c.as_of, literal_column("'infinity'")),
+            <= func.coalesce(reads.c.as_of, literal_column("'infinity'")),
         )
         .order_by(StepTiming.ended_at.desc(), StepTiming.id.desc())
         .limit(last)
     )
-    if reads[0].repo is not None:
-        of_kind = of_kind.where(StepTiming.repo == kinds.c.repo)
+    if repo is not None:
+        of_kind = of_kind.where(StepTiming.repo == repo)
     timings = of_kind.lateral("timings")
-    found: dict[_Read, list[tuple[datetime, int, _Timing]]] = {
-        read: [] for read in reads
-    }
-    for row in db.execute(
-        select(kinds.c.read, timings)
-        .select_from(kinds)
+    return (
+        select(
+            *_NO_STEP,
+            reads.c.kind.label("read_kind"),
+            (null() if repo is None else repo).label("read_repo"),
+            reads.c.as_of.label("read_as_of"),
+            timings.c.id.label("timing_id"),
+            timings.c.ended_at.label("timing_ended_at"),
+            timings.c.duration,
+            timings.c.listed_ahead.label("timing_listed"),
+        )
+        .select_from(reads)
         .join(began, true())
-        .join(timings, true())
-    ):
-        found[reads[row.read - 1]].append(
-            (row.ended_at, row.id, _Timing(row.duration, row.listed_ahead))
-        )
-    return {
-        read: tuple(
-            timing
-            for *_, timing in sorted(
-                rows, key=lambda row: (row[0], row[1]), reverse=True
-            )
-        )
-        for read, rows in found.items()
-    }
+        .outerjoin(timings, true())
+    )
+
+
+_NO_STEP = tuple(
+    null().label(name)
+    for name in (
+        "work_id",
+        "code",
+        "state_code",
+        "kind_code",
+        "started_at",
+        "listed_ahead",
+        "marked",
+        "conversation",
+        "seq",
+        "position",
+        "run",
+        "turn_started_at",
+        "repo",
+        "started",
+        "timed",
+    )
+)
+"""A timing's row's columns of a step's and its run's."""
 
 
 def _estimate(
@@ -767,7 +889,7 @@ def _run_row(
 
 
 def _against(
-    run: _Run, step: ProgressStep, figures: _Figures, running: int
+    run: _Run, step: _Step, figures: _Figures, running: int
 ) -> tuple[_Timing, ...] | None:
     """The timings the running `step` is read against, of those of its kind
     that had ended when it began; none where its kind had fewer than `FEW`
@@ -778,7 +900,7 @@ def _against(
 
 
 def _row(
-    run: _Run, step: ProgressStep, figures: _Figures, *, now: datetime, running: int
+    run: _Run, step: _Step, figures: _Figures, *, now: datetime, running: int
 ) -> StepFigures | None:
     """The running `step`'s row of the figures; none where it is read against
     nothing."""
@@ -806,8 +928,8 @@ def _left(
     but for the outrun, a marked one alone where it has none (D250). A
     running step whose kind had fewer than `FEW` timings in all repos when
     it began leaves no estimate."""
-    still: dict[ProgressStep, list[float]] = {}
-    outrun: list[ProgressStep] = []
+    still: dict[_Step, list[float]] = {}
+    outrun: list[_Step] = []
     unread = False
     for step in run.active:
         longer = _longer(run, step, figures, now=now, running=running)
@@ -835,7 +957,7 @@ def _left(
 
 
 def _longer(
-    run: _Run, step: ProgressStep, figures: _Figures, *, now: datetime, running: int
+    run: _Run, step: _Step, figures: _Figures, *, now: datetime, running: int
 ) -> list[float] | None:
     """What each timing the running `step` is read against that ran at least
     as long as it has still took; none where it is read against nothing,

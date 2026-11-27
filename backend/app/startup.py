@@ -109,6 +109,7 @@ def register_root_blueprints(app: Flask) -> None:
     from app.api.sync import sync_bp
     from app.api.testing_collector import testing_collector_bp
     from app.api.testing_controller import testing_controller_bp
+    from app.api.testing_dashboard_bounds import testing_dashboard_bounds_bp
     from app.api.testing_halt_settings import testing_halt_settings_bp
     from app.api.testing_links import testing_links_bp
     from app.api.testing_pool_guard import testing_pool_guard_bp
@@ -125,6 +126,7 @@ def register_root_blueprints(app: Flask) -> None:
     app.register_blueprint(testing_sync_bp)
     app.register_blueprint(testing_links_bp)
     app.register_blueprint(testing_halt_settings_bp)
+    app.register_blueprint(testing_dashboard_bounds_bp)
     app.register_blueprint(testing_controller_bp)
     app.register_blueprint(testing_collector_bp)
     app.register_blueprint(testing_push_service_bp)
@@ -176,13 +178,15 @@ def _load_prices(app: App) -> None:
 
 
 def load_test_data_hook(app: App) -> None:
-    """Load the price file, Pilot's own system views and the invented record
-    (`TestDataService`) after database recreation."""
+    """Load the price file, Pilot's own system views, the invented record and
+    its history (`TestDataService`) after database recreation."""
     print("Loading the invented record...")
     with scoped_session(app.container):
         _load_prices(app)
         _ship_views(app)
         counts = app.container.test_data_service().load_all()
+        calls = app.container.test_data_service().load_history()
     print("Test data loaded:")
     for entity, count in counts.items():
         print(f"   - {count} {entity}")
+    print(f"   - {calls} calls of the history")

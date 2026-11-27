@@ -14,7 +14,7 @@ reading of; `304` where `If-None-Match` names the reading's validator; else
 `200`, the reading as JSON, gzip-compressed, its validator the `ETag`,
 `"<bytes>-<microseconds since 1970>"` of the file's size and time.
 
-The readings it holds are those of the scenario a load handed it
+The readings it holds are those of each scenario a load handed it
 (`ScenarioService.load`), each the collector's own reading of the scenario's
 files as that load built them, so that a reading's calls are the facts'
 calls; and those a test hands it (`serve`). The scenario's are read through
@@ -119,7 +119,7 @@ class FakeCollector:
         self._bearer = f"Bearer {token}"
         self._lock = threading.Lock()
         self._readings: dict[tuple[str, str | None], ReadingSchema] = {}
-        self._scenario: Builder | None = None
+        self._scenarios: list[Builder] = []
         self._refusal: Refusal | None = None
         self._asks: list[FakeAsk] = []
         self._verbs: dict[str, Callable[..., Any]] = {
@@ -141,7 +141,7 @@ class FakeCollector:
         """Hold the scenario's readings as `builder` built its files, each in
         place of any of the same ids, and refuse no ask."""
         with self._lock:
-            self._scenario = builder
+            self._scenarios.append(builder)
             self._refusal = None
 
     # -- Verbs ----------------------------------------------------------------
@@ -202,7 +202,7 @@ class FakeCollector:
         """Forget every reading, ask and refusal."""
         with self._lock:
             self._readings.clear()
-            self._scenario = None
+            self._scenarios.clear()
             self._refusal = None
             self._asks.clear()
 
@@ -283,12 +283,12 @@ class FakeCollector:
         )
 
     def _held(self) -> dict[tuple[str, str | None], ReadingSchema]:
-        """The readings held, the scenario a load handed it read first. Under
-        the fake's lock."""
-        if self._scenario is not None:
-            for reading in _read(self._scenario):
+        """The readings held, the scenarios loads handed it read first, in
+        the order they were loaded. Under the fake's lock."""
+        for builder in self._scenarios:
+            for reading in _read(builder):
                 self._readings[reading.session_id, reading.agent_id] = reading
-            self._scenario = None
+        self._scenarios.clear()
         return self._readings
 
 

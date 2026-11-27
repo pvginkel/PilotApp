@@ -1,0 +1,589 @@
+/* The dashboard (PilotAppSpecs design/mockup/dashboard/dashboard.css), loaded with its screen's
+   module: the line of view tabs, the global toolbar and the one view's tab, the new tab's panel,
+   the banner, the main area, the scope and the view's card, its head, By's and Color's lists,
+   the legend, the Rows presentation's chart and the Table's, its text, lines and surfaces on the
+   app's tokens.
+   The one palette the app has no token for is the categorical one, --series-0 to --series-19 and
+   --series-other, the color's values: dark's set is brighter and more saturated than light's, to
+   read on the dark surfaces. Where the section stands and when it shows is the shell's (shell.css,
+   "The two screens"). */
+
+@layer components {
+  .dash {
+    --series-0: #4e79a7; --series-1: #f28e2b; --series-2: #59a14f; --series-3: #e15759; --series-4: #76b7b2;
+    --series-5: #edc948; --series-6: #b07aa1; --series-7: #ff9da7; --series-8: #9c755f; --series-9: #2f4b7c;
+    --series-10: #a0cbe8; --series-11: #ffbe7d; --series-12: #8cd17d; --series-13: #ff9d9a; --series-14: #86bcb6;
+    --series-15: #f1ce63; --series-16: #d4a6c8; --series-17: #665191; --series-18: #d7b5a6; --series-19: #499894;
+    --series-other: #c4c8d0;
+    font-size: var(--text-sm);
+    line-height: 1.5;
+  }
+  :root[data-theme="dark"] .dash {
+    --series-0: #4f9dff; --series-1: #ff9a2e; --series-2: #45d16a; --series-3: #ff5c6c; --series-4: #22d3c5;
+    --series-5: #ffd43b; --series-6: #e07ad0; --series-7: #ff7eb6; --series-8: #e0a15e; --series-9: #8a7dff;
+    --series-10: #6fd0ff; --series-11: #ffb86b; --series-12: #9cf27e; --series-13: #ff948f; --series-14: #6ff5d6;
+    --series-15: #fff07a; --series-16: #f0a8ff; --series-17: #b48cff; --series-18: #ffc9a8; --series-19: #1fbf9f;
+    --series-other: #6c7488;
+  }
+  .dash .lbl { color: hsl(var(--muted-foreground)); white-space: nowrap; }
+  .dash .empty { padding: 12px 0; color: hsl(var(--muted-foreground)); }
+
+  /* The global toolbar: a strip across the screen, the document tab line's relative (its rule
+     inset at the bottom) at the height a small button needs, in the project head's margins. */
+  .dash .dash-bar {
+    flex: none;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    height: 44px;
+    padding: 0 24px;
+    box-shadow: inset 0 -1px 0 hsl(var(--border));
+  }
+  /* The line of view tabs is the document tabs' line (project-head.css, .doc-tabs and .dtab) in the
+     toolbar's margins, on the page's colour and 36px high. Its icon buttons, Close all and the new
+     view, stand where the new view's stands at the toolbar's end while one view is open. */
+  .dash .dash-tabs { height: 36px; margin-top: 6px; padding: 0 24px; background: none; }
+  .dash .dash-tabs > .btn-icon { flex: none; align-self: center; position: relative; top: -2px; }
+  .dash .dash-bar .grow { flex: 1; }
+
+  /* Save view's pane (save-view.tsx; the mockup's `.savepane`), 300px wide under its button at the
+     toolbar's right: its head, the name across it, what the name does under it, Save at the right. */
+  .dash .dash-save { width: 300px; }
+  .dash .dash-save-pane { display: flex; flex-direction: column; gap: 8px; padding: 0 14px; }
+  .dash .dash-save-pane h3 { margin: 0; padding: 0; }
+  .dash .dash-save-pane .note { margin: 0; font-size: var(--text-xs); color: hsl(var(--muted-foreground)); }
+  .dash .dash-save-pane .foot { display: flex; justify-content: flex-end; }
+
+  /* The time (time-picker.tsx; the mockup's `.timepick`): its popover drops from its button at the
+     toolbar's left, 620px wide, flush: two panels and a foot. Left, the range, From and To over a
+     month's calendar with Apply. Right, the quick selections, a list that scrolls by itself at the
+     left panel's height. The foot a status bar across both. */
+  .dash .dash-time { flex: none; }
+  .dash .dash-time > .btn .chev { margin-left: -2px; color: hsl(var(--muted-foreground)); }
+  .dash .dash-time-pop { right: auto; left: 0; width: 620px; max-width: calc(100vw - 24px); }
+  .dash .dash-time-pop > .popover-body { padding: 0; }
+  .dash .dash-time-wait { padding: 12px 14px; }
+  .dash .dash-timepick { display: grid; grid-template-columns: 1fr 232px; font-size: var(--text-sm); }
+  .dash .dash-time-range { padding: 12px 14px; border-right: 1px solid hsl(var(--border)); }
+  .dash .dash-time-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .dash .dash-time-field { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+  .dash .dash-time-field .lbl { font-size: var(--text-xs); font-weight: 600; color: hsl(var(--foreground)); }
+  .dash .dash-time-field .field { font-size: var(--text-sm); }
+  .dash .dash-time-field .field.bad { outline-color: hsl(var(--destructive)); box-shadow: 0 0 0 3px hsl(var(--destructive) / 0.15); }
+  .dash .dash-time-apply { display: flex; justify-content: flex-end; margin-top: 10px; }
+  .dash .dash-time-quick { position: relative; min-height: 0; }
+  .dash .dash-time-quick > .list { position: absolute; inset: 0; overflow-y: auto; padding: 6px; scrollbar-width: thin; scrollbar-color: hsl(var(--muted-foreground) / 0.4) transparent; }
+  .dash .dash-time-quick .menu-item { justify-content: space-between; padding: 5px 10px; font-size: var(--text-sm); }
+  .dash .dash-time-quick .menu-item.on { background: hsl(var(--primary-muted)); color: hsl(var(--primary-muted-foreground)); font-weight: 600; }
+  .dash .dash-time-quick .menu-item .sub { font-weight: 400; color: hsl(var(--muted-foreground)); }
+  .dash .dash-time-quick .menu-head { padding: 8px 10px 3px; font-size: var(--text-xs); font-weight: 600; color: hsl(var(--muted-foreground)); }
+  .dash .dash-time-foot { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 2px 18px; padding: 7px 14px; border-top: 1px solid hsl(var(--border)); background: hsl(var(--muted) / 0.5); font-size: var(--text-xs); color: hsl(var(--muted-foreground)); }
+  /* A month's calendar, Monday first: today ringed, the days after it out of reach, the range
+     painted, its ends filled in the primary and the days between in the muted primary. */
+  .dash .dash-cal { margin-top: 12px; user-select: none; }
+  .dash .dash-cal-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px; }
+  .dash .dash-cal-head .month { font-weight: 600; }
+  .dash .dash-cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); row-gap: 2px; }
+  .dash .dash-cal-grid .wd { padding: 2px 0 4px; font-size: var(--text-xs); color: hsl(var(--muted-foreground)); text-align: center; }
+  .dash .dash-cal-grid .day {
+    height: 30px;
+    padding: 0;
+    border: 0;
+    border-radius: 6px;
+    background: none;
+    color: inherit;
+    font: inherit;
+    font-variant-numeric: tabular-nums;
+    cursor: pointer;
+  }
+  .dash .dash-cal-grid .day:hover:not(:disabled) { background: hsl(var(--accent)); }
+  .dash .dash-cal-grid .day:disabled { color: hsl(var(--muted-foreground)); opacity: 0.45; cursor: default; }
+  .dash .dash-cal-grid .day.today { box-shadow: inset 0 0 0 1.5px hsl(var(--primary)); font-weight: 600; }
+  .dash .dash-cal-grid .day.in { border-radius: 0; background: hsl(var(--primary-muted)); color: hsl(var(--primary-muted-foreground)); }
+  .dash .dash-cal-grid .day.in:hover:not(:disabled) { background: hsl(var(--primary-muted-strong)); }
+  .dash .dash-cal-grid .day.in.first { border-radius: 6px 0 0 6px; }
+  .dash .dash-cal-grid .day.in.last { border-radius: 0 6px 6px 0; }
+  .dash .dash-cal-grid .day.in.first.last { border-radius: 6px; }
+  .dash .dash-cal-grid .day.end, .dash .dash-cal-grid .day.end:hover:not(:disabled) { background: hsl(var(--primary-strong)); color: hsl(var(--primary-foreground)); opacity: 1; }
+  .dash .dash-cal.picking .day:not(:disabled) { cursor: cell; }
+
+  /* The one view, with no line: a tab at the toolbar's left, a small button high, the tab's own
+     look without the line's primary: its icon, its name cut short past 300px, its square-x; the
+     middle button closes it too. */
+  .dash .dash-onetab {
+    flex: 0 1 auto;
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    min-width: 0;
+    max-width: 300px;
+    height: 28px;
+    margin-right: 6px;
+    padding: 0 3px 0 10px;
+    border: 1px solid hsl(var(--border));
+    border-radius: var(--radius);
+    background: hsl(var(--background));
+    color: hsl(var(--foreground));
+    font-size: var(--text-base);
+  }
+  .dash .dash-onetab > .icon { flex: none; }
+  .dash .dash-onetab .t { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .dash .dash-onetab .dtab-x { margin-right: 0; }
+
+  /* The new tab's panel (views-panel.tsx), in the view's place: its block centred in its height, the
+     head row of the find and Start from scratch, then the two lists side by side, a line between
+     them, each a 274px column of titles at the body's size, scrolling on its own under its heading,
+     at most half the window high or 400px where that is more. A panel 760px wide or less stacks
+     them, System views first, and scrolls them as one. A row's title runs to its right edge but for
+     what shows at its right, so it gives way on hover; a hairline under a list's heading shows while
+     the list is scrolled from its top. A rename is typed in the title's place, the row as tall as it
+     was; a name taken is said under it. */
+  .dash .dash-panel { flex: 1; min-height: 0; display: flex; flex-direction: column; container-type: inline-size; }
+  .dash .dash-views { flex: 1; min-height: 0; display: flex; flex-direction: column; justify-content: center; padding: 31px 0; }
+  .dash .dash-views-top { flex: none; display: flex; align-items: center; gap: 8px; width: min(570px, 100% - 48px); margin: 0 auto 13px; }
+  .dash .dash-views-find { flex: 1; min-width: 0; width: auto; height: 34px; border-width: 5px 1px; }
+  .dash .dash-views-top .btn { flex: none; }
+  .dash .dash-views-cols { flex: 0 1 auto; min-height: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 285px)); grid-template-rows: minmax(0, 1fr); justify-content: center; padding: 0 24px; }
+  .dash .dash-views-part { min-width: 0; min-height: 0; display: flex; flex-direction: column; padding-right: 11px; }
+  .dash .dash-views-part + .dash-views-part { padding: 0 0 0 10px; border-left: 1px solid hsl(var(--border)); }
+  .dash .dash-views-list, .dash .dash-views-cols { scrollbar-width: thin; scrollbar-color: hsl(var(--muted-foreground) / 0.4) transparent; }
+  .dash .dash-views-list { flex: 0 1 auto; min-height: 0; max-height: max(50vh, 400px); overflow-y: auto; }
+  @container (max-width: 760px) {
+    .dash .dash-views-top { flex-wrap: wrap; width: min(274px, 100% - 48px); }
+    .dash .dash-views-find { flex-basis: 100%; }
+    .dash .dash-views-cols { display: block; overflow-y: auto; }
+    .dash .dash-views-part, .dash .dash-views-part + .dash-views-part { max-width: 274px; margin: 0 auto; padding: 0; border: 0; }
+    .dash .dash-views-part + .dash-views-part { margin-top: 15px; }
+    .dash .dash-views-list { max-height: none; overflow: visible; }
+  }
+  .dash .dash-views-head { flex: none; margin: 0; padding: 0 7px 3px; border-bottom: 1px solid transparent; font-size: var(--text-sm); font-weight: 600; color: hsl(var(--muted-foreground)); }
+  .dash .dash-views-part.scrolled .dash-views-head { border-bottom-color: hsl(var(--border)); }
+  .dash .dash-views-none { margin: 3px 7px; font-size: var(--text-base); color: hsl(var(--muted-foreground)); }
+  .dash .dash-viewrow { position: relative; }
+  .dash .dash-view {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    width: 100%;
+    padding: 3.5px 7px;
+    border: 0;
+    border-radius: var(--radius);
+    background: none;
+    color: inherit;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+  }
+  .dash .dash-view:hover, .dash .dash-viewrow:focus-within .dash-view { background: hsl(var(--accent)); }
+  .dash .dash-view > .icon { flex: none; width: 16px; height: 16px; color: hsl(var(--muted-foreground)); }
+  .dash .dash-view .txt { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+  .dash .dash-view .name { overflow: hidden; font-size: var(--text-base); line-height: 1.4; text-overflow: ellipsis; white-space: nowrap; }
+  .dash .dash-view .what { margin-top: 1px; font-size: var(--text-sm); color: hsl(var(--destructive-text)); }
+  .dash .dash-viewrow.fav .dash-view, .dash .dash-viewrow.system:hover .dash-view, .dash .dash-viewrow.system:focus-within .dash-view { padding-right: 40px; }
+  .dash .dash-viewrow:not(.system, .renaming):hover .dash-view, .dash .dash-viewrow:not(.system, .renaming):focus-within .dash-view { padding-right: 100px; }
+  .dash .dash-view-acts { position: absolute; top: 50%; right: 8px; display: flex; gap: 2px; transform: translateY(-50%); }
+  .dash .dash-view-acts .btn { opacity: 0; }
+  .dash .dash-viewrow:hover .dash-view-acts .btn, .dash .dash-viewrow:focus-within .dash-view-acts .btn, .dash .dash-view-acts .dash-view-star.on { opacity: 1; }
+  .dash .dash-view-acts .btn:hover:not(:disabled) { background: hsl(var(--foreground) / 0.08); }
+  .dash .dash-view-x:hover:not(:disabled) { color: hsl(var(--destructive-text)); }
+  .dash .dash-view-star { color: hsl(var(--foreground)); }
+  .dash .dash-view-star.on .icon { fill: currentColor; }
+  .dash .dash-viewrow.renaming .dash-view { align-items: flex-start; background: hsl(var(--accent)); cursor: default; }
+  .dash .dash-viewrow.renaming .dash-view > .icon { margin-top: calc((var(--text-base) * 1.4 - 16px) / 2); }
+  .dash .dash-view-name { display: block; width: 100%; max-width: 420px; height: 26px; margin: calc((var(--text-base) * 1.4 - 26px) / 2) 0 calc((var(--text-base) * 1.4 - 26px) / 2) -9px; padding: 0 8px; border-width: 1px; line-height: 24px; }
+
+  /* What failed, under the toolbar until it is closed. */
+  .dash .dash-banner {
+    flex: none;
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    padding: 8px 16px 8px 24px;
+    border-bottom: 1px solid hsl(var(--destructive) / 0.3);
+    background: hsl(var(--destructive) / 0.08);
+    color: hsl(var(--destructive-text));
+  }
+  .dash .dash-banner .text { flex: 1; min-width: 0; max-height: 9em; overflow: auto; padding: 3px 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+
+  /* The main area, which scrolls. (No padding at its top, which a row that sticks would stand
+     under.) */
+  .dash .dash-main { flex: 1; min-height: 0; overflow-y: auto; padding: 0 24px 40px; }
+
+  /* The scope, above the card: the drill path, the chips and the filter picker in one line, which
+     wraps as a long row of chips does. */
+  .dash .dash-scope { display: flex; flex-direction: column; gap: 8px; padding: 14px 0 2px; }
+  .dash .dash-line { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; min-height: 28px; }
+
+  /* The drill path (scope.tsx; the mockup's `.dash-path`): one segmented bar a small button high,
+     its segments joined by chevrons that span its height. All is in the tint of a segmented
+     control's pressed choice, a step stronger. A parent is a button whose hover fills the arrow
+     its chevrons make; the last, where the view is, stronger text. A level's kind is small and
+     muted before its value, which is cut short past 240px. */
+  .dash .dash-path {
+    --sep: 9px;
+    display: inline-flex;
+    align-items: stretch;
+    max-width: 100%;
+    height: 28px;
+    border: 1px solid hsl(var(--border));
+    border-right-width: 2px;
+    border-bottom-width: 2px;
+    border-radius: var(--radius);
+    background: hsl(var(--background));
+    font-size: var(--text-sm);
+    overflow: hidden;
+  }
+  .dash .dash-path .crumb {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 5px;
+    min-width: 0;
+    margin: 0 calc(-1 * var(--sep));
+    padding: 0 calc(var(--sep) + 9px) 0 calc(var(--sep) + 10px);
+    border: 0;
+    background: none;
+    color: inherit;
+    font: inherit;
+    line-height: 25px;
+    white-space: nowrap;
+  }
+  .dash .dash-path .crumb:first-child { margin-left: 0; padding-left: 12px; }
+  .dash .dash-path .crumb:last-child { margin-right: 0; padding-right: 12px; }
+  .dash .dash-path .crumb.up { cursor: pointer; clip-path: polygon(0 0, calc(100% - var(--sep)) 0, 100% 50%, calc(100% - var(--sep)) 100%, 0 100%, var(--sep) 50%); }
+  .dash .dash-path .crumb.up:first-child { clip-path: polygon(0 0, calc(100% - var(--sep)) 0, 100% 50%, calc(100% - var(--sep)) 100%, 0 100%); }
+  .dash .dash-path .crumb.up:hover { background: hsl(var(--accent)); }
+  .dash .dash-path .crumb.up:focus-visible { outline: none; background: hsl(var(--primary-muted)); }
+  .dash .dash-path .crumb.all { background: hsl(var(--primary) / 0.38); }
+  .dash .dash-path .crumb.all.up:hover, .dash .dash-path .crumb.all.up:focus-visible { background: hsl(var(--primary) / 0.5); }
+  .dash .dash-path .crumb.here { font-weight: 600; }
+  .dash .dash-path .crumb .k { font-size: var(--text-xs); font-weight: 400; color: hsl(var(--muted-foreground)); }
+  .dash .dash-path .crumb .v { max-width: 240px; overflow: hidden; text-overflow: ellipsis; }
+  .dash .dash-path .crumb-sep { position: relative; z-index: 1; flex: none; width: var(--sep); height: 100%; pointer-events: none; }
+  .dash .dash-path .crumb-sep path { fill: none; stroke: hsl(var(--border)); stroke-width: 1.5; }
+
+  /* A chip (the mockup's `.dash-chip`): a small button's height and corners, filled, in segments
+     with a hairline between two, each a press of its own with the pointer's tint, inside a border
+     in the dividers' colour; at most 300px wide, its values cut with an ellipsis and what follows
+     them ("2 more") kept whole. A filter is in the scope, the muted primary; a mark filters
+     nothing, the warning's tint, which the rows lay under what is marked. A negated chip's "is
+     not" is in the destructive's text, bold. Its pane drops from it. */
+  .dash .dash-chip-anchor { display: inline-flex; max-width: min(300px, 100%); }
+  .dash .dash-chip {
+    display: inline-flex;
+    align-items: stretch;
+    max-width: min(300px, 100%);
+    height: 28px;
+    border: 1px solid hsl(var(--border));
+    border-radius: var(--radius);
+    font-size: var(--text-sm);
+    line-height: 26px;
+    white-space: nowrap;
+    overflow: hidden;
+  }
+  .dash .dash-chip-anchor > .dash-chip { max-width: 100%; }
+  .dash .dash-chip.filter { background: hsl(var(--primary-muted)); color: hsl(var(--primary-muted-foreground)); }
+  .dash .dash-chip.mark { background: hsl(var(--warning) / 0.15); color: hsl(var(--warning-text)); }
+  .dash .dash-chip > * { min-width: 0; padding: 0 9px; border: 0; background: none; color: inherit; font: inherit; line-height: inherit; }
+  .dash .dash-chip > * + * { border-left: 1px solid color-mix(in srgb, currentColor 18%, transparent); }
+  .dash .dash-chip > button { cursor: pointer; }
+  .dash .dash-chip > button:hover { background: hsl(var(--foreground) / 0.08); }
+  .dash .dash-chip > button:focus-visible { outline-offset: -2px; }
+  .dash .dash-chip .lab { display: flex; }
+  .dash .dash-chip .lab > span { flex: none; }
+  .dash .dash-chip .lab .not { margin-left: 0.3em; color: hsl(var(--destructive-text)); font-weight: 700; }
+  .dash .dash-chip .lab .what { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+  .dash .dash-chip .kind, .dash .dash-chip .x { flex: none; display: grid; place-items: center; width: 28px; padding: 0; }
+  .dash .dash-chip .icon { width: 14px; height: 14px; }
+  .dash .dash-chip .x .icon { opacity: 0.65; }
+  .dash .dash-chip .x:hover .icon { opacity: 1; }
+  /* A quick filter (quick-filters.tsx; the mockup's `.dash-badge`), on a line of its own under the
+     scope's: a toggle in a chip's form, its name, its count, its amount muted, a diamond first where
+     it marks. Off, the muted fill; on, the primary's muted tint; muted where it counts nothing and is
+     off. Its border is its hover's fill. Under the pointer its × lies over its right end on the
+     quick filter's own fill, so that the line does not move. While another scope's counts are on
+     their way the line fades a little. */
+  .dash .dash-quick-line.changing { opacity: 0.65; transition: opacity 0.2s 0.15s; }
+  .dash .dash-quick { --hover: color-mix(in srgb, hsl(var(--muted)) 92%, hsl(var(--foreground))); --fill: hsl(var(--muted)); position: relative; border-color: var(--hover); background: var(--fill); }
+  .dash .dash-quick:not(.idle):hover { --fill: var(--hover); }
+  .dash .dash-quick.on { --hover: hsl(var(--primary-muted-strong)); --fill: hsl(var(--primary-muted)); color: hsl(var(--primary-muted-foreground)); }
+  .dash .dash-quick > .main { display: inline-flex; align-items: center; gap: 7px; padding: 0 10px; }
+  .dash .dash-quick > .main:hover { background: none; }
+  .dash .dash-quick > .main .icon { margin-right: -2px; }
+  .dash .dash-quick .n { font-weight: 600; font-variant-numeric: tabular-nums; }
+  .dash .dash-quick .amt { color: hsl(var(--muted-foreground)); font-variant-numeric: tabular-nums; }
+  .dash .dash-quick.on .amt { color: inherit; opacity: 0.8; }
+  .dash .dash-quick.idle > .main { cursor: default; }
+  .dash .dash-quick.idle > .main > * { opacity: 0.5; }
+  .dash .dash-quick > .x {
+    position: absolute;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    width: 22px;
+    border-left: 0;
+    border-radius: 0 calc(var(--radius) - 1px) calc(var(--radius) - 1px) 0;
+    background: var(--fill);
+    box-shadow: -4px 0 4px var(--fill);
+    opacity: 0;
+  }
+  .dash .dash-quick:hover > .x, .dash .dash-quick > .x:focus-visible { opacity: 1; }
+  .dash .dash-quick > .x:hover { background: var(--fill); color: hsl(var(--destructive-text)); }
+  /* A pane's foot asking a quick filter's name: the field takes the room Save leaves it. */
+  .dash .dash-valuepane .foot .field { min-width: 0; }
+
+  /* "+ Filter" after the chips, in the link's colour. */
+  .dash .dash-add { gap: 4px; padding: 0 8px 0 6px; color: hsl(var(--link)); }
+  .dash .dash-add:hover:not(:disabled) { color: hsl(var(--link)); }
+
+  /* The filter picker and a dimension's pane, dropping from their button at its left, 340px wide:
+     the parts and the attributes in their groups; or the dimension's values, checked, in a list that
+     scrolls by itself, Is or Is not and Filter or Mark under it, Add or Apply and Remove at its
+     foot. */
+  .dash .dash-pane-pop { right: auto; left: 0; width: 340px; max-width: calc(100vw - 24px); }
+  .dash .dash-pane-wait { padding: 6px 10px; }
+  .dash .dash-picker .menu-head, .dash .dash-valuepane > .menu-head { padding: 6px 10px 3px; font-size: var(--text-xs); font-weight: 600; color: hsl(var(--muted-foreground)); }
+  .dash .dash-picker .menu-item { padding: 5px 10px; font-size: var(--text-sm); }
+  .dash .dash-valuepane { display: flex; flex-direction: column; gap: 8px; padding: 0 4px 4px; font-size: var(--text-sm); }
+  .dash .dash-valuepane > .menu-head { padding-left: 2px; padding-bottom: 0; }
+  .dash .dash-valuepane .field { font-size: var(--text-sm); }
+  .dash .dash-valuepane .note { margin: 0; font-size: var(--text-xs); color: hsl(var(--muted-foreground)); }
+  .dash .dash-valuepane .row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+  .dash .dash-valuepane .grow { flex: 1; }
+  .dash .dash-values { max-height: 340px; overflow: auto; padding: 3px; border: 1px solid hsl(var(--border)); border-radius: 6px; scrollbar-width: thin; scrollbar-color: hsl(var(--muted-foreground) / 0.4) transparent; }
+  .dash .dash-values.changing { opacity: 0.65; transition: opacity 0.2s 0.15s; }
+  .dash .dash-values .empty { padding: 4px 6px; }
+  .dash .dash-val { display: flex; align-items: center; gap: 8px; padding: 3px 6px; border-radius: 4px; cursor: pointer; }
+  .dash .dash-val:hover { background: hsl(var(--accent)); }
+  .dash .dash-val input { flex: none; width: 15px; height: 15px; margin: 0; accent-color: hsl(var(--primary)); }
+  .dash .dash-val .l { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .dash .dash-val .a { color: hsl(var(--muted-foreground)); font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+  /* A choice of which one holds (segmented.tsx; the mockup's `.dash-seg`): a rounded track, the
+     one that holds on the primary's tint, its words a pixel above the middle. */
+  .dash .dash-seg { display: inline-flex; flex-wrap: wrap; gap: 2px; padding: 2px; border: 1px solid hsl(var(--border)); border-radius: 15px; background: hsl(var(--muted) / 0.6); }
+  .dash .dash-seg button {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    height: 22px;
+    padding: 0 12px 2px;
+    border: 0;
+    border-radius: 999px;
+    background: none;
+    color: hsl(var(--muted-foreground));
+    font: inherit;
+    font-size: var(--text-sm);
+    font-weight: 500;
+    line-height: 20px;
+    white-space: nowrap;
+    cursor: pointer;
+  }
+  .dash .dash-seg button:hover { color: hsl(var(--foreground)); }
+  .dash .dash-seg button.on { background: hsl(var(--primary) / 0.3); color: hsl(var(--foreground)); box-shadow: 0 1px 2px rgb(0 0 0 / 0.08); cursor: default; }
+  .dash .dash-seg button .icon { width: 13px; height: 13px; }
+
+  /* The chart's card: the timeline's item. Under it the legend and the chart. While an answer for
+     another state is on its way, the one drawn fades a little; a read again in place does not. */
+  .dash .dash-card {
+    margin-top: 12px;
+    border: 1px solid hsl(var(--border));
+    border-radius: var(--radius);
+    background: hsl(var(--card));
+  }
+  .dash .dash-card.changing { cursor: progress; opacity: 0.65; transition: opacity 0.2s 0.15s; }
+  .dash .dash-chart { padding: 12px 16px 14px; }
+
+  /* The card's head, the view's toolbar (card-head.tsx; the mockup's `.dash-cardbar`), inside the
+     card's border with a hairline under it: its two ends each wrap within themselves, the right one
+     keeping to the right when the head wraps. */
+  .dash .dash-cardbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 8px 16px; border-bottom: 1px solid hsl(var(--border)); }
+  .dash .dash-cardbar-part { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-width: 0; }
+  .dash .dash-cardbar-part.end { margin-left: auto; }
+  /* A button that picks from a list names what it picks, muted, before the choice at hand, and
+     ends in the chevron, a size down. */
+  .dash .dash-pick .k { margin-right: -1px; color: hsl(var(--muted-foreground)); font-weight: 400; }
+  .dash .dash-pick .chev { width: 0.9em; height: 0.9em; margin: 0 -3px 0 -2px; color: hsl(var(--muted-foreground)); }
+  /* A toggle button: in the muted primary while its setting is on; greyed where it does not apply. */
+  .dash .dash-toggle.on { border-color: hsl(var(--primary-muted-foreground) / 0.3); background: hsl(var(--primary-muted)); color: hsl(var(--primary-muted-foreground)); }
+  .dash .dash-toggle.on:hover { background: hsl(var(--primary-muted-strong)); }
+  .dash .dash-toggle.off { opacity: 0.45; cursor: default; }
+  .dash .dash-toggle.off:hover { background: hsl(var(--background)); }
+  .dash .dash-toggle.on.off:hover { background: hsl(var(--primary-muted)); }
+
+  /* By's list and Color's (the mockup's `.bypanel`), 300px wide under their button, By's from its
+     left, Color's from its right: one scrollbar, the popover's, its search standing at its top. */
+  .dash .dash-list-pop { right: auto; left: 0; width: 300px; max-width: calc(100vw - 24px); }
+  .dash .dash-list-pop.end { left: auto; right: 0; }
+  .dash .dash-list-pop > .popover-body { padding-top: 0; }
+  .dash .dash-dimlist { padding: 0 6px; font-size: var(--text-sm); }
+  .dash .dash-dimlist > .field { position: sticky; top: 0; z-index: 1; height: 30px; margin: 0 -6px 4px; padding: 0 11px; border-width: 10px 6px 0; border-color: hsl(var(--background)); background-clip: padding-box; font-size: var(--text-sm); }
+  .dash .dash-dimlist .menu-head { padding: 6px 10px 3px; font-size: var(--text-xs); font-weight: 600; color: hsl(var(--muted-foreground)); }
+  .dash .dash-dimgroup.bare:not(:first-of-type) { margin-top: 4px; padding-top: 4px; border-top: 1px solid hsl(var(--border)); }
+  .dash .dash-dimlist .empty { padding: 8px 10px; }
+  .dash .dash-dimrow { display: flex; align-items: center; border-radius: 6px; }
+  .dash .dash-dimrow:hover, .dash .dash-dimrow:focus-within { background: hsl(var(--accent)); }
+  .dash .dash-dimrow .menu-item { flex: 1; min-width: 0; gap: 8px; padding: 5px 4px 5px 10px; font-size: var(--text-sm); }
+  .dash .dash-dimrow .menu-item:hover { background: none; }
+  .dash .dash-dimrow .t { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .dash .dash-dimrow .n { flex: none; color: hsl(var(--muted-foreground)); font-size: var(--text-xs); font-variant-numeric: tabular-nums; }
+  .dash .dash-dimrow.on { background: hsl(var(--primary-muted)); color: hsl(var(--primary-muted-foreground)); font-weight: 600; }
+  .dash .dash-dimrow.on .n { color: inherit; opacity: 0.8; }
+  .dash .dash-dimrow.dim .t { color: hsl(var(--muted-foreground)); }
+  .dash .dash-dimrow .star { flex: none; display: grid; place-items: center; width: 26px; height: 26px; margin-right: 2px; padding: 0; border: 0; border-radius: 6px; background: none; color: hsl(var(--foreground)); opacity: 0; cursor: pointer; }
+  .dash .dash-dimrow:hover .star, .dash .dash-dimrow:focus-within .star { opacity: 1; }
+  .dash .dash-dimrow .star:hover { background: hsl(var(--foreground) / 0.08); }
+  .dash .dash-dimrow .star .icon { width: 14px; height: 14px; }
+  .dash .dash-dimrow .star.on .icon { fill: currentColor; }
+  /* A person's ratio's pencil and × in + Measure, under the pointer as a star is. */
+  .dash .dash-dimrow .act { flex: none; display: grid; place-items: center; width: 26px; height: 26px; padding: 0; border: 0; border-radius: 6px; background: none; color: hsl(var(--foreground)); opacity: 0; cursor: pointer; }
+  .dash .dash-dimrow .act:last-child { margin-right: 2px; }
+  .dash .dash-dimrow:hover .act, .dash .dash-dimrow:focus-within .act { opacity: 1; }
+  .dash .dash-dimrow .act:hover { background: hsl(var(--foreground) / 0.08); }
+  .dash .dash-dimrow .act .icon { width: 14px; height: 14px; }
+  .dash .dash-dimmore { display: block; margin-top: 4px; padding: 6px 10px; border: 0; background: none; color: hsl(var(--link)); font: inherit; font-size: var(--text-sm); cursor: pointer; }
+  .dash .dash-dimmore:hover { text-decoration: underline; }
+
+  /* The table (rows-table.tsx; the mockup's `.rowstable`). While it shows, the main area stands
+     still: the card takes the room the scope leaves and the table scrolls inside it, both ways, its
+     headings in sight above the rows, so that its sideways scrollbar is always in view. The card's
+     least height keeps a few rows: in a window shorter than that the main area scrolls too. */
+  .dash .dash-main.fit { display: flex; flex-direction: column; padding-bottom: 16px; }
+  .dash .dash-main.fit > * { flex: none; }
+  .dash .dash-main.fit > .dash-card { flex: 0 1 auto; min-height: 240px; display: flex; flex-direction: column; }
+  .dash .dash-main.fit .dash-cardbar { flex: none; }
+  .dash .dash-main.fit .dash-chart { flex: 0 1 auto; min-height: 0; display: flex; flex-direction: column; padding-bottom: 10px; }
+  .dash .dash-main.fit .dash-chart > * { flex: none; }
+  .dash .dash-main.fit .dash-chart > .dash-tablewrap { flex: 0 1 auto; min-height: 0; }
+  .dash .dash-tablewrap { overflow: auto; }
+  .dash .dash-table { width: 100%; border-collapse: separate; border-spacing: 0; font-size: var(--text-sm); }
+  .dash .dash-table th {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    padding: 5px 8px;
+    border-bottom: 1px solid hsl(var(--border));
+    background: hsl(var(--card));
+    text-align: left;
+    font-size: var(--text-xs);
+    font-weight: 600;
+    color: hsl(var(--muted-foreground));
+    white-space: nowrap;
+  }
+  .dash .dash-table td { padding: 5px 8px; border-bottom: 1px solid hsl(var(--border) / 0.6); vertical-align: baseline; white-space: nowrap; }
+  .dash .dash-table .num { text-align: right; font-variant-numeric: tabular-nums; }
+  .dash .dash-table .lab { text-align: left; }
+  .dash .dash-table td.lab { max-width: 460px; }
+  .dash .dash-table td.lab > .t { overflow: hidden; text-overflow: ellipsis; font-weight: 500; }
+  .dash .dash-table td.lab > .at { font-size: 10.5px; color: hsl(var(--muted-foreground)); }
+  .dash .dash-table .nn { color: hsl(var(--muted-foreground)); font-size: 11.5px; }
+  .dash .dash-table td.sp, .dash .dash-table th.sp { background-color: hsl(var(--muted) / 0.45); }
+  .dash .dash-table th.sp { background: linear-gradient(hsl(var(--muted) / 0.45), hsl(var(--muted) / 0.45)), hsl(var(--card)); }
+  .dash .dash-table th .sw { margin-right: 4px; vertical-align: -1px; }
+  .dash .dash-table tr.allrow td { font-weight: 600; background: hsl(var(--muted)); }
+  .dash .dash-table tr.marked td { background: hsl(var(--warning) / 0.15); }
+  .dash .dash-table .share { display: inline-block; height: 6px; margin-left: 6px; border-radius: 3px; background: hsl(var(--primary) / 0.45); vertical-align: middle; }
+
+  /* The headings' row stays in sight while the main area scrolls: the page's own elements over
+     the chart's columns, their text where the chart would draw it (its baseline 14px down), the
+     columns' rules drawn through. */
+  .dash .dash-heads { position: sticky; top: 0; z-index: 2; background: hsl(var(--card)); }
+  .dash .rowheads { font-size: 11.5px; font-weight: 600; line-height: 20px; color: hsl(var(--muted-foreground)); }
+  .dash .rowheads > * { position: absolute; top: 0; }
+  .dash .rowheads > svg { left: 0; }
+  .dash .rowheads .colhead { display: inline-flex; align-items: baseline; gap: 4px; white-space: nowrap; }
+  .dash .rowheads .colhead .t { overflow: hidden; text-overflow: ellipsis; }
+  .dash .rowheads .mslot { height: 20px; }
+
+  /* A measure's heading (measure-heads.tsx; the mockup's `.dash-mhead`): its name, which sorts, the
+     arrow of the sort, and at its right the menu's sign, muted, and the ×. In the rows they show
+     under the pointer and while the focus is inside, the name, cut to its column at rest, giving
+     them its room; in a table they keep their room, hidden at rest, the column growing to the name.
+     A refused measure's name reads in the warning's text colour; a heading lifted fades in place. */
+  .dash .dash-mhead { display: inline-flex; align-items: center; min-width: 0; max-width: 100%; vertical-align: top; user-select: none; }
+  .dash .dash-mhead.dragging { opacity: 0.35; }
+  .dash .dash-mhead .name { display: inline-flex; align-items: baseline; gap: 4px; min-width: 0; padding: 0; border: 0; background: none; color: inherit; font: inherit; line-height: inherit; cursor: pointer; }
+  .dash .dash-mhead .name .t { overflow: hidden; white-space: nowrap; }
+  .dash .dash-mhead .arr { flex: none; font-size: 0.85em; }
+  .dash .dash-mhead .name:hover, .dash .dash-mhead.on .name, .dash .dash-mhead.open .name { color: hsl(var(--foreground)); }
+  .dash .dash-mhead.refused .name .t { color: hsl(var(--warning-text)); }
+  .dash .dash-mhead .ctl { flex: none; display: grid; place-items: center; width: 18px; height: 18px; padding: 0; border: 0; border-radius: 4px; background: none; color: hsl(var(--muted-foreground)); cursor: pointer; }
+  .dash .dash-mhead .ctl.menu { margin-left: 3px; }
+  .dash .dash-mhead .ctl.x { margin-left: 2px; }
+  .dash .dash-mhead .ctl:hover, .dash .dash-mhead.open .ctl.menu { background: hsl(var(--foreground) / 0.08); color: hsl(var(--foreground)); }
+  .dash .dash-mhead .ctl.x:hover { color: hsl(var(--destructive-text)); }
+  .dash .dash-mhead .ctl .icon { width: 14px; height: 14px; }
+  .dash .rowheads .dash-mhead .ctl { display: none; }
+  .dash .rowheads .dash-mhead:is(:hover, :focus-within, .open) .ctl { display: grid; }
+  .dash .dash-table .dash-mhead .ctl { visibility: hidden; }
+  .dash .dash-table .dash-mhead:is(:hover, :focus-within, .open) .ctl { visibility: visible; }
+
+  /* A heading's panel, under it, held in the window so that the table's scroll does not cut it: its
+     name and its ×, the aggregate and the grain as segmented choices, what the figure is. */
+  .dash .dash-headpane { position: fixed; top: 0; left: 0; right: auto; z-index: 20; width: 340px; max-width: calc(100vw - 24px); color: hsl(var(--foreground)); font-weight: 400; line-height: 1.5; cursor: auto; user-select: text; }
+  .dash .dash-headpane > .dash-valuepane { padding: 8px 12px 12px; }
+  .dash :is(.dash-headpane, .dash-valuepane, .dash-ratioform) .panehead { display: flex; align-items: center; gap: 8px; font-weight: 600; }
+  .dash :is(.dash-headpane, .dash-valuepane, .dash-ratioform) .panehead .t { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .dash .dash-headpane > .dash-ratioform { padding: 8px 12px 12px; }
+
+  /* A threshold's pane (threshold-pane.tsx): what it is on, the operator and the number, Is or Is
+     not on each item, Filter or Mark, its foot. */
+  .dash .dash-threshold .field { width: 0; min-width: 6em; }
+
+  /* A custom ratio's form (ratio-form.tsx), in + Measure's place or the heading's panel's, 340px
+     wide: its name, each side a figure, its aggregate and its items on a line with its own filters
+     under them, the format it reads as. */
+  .dash .dash-list-pop:has(.dash-ratioform) { width: 340px; }
+  .dash .dash-ratioform { display: flex; flex-direction: column; gap: 8px; padding: 6px 4px 4px; font-size: var(--text-sm); }
+  .dash .dash-ratioform .note.bad { color: hsl(var(--destructive-text)); }
+  .dash .dash-ratioside { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 4px 6px; align-items: center; }
+  .dash .dash-ratioside > .k { grid-column: 1 / -1; font-size: var(--text-xs); font-weight: 600; color: hsl(var(--muted-foreground)); }
+  .dash .dash-ratioside select.field { min-width: 0; height: 30px; padding-block: 0; padding-inline: 6px 2px; line-height: 28px; font-size: var(--text-sm); }
+  .dash label.dash-ratioside { grid-template-columns: auto 1fr; }
+  .dash label.dash-ratioside > .k { grid-column: auto; }
+  .dash .dash-ratioside .filters { grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
+  .dash .dash-sidefilter { display: inline-flex; align-items: center; max-width: 100%; height: 24px; padding-left: 8px; border: 1px solid hsl(var(--border)); border-radius: 999px; font-size: var(--text-xs); }
+  .dash .dash-sidefilter .t { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .dash .dash-sidefilter .x { display: grid; place-items: center; width: 22px; height: 22px; padding: 0; border: 0; border-radius: 999px; background: none; color: hsl(var(--muted-foreground)); cursor: pointer; }
+  .dash .dash-sidefilter .x:hover { color: hsl(var(--foreground)); }
+  .dash .dash-sidefilter .x .icon { width: 12px; height: 12px; }
+
+  /* A heading dragged: its name following the pointer, and a line in the primary, a dot at each
+     end, where it would drop. */
+  .dash .dash-dragghost { position: fixed; z-index: 30; padding: 1px 8px; border: 1px solid hsl(var(--border)); border-radius: 6px; background: hsl(var(--card)); box-shadow: var(--shadow-lg); font-size: 11.5px; font-weight: 600; line-height: 18px; white-space: nowrap; pointer-events: none; }
+  .dash .dash-dropmark { position: fixed; z-index: 29; width: 2px; background: hsl(var(--primary)); pointer-events: none; }
+  .dash .dash-dropmark::before, .dash .dash-dropmark::after { content: ""; position: absolute; left: -3px; width: 8px; height: 8px; border-radius: 50%; background: hsl(var(--primary)); }
+  .dash .dash-dropmark::before { top: -4px; }
+  .dash .dash-dropmark::after { bottom: -4px; }
+
+  /* What the By refuses of the measures, over the chart. */
+  .dash .dash-refused { margin-bottom: 8px; font-size: var(--text-xs); color: hsl(var(--warning-text)); }
+  .dash .dash-refused p { margin: 0; }
+
+  /* The legend's items 10px apart and its lines 4px, each item's margins making the gaps, the
+     first at the chart's left edge. */
+  .dash .legend { display: flex; flex-wrap: wrap; align-items: center; margin: -2px -5px 6px; }
+  .dash .legend > * { margin: 2px 5px; }
+  .dash .lg { display: flex; align-items: center; gap: 5px; }
+  .dash .sw { display: inline-block; flex: none; width: 11px; height: 11px; border-radius: 2px; }
+  .dash .lg .amt { color: hsl(var(--muted-foreground)); font-variant-numeric: tabular-nums; }
+  .dash .showall { padding: 10px 0; color: hsl(var(--muted-foreground)); }
+
+  .dash svg.chart { display: block; }
+  .dash svg.chart text { font-size: 12px; fill: hsl(var(--foreground)); }
+  .dash svg.chart .muted { fill: hsl(var(--muted-foreground)); }
+  .dash svg.chart .at { font-size: 10.5px; }
+  .dash svg.chart .grid { stroke: hsl(var(--border)); }
+  .dash svg.chart .medlab { font-size: 10.5px; fill: hsl(var(--muted-foreground)); }
+
+  /* The rows. */
+  .dash svg.rowschart .row .bg { fill: transparent; }
+  .dash svg.rowschart .row:hover .bg { fill: hsl(var(--accent)); }
+  .dash svg.rowschart .row.drill { cursor: pointer; }
+  .dash svg.rowschart .row.drill:focus-visible { outline: none; }
+  .dash svg.rowschart .row.drill:focus-visible .bg { fill: hsl(var(--primary-muted)); }
+  .dash svg.rowschart .row.marked .bg { fill: hsl(var(--warning) / 0.15); }
+  .dash svg.rowschart .allbg { fill: hsl(var(--muted)); }
+  .dash svg.rowschart .alltext { font-weight: 600; }
+  .dash svg.rowschart .markline { fill: hsl(var(--warning-text)); }
+  .dash svg.rowschart .medtick { stroke: hsl(var(--foreground)); stroke-width: 1.2; stroke-dasharray: 2 3; opacity: 0.55; pointer-events: none; }
+}

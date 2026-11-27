@@ -10,7 +10,7 @@ from datetime import UTC, datetime, timedelta
 import httpx
 import pytest
 from pilot_collection.reading import ReadingSchema
-from pilot_scenario import SCENARIO, Builder
+from pilot_scenario import SCENARIO, TALLY, Builder
 
 from app.services.fake_collector import (
     TOO_LARGE,
@@ -200,6 +200,16 @@ class TestScenario:
         assert _read(client, first["session_id"]).file_modified_at == (
             datetime.fromisoformat(first["file_modified_at"]) + timedelta(days=1)
         )
+
+    def test_two_loads_before_an_ask_hold_both_scenarios(
+        self, fake: ServedFakeCollector, client: httpx.Client
+    ) -> None:
+        fake.scenario(Builder(SCENARIO, UNTIL))
+        fake.scenario(Builder(TALLY, UNTIL))
+
+        for scenario in (SCENARIO, TALLY):
+            first = Builder(scenario, UNTIL).publications()[0]
+            assert _read(client, first["session_id"]).file_size == first["file_size"]
 
     def test_a_load_reads_none_of_the_scenario_until_it_is_asked(
         self, fake: ServedFakeCollector, monkeypatch: pytest.MonkeyPatch

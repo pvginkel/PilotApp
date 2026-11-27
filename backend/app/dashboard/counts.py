@@ -154,7 +154,9 @@ class CountsService:
         counts: dict[str, int] = {}
         for done, fact in enumerate(facts, start=1):
             keys = homes[fact]
-            with self.bounds.read(self.db) as db:
+            # Held after the first fact, a spec sees the task between its
+            # first progress update and its end.
+            with self.bounds.read(self.db, holdable=done > 1) as db:
                 found_row = db.execute(
                     attributes(found, catalogue, fact, keys).select
                 ).one()

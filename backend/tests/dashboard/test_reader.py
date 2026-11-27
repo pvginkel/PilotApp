@@ -16,6 +16,7 @@ from typing import Any
 
 import pytest
 from pilot_collection.reading import ReadingSchema
+from pilot_scenario import SCENARIO
 from sqlalchemy import select
 from sqlalchemy.orm import Session as DbSession
 
@@ -690,7 +691,7 @@ class TestTheScenariosConversations:
         project: Project,
         service: ReaderService,
     ) -> None:
-        loaded = container.scenario_service().load({"recipe-box": project.id})
+        loaded = container.scenario_service().load(SCENARIO, {"recipe-box": project.id})
 
         for thread in loaded:
             found: Batch = service.batch("t=all", thread.id)

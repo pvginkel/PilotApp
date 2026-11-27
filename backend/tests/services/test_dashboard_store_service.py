@@ -31,7 +31,7 @@ from app.models import (
     User,
     ViewStar,
 )
-from app.models.reference import FavouriteMenu, Origin, UserKind
+from app.models.reference import FavouriteMenu, NumberFormat, Origin, UserKind
 from app.services.container import ServiceContainer
 from app.services.dashboard_store_service import (
     DashboardStoreService,
@@ -547,7 +547,9 @@ class TestLoadWorkflow:
         self, session: DbSession, service: DashboardStoreService
     ) -> None:
         service.save_view("Mine", STATE, None, EARLIER)
-        mine = service.add_ratio("Cost per turn", "cost.sum", "turns.count", None)
+        mine = service.add_ratio(
+            "Cost per turn", "cost.sum", "turns.count", NumberFormat.USD, None
+        )
 
         service.load_workflow(*workflow_views.entries(), NOW)
         service.load_workflow([], [], NOW)
@@ -1025,7 +1027,12 @@ class TestCustomRatios:
         self, service: DashboardStoreService
     ) -> None:
         made = service.add_ratio(
-            "Cost per turn", "reported_cost.sum", "turns.count", None, NOW
+            "Cost per turn",
+            "reported_cost.sum",
+            "turns.count",
+            NumberFormat.USD,
+            None,
+            NOW,
         )
 
         assert (made.origin_code, made.key, made.name) == (
@@ -1042,9 +1049,28 @@ class TestCustomRatios:
     def test_its_sides_are_kept_in_their_normal_form(
         self, service: DashboardStoreService
     ) -> None:
-        made = service.add_ratio("Waits", "waited", "calls.count", None, NOW)
+        made = service.add_ratio(
+            "Waits", "waited", "calls.count", NumberFormat.USD, None, NOW
+        )
 
         assert (made.numerator, made.denominator) == ("waited.sum", "calls.count")
+
+    def test_its_format_is_the_one_picked_and_an_edit_replaces_it(
+        self, service: DashboardStoreService
+    ) -> None:
+        """DB 639 and 640: calls over turns, whose two counts would make a
+        share, picked as a number, then as a share."""
+        made = service.add_ratio(
+            "Calls per turn", "calls", "turns", NumberFormat.COUNT, None, NOW
+        )
+
+        assert made.format_code == NumberFormat.COUNT
+
+        changed = service.edit_ratio(
+            made.id, "Calls per turn", "calls", "turns", NumberFormat.SHARE, None, NOW
+        )
+
+        assert changed.format_code == NumberFormat.SHARE
 
     @pytest.mark.parametrize(
         ("name", "key"),
@@ -1057,15 +1083,32 @@ class TestCustomRatios:
     def test_its_key_is_a_word_of_its_name(
         self, service: DashboardStoreService, name: str, key: str
     ) -> None:
-        assert service.add_ratio(name, "cost.sum", "calls.count", None, NOW).key == key
+        assert (
+            service.add_ratio(
+                name, "cost.sum", "calls.count", NumberFormat.USD, None, NOW
+            ).key
+            == key
+        )
 
     def test_a_key_taken_is_numbered(self, service: DashboardStoreService) -> None:
-        first = service.add_ratio("Cost per turn", "cost.sum", "turns.count", None, NOW)
-        service.edit_ratio(first.id, "Turn cost", "cost.sum", "turns.count", None, NOW)
+        first = service.add_ratio(
+            "Cost per turn", "cost.sum", "turns.count", NumberFormat.USD, None, NOW
+        )
+        service.edit_ratio(
+            first.id,
+            "Turn cost",
+            "cost.sum",
+            "turns.count",
+            NumberFormat.USD,
+            None,
+            NOW,
+        )
 
-        again = service.add_ratio("Cost per turn", "cost.sum", "calls.count", None, NOW)
+        again = service.add_ratio(
+            "Cost per turn", "cost.sum", "calls.count", NumberFormat.USD, None, NOW
+        )
         third = service.add_ratio(
-            "Cost  per turn", "cost.sum", "calls.count", None, NOW
+            "Cost  per turn", "cost.sum", "calls.count", NumberFormat.USD, None, NOW
         )
 
         assert [first.key, again.key, third.key] == [
@@ -1079,7 +1122,9 @@ class TestCustomRatios:
     ) -> None:
         _loaded_ratio(session)
 
-        made = service.add_ratio("Cost per crate", "cost.sum", "calls.count", None, NOW)
+        made = service.add_ratio(
+            "Cost per crate", "cost.sum", "calls.count", NumberFormat.USD, None, NOW
+        )
 
         assert made.name == "Cost per crate"
         assert [ratio.system for ratio in service.custom_ratios()] == [True, False]
@@ -1087,10 +1132,14 @@ class TestCustomRatios:
     def test_a_persons_name_taken_is_refused(
         self, service: DashboardStoreService
     ) -> None:
-        service.add_ratio("Cost per turn", "cost.sum", "turns.count", None, NOW)
+        service.add_ratio(
+            "Cost per turn", "cost.sum", "turns.count", NumberFormat.USD, None, NOW
+        )
 
         with pytest.raises(ResourceConflictException) as refused:
-            service.add_ratio("Cost per turn", "cost.sum", "calls.count", None, NOW)
+            service.add_ratio(
+                "Cost per turn", "cost.sum", "calls.count", NumberFormat.USD, None, NOW
+            )
 
         assert refused.value.message == (
             'A custom ratio with the name "Cost per turn" already exists'
@@ -1100,7 +1149,9 @@ class TestCustomRatios:
         self, session: DbSession, service: DashboardStoreService
     ) -> None:
         with pytest.raises(StateRefusedException) as refused:
-            service.add_ratio("Broken", "cots.sum", "calls.cuont", None, NOW)
+            service.add_ratio(
+                "Broken", "cots.sum", "calls.cuont", NumberFormat.USD, None, NOW
+            )
 
         assert [fault.part for fault in refused.value.faults] == [
             "m=cots.sum",
@@ -1112,11 +1163,19 @@ class TestCustomRatios:
         assert service.custom_ratios() == []
 
     def test_one_is_changed_under_its_key(self, service: DashboardStoreService) -> None:
-        made = service.add_ratio("Cost per turn", "cost.sum", "turns.count", "A", NOW)
+        made = service.add_ratio(
+            "Cost per turn", "cost.sum", "turns.count", NumberFormat.USD, "A", NOW
+        )
         later = NOW + timedelta(hours=1)
 
         changed = service.edit_ratio(
-            made.id, "Turn cost", "reported_cost.sum", "turns.count", None, later
+            made.id,
+            "Turn cost",
+            "reported_cost.sum",
+            "turns.count",
+            NumberFormat.USD,
+            None,
+            later,
         )
 
         assert (changed.id, changed.key, changed.name) == (
@@ -1133,19 +1192,37 @@ class TestCustomRatios:
     def test_a_change_may_keep_its_name_and_not_take_anothers(
         self, service: DashboardStoreService
     ) -> None:
-        made = service.add_ratio("Cost per turn", "cost.sum", "turns.count", None, NOW)
-        service.add_ratio("Cost per call", "cost.sum", "calls.count", None, NOW)
+        made = service.add_ratio(
+            "Cost per turn", "cost.sum", "turns.count", NumberFormat.USD, None, NOW
+        )
+        service.add_ratio(
+            "Cost per call", "cost.sum", "calls.count", NumberFormat.USD, None, NOW
+        )
 
         service.edit_ratio(
-            made.id, "Cost per turn", "cost.sum", "turns.count", "B", NOW
+            made.id,
+            "Cost per turn",
+            "cost.sum",
+            "turns.count",
+            NumberFormat.USD,
+            "B",
+            NOW,
         )
         with pytest.raises(ResourceConflictException):
             service.edit_ratio(
-                made.id, "Cost per call", "cost.sum", "turns.count", None, NOW
+                made.id,
+                "Cost per call",
+                "cost.sum",
+                "turns.count",
+                NumberFormat.USD,
+                None,
+                NOW,
             )
 
     def test_one_is_removed(self, service: DashboardStoreService) -> None:
-        made = service.add_ratio("Cost per turn", "cost.sum", "turns.count", None, NOW)
+        made = service.add_ratio(
+            "Cost per turn", "cost.sum", "turns.count", NumberFormat.USD, None, NOW
+        )
 
         service.remove_ratio(made.id)
 
@@ -1158,7 +1235,15 @@ class TestCustomRatios:
         loaded = _loaded_ratio(session)
 
         with pytest.raises(InvalidOperationException) as changed:
-            service.edit_ratio(loaded.id, "Mine", "cost.sum", "turns.count", None, NOW)
+            service.edit_ratio(
+                loaded.id,
+                "Mine",
+                "cost.sum",
+                "turns.count",
+                NumberFormat.USD,
+                None,
+                NOW,
+            )
         with pytest.raises(InvalidOperationException) as removed:
             service.remove_ratio(loaded.id)
 
@@ -1177,7 +1262,9 @@ class TestCustomRatios:
         catalogue_service = container.catalogue_service()
         store = container.dashboard_store_service()
         catalogue_service.catalogue(session)
-        made = store.add_ratio("Cost per turn", "cost.sum", "turns.count", None, NOW)
+        made = store.add_ratio(
+            "Cost per turn", "cost.sum", "turns.count", NumberFormat.USD, None, NOW
+        )
         run_after_commit_callbacks()
 
         assert catalogue_service.catalogue(session).ratios[-1].key == made.key
@@ -1194,11 +1281,20 @@ class TestCustomRatios:
     ) -> None:
         catalogue_service = container.catalogue_service()
         store = container.dashboard_store_service()
-        made = store.add_ratio("Cost per turn", "cost.sum", "turns.count", None, NOW)
+        made = store.add_ratio(
+            "Cost per turn", "cost.sum", "turns.count", NumberFormat.USD, None, NOW
+        )
         run_after_commit_callbacks()
         catalogue_service.catalogue(session)
 
-        store.edit_ratio(made.id, "Turn cost", "reported_cost.sum", "turns.count", None)
+        store.edit_ratio(
+            made.id,
+            "Turn cost",
+            "reported_cost.sum",
+            "turns.count",
+            NumberFormat.USD,
+            None,
+        )
         run_after_commit_callbacks()
 
         (edited,) = [
@@ -1210,6 +1306,8 @@ class TestCustomRatios:
 
     def test_no_ratio_is_refused(self, service: DashboardStoreService) -> None:
         with pytest.raises(RecordNotFoundException):
-            service.edit_ratio(uuid.uuid4(), "Mine", "cost.sum", "calls.count", None)
+            service.edit_ratio(
+                uuid.uuid4(), "Mine", "cost.sum", "calls.count", NumberFormat.USD, None
+            )
         with pytest.raises(RecordNotFoundException):
             service.remove_ratio(uuid.uuid4())

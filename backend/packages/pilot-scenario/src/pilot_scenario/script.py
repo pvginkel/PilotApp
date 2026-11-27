@@ -191,13 +191,32 @@ class SubAgent:
 
 @dataclass(frozen=True)
 class Turn:
-    """A Turn of Pilot's that a session ran under: the message Pilot sent it
-    on one of the scenario's projects, from `at` to `ended`."""
+    """A Turn of Pilot's that a session ran under: the message Pilot sent
+    it, from `at` to `ended`, and why it was sent, a Turn Cause's code. One a
+    person sent, `person`, has its `author`, one of the scenario's people."""
 
-    project: str
     message: str
     at: int
     ended: int
+    cause: str = "brief"
+    author: str | None = None
+
+
+@dataclass(frozen=True)
+class Ran:
+    """What Pilot holds of a session it ran before a collector reads its
+    transcript: the project, by the scenario's name of it, its Session
+    Kind's code (`work`, `job`, `chat` or `conversation`) and its Turns, in
+    order, each the start of a Launch. A work item's run or a job with a
+    `title` is placed as a Work with its Item, a job's with the Work Trigger
+    `trigger`; a chat has its Chat Kind `chat`."""
+
+    project: str
+    turns: tuple[Turn, ...]
+    kind: str = "work"
+    title: str | None = None
+    trigger: str | None = None
+    chat: str | None = None
 
 
 @dataclass(frozen=True)
@@ -213,9 +232,9 @@ class Group:
 @dataclass(frozen=True)
 class Session:
     """A conversation with Claude Code in one directory, its main thread and
-    its sub-agents'. One Pilot ran has its `turn`; one a person ran by hand
-    has that `person`, is on no project of Pilot's running, and may belong to
-    a `group`. `unit` is the unit of work it ran. Its `repository` is the
+    its sub-agents'. One Pilot ran has what Pilot holds of it, `ran`; one a
+    person ran by hand has that `person`, is on no project of Pilot's
+    running, and may belong to a `group`. `unit` is the unit of work it ran. Its `repository` is the
     checkout its `directory` lies under, and its `environment` the one that
     hosted it, each none where it has none."""
 
@@ -224,7 +243,7 @@ class Session:
     launches: tuple[Launch, ...]
     environment: str | None = None
     repository: str | None = None
-    turn: Turn | None = None
+    ran: Ran | None = None
     person: str | None = None
     unit: str | None = None
     group: Group | None = None

@@ -14,7 +14,6 @@
   .topbar {
     position: relative;
     z-index: 26;
-    flex: none;
     display: flex;
     align-items: center;
     gap: 16px;
@@ -27,6 +26,22 @@
   .brand { display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: var(--text-2xl); }
   .logo { width: 32px; height: 32px; }
   .topbar .spacer { flex: 1; }
+  /* The screens' tabs after the name (screen-nav.tsx; F160.1), FieldnotesApp's: text alone, the one
+     showing underlined in white, a hover in a fainter line. Large text, as FieldnotesApp's, for
+     which the header's 3.4:1 passes. */
+  .screens { display: flex; align-self: stretch; gap: 4px; margin-left: -4px; }
+  .screens a {
+    display: flex;
+    align-items: center;
+    padding: 3px 12px 0;
+    border-bottom: 3px solid transparent;
+    color: #fff;
+    font-size: 19px;
+    font-weight: 700;
+    white-space: nowrap;
+  }
+  .screens a:hover { border-bottom-color: rgb(255 255 255 / 0.4); text-decoration: none; }
+  .screens a.active { border-bottom-color: #fff; }
   /* The gold bar off a phone: a badge per condition after Pilot's name, its full line its title,
      or, where the condition has a button, its popover. The light theme's gold in both themes
      (app-theme.css), the top bar being the same blue in both. */
@@ -129,12 +144,35 @@
   .menu-pop .menu-rule { margin: 2px -6px 6px; border: 0; border-top: 1px solid hsl(var(--border)); }
   .menu-pop .menu-foot { padding: 4px 10px 2px; font-size: var(--text-xs); color: hsl(var(--muted-foreground)); }
 
+  /* ---- The two screens (F160.2): under the top bar the Projects screen, the frame's .app, and
+     the dashboard (dashboard-screen.tsx), in one box. The one out of sight lies in that box out of
+     the flow, its visibility off and inert, so that it keeps its size, its scroll and what it
+     draws; the handle step stands in their place (F137). Over them the offer's line and the top
+     bar, or on a phone at the handle step the home's head ----------------------------------- */
+
+  .screen-stack {
+    position: relative;
+    flex: 1;
+    min-height: 0;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto auto minmax(0, 1fr);
+  }
+  .screen-stack > * { grid-area: 3 / 1 / 4 / 2; }
+  /* The offer of the browser's notifications (F146.2): a gold line of its own across the full width
+     of the page's top, over the top bar or the phone's conditions. */
+  .screen-stack > .notifications-offer { grid-area: 1 / 1 / 2 / 2; }
+  .screen-stack > :is(.topbar, .home-head) { grid-area: 2 / 1 / 3 / 2; }
+  /* Placed in its grid area, which is its containing block. */
+  .screen-stack > .away { position: absolute; inset: 0; }
+  .screen-stack > .away, .screen-stack > .away * { visibility: hidden !important; }
+  .dash { min-width: 0; min-height: 0; display: flex; flex-direction: column; background: hsl(var(--background)); }
+
   /* ---- The side column and the centre --------------------------------------------------- */
 
   /* The side column beside the centre; with a drawer, the gold bar over the centre. */
   .app {
     position: relative;
-    flex: 1;
     min-height: 0;
     display: grid;
     grid-template-columns: var(--tabs) minmax(0, 1fr);
@@ -258,10 +296,6 @@
   .gold-btn:disabled { opacity: 0.45; cursor: default; }
   :root[data-theme="dark"] .gold-btn { background: hsl(0 0% 100% / 0.06); }
   :root[data-theme="dark"] .gold-btn:hover:not(:disabled) { background: hsl(0 0% 100% / 0.14); }
-
-  /* The offer of the browser's notifications (F146.2): a gold line of its own across the full width
-     of the page's top, over the top bar or the phone's conditions. */
-  .notifications-offer { flex: none; }
 
   /* ---- The keys list -------------------------------------------------------------------- */
 

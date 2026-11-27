@@ -1,4 +1,4 @@
-"""Revision 0057: the Events and Context Parts stored are the collector's,
+"""Revision 0058: the Events and Context Parts stored are the collector's,
 and its downgrade takes every label, the labeller's Events and Context Parts
 with them."""
 
@@ -80,7 +80,7 @@ class TestTheDowngrade:
         request.segment_position = 1
         session.flush()
 
-        run_revision(session, "0057", "downgrade")
+        run_revision(session, "0058", "downgrade")
 
         assert session.scalars(TABLES).all() == []
         assert session.scalars(COLUMNS).all() == []
@@ -97,9 +97,9 @@ class TestTheUpgrade:
         self, session: DbSession
     ) -> None:
         _first_call(session)
-        run_revision(session, "0057", "downgrade")
+        run_revision(session, "0058", "downgrade")
 
-        run_revision(session, "0057", "upgrade")
+        run_revision(session, "0058", "upgrade")
 
         assert session.scalars(text("SELECT labelled FROM events")).all() == [False]
         assert session.scalars(text("SELECT labelled FROM context_parts")).all() == [

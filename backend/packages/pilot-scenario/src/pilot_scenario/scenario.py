@@ -29,6 +29,7 @@ from pilot_scenario.script import (
     HookRun,
     Launch,
     Prompt,
+    Ran,
     Retry,
     Scenario,
     Session,
@@ -112,11 +113,15 @@ HALVING = Session(
     directory="/work/RecipeBox",
     environment="ben-recipebox-51f0c2",
     repository="RecipeBox",
-    turn=Turn(
+    ran=Ran(
         project="recipe-box",
-        message="Halve the stew: it serves eight, and the pot holds four.",
-        at=0,
-        ended=224,
+        turns=(
+            Turn(
+                message="Halve the stew: it serves eight, and the pot holds four.",
+                at=0,
+                ended=224,
+            ),
+        ),
     ),
     unit="Halve the stew",
     launches=(

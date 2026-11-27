@@ -127,6 +127,7 @@ function generateHooks(spec) {
 
   const hooksContent = `// Generated TanStack Query hooks - do not edit manually
 import { ${Array.from(imports).join(', ')} } from '@tanstack/react-query';
+import type { Query } from '@tanstack/react-query';
 import { toApiError } from '@/lib/api/api-error';
 import { makeUniqueToken } from '@/lib/utils/random';
 import { api } from './client';
@@ -134,10 +135,17 @@ import type { paths, components } from './types';
 
 /**
  * This page, named in the \`X-Sender\` header of every write a mutation hook sends. A hook's success
- * reads every query again, where the server's live events leave a page's own write to it; a caller's
- * \`onSuccess\` runs beside that read, and the write stays pending until both have ended.
+ * reads the queries again (\`READ_AFTER_A_WRITE\`), where the server's live events leave a page's own
+ * write to it; a caller's \`onSuccess\` runs beside that read, and the write stays pending until both
+ * have ended.
  */
 export const SENDER = makeUniqueToken(32);
+
+/** The \`meta\` flag of a query a write's read of every query passes over: one read again by events of its own. */
+export const WRITES_PASS_OVER = 'writesPassOver';
+
+/** The queries a mutation hook's success reads again: every one but those whose \`meta\` holds \`WRITES_PASS_OVER\`. */
+export const READ_AFTER_A_WRITE = { predicate: (query: Query) => query.meta?.[WRITES_PASS_OVER] !== true };
 
 // Type aliases for better developer experience
 ${typeAliases.join('\n')}
@@ -286,8 +294,7 @@ export function ${hookName}(options?: Omit<Parameters<typeof useMutation>[0], 'm
     },
     ...rest,
     onSuccess: (...args) => {
-      // Invalidate relevant queries after successful mutation
-      const read = queryClient.invalidateQueries();
+      const read = queryClient.invalidateQueries(READ_AFTER_A_WRITE);
       return onSuccess === undefined ? undefined : Promise.all([read, onSuccess(...args)]);
     },
   });

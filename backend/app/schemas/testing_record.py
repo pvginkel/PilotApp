@@ -687,12 +687,19 @@ class InventedFiredSchema(BaseModel):
 
 
 class InventedScenarioCreateSchema(BaseModel):
-    """The invented scenario to load (F122.6)."""
+    """An invented scenario to load (F122.6)."""
 
+    scenario: Literal["supper", "tally"] = Field(
+        description=(
+            "The scenario: `supper`, the invented story, or `tally`, all of it "
+            "Pilot's, whose figures the dashboard's specs know"
+        ),
+        examples=["tally"],
+    )
     projects: dict[str, uuid.UUID] = Field(
         description=(
-            "The project that stands for each of the scenario's projects a Turn "
-            "of Pilot's is on, by the scenario's name of it"
+            "The project that stands for each of the scenario's projects Pilot "
+            "ran a session on, by the scenario's name of it"
         ),
         examples=[{"recipe-box": "5e7f9a10-1c2d-4e3f-8a4b-6c7d8e9f0a1b"}],
     )

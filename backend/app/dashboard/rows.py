@@ -32,8 +32,8 @@ it.
   is marked, and 0 on one that is not; the All row's is the sum of its
   rows'.
 - Times are instants with the engine's zone beside them, never text, which
-  the page writes: the window's spans, and a key of the By or of the color
-  that is a time.
+  the page writes: the window's spans, a key of the By or of the color that
+  is a time, and a row's time where its By's values have one.
 """
 
 from __future__ import annotations
@@ -142,8 +142,12 @@ class Line:
 
 @dataclass(frozen=True)
 class ByRow(Line):
+    """A row of the By: `at` the instant its value is at, where the By's
+    values have one (`Dimension.at`), none on the row of none."""
+
     key: Value = None
     label: str | None = None
+    at: datetime | None = None
     focus: bool = False
     marked: bool = False
 
@@ -172,6 +176,7 @@ class _Taken:
     by_color: dict[int, dict[Value, Any]] = field(default_factory=dict)
     kinds: dict[int, dict[str, Any]] = field(default_factory=dict)
     name: str | None = None
+    at: datetime | None = None
     axis: Any = None
     focus: bool = False
     marked: dict[int, Any] = field(default_factory=dict)
@@ -330,6 +335,7 @@ class Shaper:
                     marks=line.marks,
                     key=key,
                     label=value_label(by, key, taken.name),
+                    at=None if key is None else taken.at,
                     focus=taken.focus,
                     marked=marked,
                 )
@@ -394,6 +400,8 @@ class Shaper:
         if not whole:
             if "b_name" in mapping:
                 taken.name = mapping["b_name"]
+            if "b_at" in mapping:
+                taken.at = mapping["b_at"]
             if "axis" in mapping:
                 taken.axis = mapping["axis"]
             if "focus" in mapping:

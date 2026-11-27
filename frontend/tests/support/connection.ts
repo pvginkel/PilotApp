@@ -20,8 +20,13 @@ export class Outage {
 
   /** The stream drops and stays down, each attempt to open it again failing, until `end()`. */
   async drop(): Promise<void> {
-    await this.start(false);
+    await this.refuse();
     await this.page.evaluate(() => window.__sseForceReconnect!());
+  }
+
+  /** Each attempt to open a stream fails until `end()`, a stream that stands left standing: a page opened meanwhile has none. */
+  async refuse(): Promise<void> {
+    await this.start(false);
   }
 
   /** The open stream sends nothing more, as a connection that died without saying so, and each attempt to open another fails, until `end()`. */

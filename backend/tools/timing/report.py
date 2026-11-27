@@ -4,12 +4,15 @@
 
 Each part's time at both sizes, over all time and over a quota week, the
 size at which it passes two seconds, and the statements that went to disk;
-the record's size on disk at both against production's 10 Gi volume; and
-the burst, where the timing read one (a timing of some parts alone,
-`--only`, reads none). A part passes two seconds where the line through its two times,
-taken as growing in step with the Calls, reaches it: "beyond" where it
-grows by less than it would need to within ten times the larger size, "—"
-where it does not grow.
+the record's size on disk at both against production's 10 Gi volume; the
+burst, where the timing read one (a timing of some parts alone, `--only`,
+reads none); and one walk, what the walk's event has one page read again:
+the rows of the view in view and the quick filters' counts, summed, against
+the walk's 30 s, and an open filter's pane's values beside them, where the
+timing timed them. A table with no row is not printed. A part passes two
+seconds where the line through its two times, taken as growing in step with
+the Calls, reaches it: "beyond" where it grows by less than it would need to
+within ten times the larger size, "—" where it does not grow.
 """
 
 import argparse
@@ -23,6 +26,20 @@ BOUND_MS = 2_000.0
 
 VOLUME = 10 * 1024**3
 """Production's volume, 10 Gi, which every database of the cluster shares."""
+
+WALK_MS = 30_000.0
+"""The collector's walk, every 30 s on both stages
+(`COLLECTOR_WALK_INTERVAL_SECONDS`)."""
+
+VIEWS = ("rows", "projects", "work_types", "medians", "threshold", "each_item")
+"""The parts that are a view's rows, each what the view in view reads again
+at a walk beside the quick filters' counts."""
+
+COUNTS = "quick_filters"
+"""The quick filters' counts, which a walk reads again with every view."""
+
+PANES = ("values_call", "values_conversation")
+"""A filter's pane's values, which a walk reads again while the pane is open."""
 
 
 def passes(small: tuple[int, float], large: tuple[int, float]) -> str:
@@ -140,6 +157,51 @@ def burst(results: Sequence[dict[str, Any]]) -> list[str]:
     return lines
 
 
+def walk(small: dict[str, Any], large: dict[str, Any]) -> list[str]:
+    """One walk for one page: each view's rows and the quick filters' counts
+    over the same range, each to the millisecond, their sum, and the sum's
+    share of the walk's 30 s."""
+    n1, n2 = _calls(small), _calls(large)
+    first, second = _timed(small), _timed(large)
+    lines = [
+        f"| The view | Range | {n1:,} calls: rows + counts, ms | "
+        f"{n2:,} calls: rows + counts, ms | Of 30 s at {n1:,} | Of 30 s at {n2:,} |",
+        "|---|---|---|---|---:|---:|",
+    ]
+    for key, range_ in second:
+        if key not in VIEWS:
+            continue
+        sums = [
+            (round(found[(key, range_)]["ms"]), round(found[(COUNTS, range_)]["ms"]))
+            for found in (first, second)
+        ]
+        cells = [f"{rows:,} + {counts:,} = {rows + counts:,}" for rows, counts in sums]
+        shares = [f"{(rows + counts) / WALK_MS:.0%}" for rows, counts in sums]
+        lines.append(
+            f"| {second[(key, range_)]['label']} | {range_} | "
+            + " | ".join(cells + shares)
+            + " |"
+        )
+    return lines
+
+
+def panes(small: dict[str, Any], large: dict[str, Any]) -> list[str]:
+    """What an open filter's pane adds to one walk: its values' time."""
+    n1, n2 = _calls(small), _calls(large)
+    first, second = _timed(small), _timed(large)
+    lines = [
+        f"| An open filter's pane | Range | {n1:,} calls, ms | {n2:,} calls, ms |",
+        "|---|---|---:|---:|",
+    ]
+    for key, range_ in second:
+        if key in PANES:
+            lines.append(
+                f"| {second[(key, range_)]['label']} | {range_} | "
+                f"{_ms(first.get((key, range_)))} | {_ms(second[(key, range_)])} |"
+            )
+    return lines
+
+
 def main(argv: Sequence[str] | None = None) -> None:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument("small", type=Path)
@@ -147,8 +209,14 @@ def main(argv: Sequence[str] | None = None) -> None:
     args = parser.parse_args(argv)
     small = json.loads(args.small.read_text())
     large = json.loads(args.large.read_text())
-    for table in (record([small, large]), parts(small, large), burst([small, large])):
-        if table:
+    for table in (
+        record([small, large]),
+        parts(small, large),
+        burst([small, large]),
+        walk(small, large),
+        panes(small, large),
+    ):
+        if table[2:]:
             print("\n".join(table), end="\n\n")
 
 
