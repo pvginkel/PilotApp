@@ -38,6 +38,7 @@ it.
 
 from __future__ import annotations
 
+import re
 import statistics
 from collections.abc import Sequence
 from dataclasses import dataclass, field, replace
@@ -662,6 +663,15 @@ def _order(value: Value) -> tuple[bool, str]:
     return (value is None, "" if value is None else str(value))
 
 
+def _natural(words: str) -> tuple[str | int, ...]:
+    """`words` to sort by, case folded, each run of digits read as its
+    number, so that Call 2 comes before Call 10."""
+    return tuple(
+        int(part) if index % 2 else part
+        for index, part in enumerate(re.split(r"(\d+)", words.casefold()))
+    )
+
+
 def _sorted(
     rows: list[ByRow],
     sort: Sort,
@@ -675,7 +685,7 @@ def _sorted(
 
         def column(row: ByRow) -> Any:
             if sort.column == "label":
-                return (row.label if row.label is not None else str(row.key)).casefold()
+                return _natural(row.label if row.label is not None else str(row.key))
             if sort.column == "n":
                 return row.n[0] if row.n else None
             axis = axes.get(row.key)

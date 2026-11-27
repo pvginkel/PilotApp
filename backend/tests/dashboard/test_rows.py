@@ -370,6 +370,33 @@ class TestRowsOrder:
         assert [row.key for row in ascending.rows] == [None, worked.project.id]
         assert [row.key for row in descending.rows] == [worked.project.id, None]
 
+    def test_by_the_label_its_numbers_read_as_numbers(self) -> None:
+        rows = [
+            ByRow(values=(1.0,), n=(1,), split=None, key=key, label=label)
+            for key, label in (
+                (1, "Call 10"),
+                (2, "call 2"),
+                (3, "Call 1"),
+                (4, "Call"),
+            )
+        ]
+
+        ascending = rows_module._sorted(rows, Sort("asc", "label"), [], {})
+        descending = rows_module._sorted(rows, Sort("desc", "label"), [], {})
+
+        assert [row.label for row in ascending] == [
+            "Call",
+            "Call 1",
+            "call 2",
+            "Call 10",
+        ]
+        assert [row.label for row in descending] == [
+            "Call 10",
+            "call 2",
+            "Call 1",
+            "Call",
+        ]
+
     def test_at_most_the_cap_with_the_count_of_all(
         self, service: RowsService, monkeypatch: pytest.MonkeyPatch
     ) -> None:
