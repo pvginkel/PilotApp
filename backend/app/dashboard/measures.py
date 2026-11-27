@@ -1,6 +1,7 @@
 """The figures, the aggregates, the built-in ratios and the time ranges
-Pilot's code declares (F154.4, F155.3). A ratio here names nothing of a
-workflow; one that names a declared kind or value is a stored row."""
+Pilot's code declares (F154.4, F155.3), and a figure per Unit Measure the
+labeller declares. A ratio here names nothing of a workflow; one that names
+a declared kind or value is a stored row."""
 
 from typing import Any
 
@@ -15,6 +16,8 @@ from app.dashboard.catalogue import (
     Row,
     TimeRange,
 )
+from app.dashboard.facts import measure_join
+from app.models import UnitMeasure
 
 TOKEN_KINDS = ("input", "cache_write", "cache_read", "output")
 """The Token Kinds within none (DB 547), which a Turn counts and a Call's
@@ -190,6 +193,15 @@ FIGURES = (
         format="count",
         path=_number(lambda row: row["is_error"]),
     ),
+    Figure(
+        key="units",
+        label="Work units",
+        fact="work_unit",
+        line="The Work Units the labeller recognised",
+        format="count",
+        path=lambda row: literal(1),
+        aggregate=COUNT,
+    ),
 )
 
 AGGREGATES = (
@@ -268,3 +280,18 @@ RANGES = (
     ),
     TimeRange("all", "All time", "Everything the record holds"),
 )
+
+
+def measure_figure(measure: UnitMeasure, key: str) -> Figure:
+    """The figure of a Unit Measure, under `key`: a Work Unit's figure of it.
+    Its path holds the measure's code, never the row, which the session that
+    read it lets go while the process keeps the catalogue."""
+    join = measure_join(measure.code)
+    return Figure(
+        key=key,
+        label=measure.name,
+        fact="work_unit",
+        line=measure.description,
+        format="count",
+        path=lambda row: row.to(join).c.amount,
+    )

@@ -4,6 +4,7 @@ filters, and the process's copy, kept until a publication writes a
 vocabulary's row."""
 
 from datetime import UTC, datetime, timedelta
+from decimal import Decimal
 
 import pytest
 from flask.testing import FlaskClient
@@ -33,7 +34,10 @@ from app.services.container import ServiceContainer
 from app.services.quota_week_service import quota_weeks
 from app.utils.after_commit import run_after_commit_callbacks
 from tests.support.dashboard import GAP, ZONE
+from tests.support.dashboard import read as read_paths
+from tests.support.labels import declared
 from tests.support.transcripts import reference
+from tests.support.vocabularies import vocabularies
 
 
 def _codes(catalogue: Catalogue, dimension: str) -> list[str]:
@@ -59,6 +63,7 @@ class TestAssemble:
             "sitting",
             "conversation",
             "call",
+            "work_unit",
             "event",
         ]
 
@@ -451,3 +456,186 @@ class TestAPublication:
             d["key"] for d in before.get_json()["dimensions"]
         }
         assert "claude_code_version" in added
+
+
+def _values(catalogue: Catalogue, dimension: str) -> list[tuple[object, ...]]:
+    values = catalogue.dimension(dimension).values
+    assert values is not None
+    return [(value.code, value.name, value.line, value.position) for value in values]
+
+
+@pytest.mark.usefixtures("service_user")
+class TestTheLabellersRows:
+    """The scenario's invented lists, as the stub labeller declares them and
+    the builder publishes them (F154.4, F92.13)."""
+
+    @pytest.fixture
+    def loaded(
+        self, session: DbSession, container: ServiceContainer, project: Project
+    ) -> Catalogue:
+        container.scenario_service().load({"recipe-box": project.id})
+        return assemble(session, ZONE, GAP)
+
+    def test_each_work_unit_kind_is_a_part_its_nesting_the_drills_order(
+        self, loaded: Catalogue
+    ) -> None:
+        errand, leg = loaded.dimension("errand"), loaded.dimension("leg")
+
+        assert (errand.label, errand.line, errand.group) == (
+            "Errand",
+            "The widest kind of work.",
+            "part",
+        )
+        assert (leg.label, leg.line, leg.group) == (
+            "Leg",
+            "A part of one errand.",
+            "part",
+        )
+        assert (errand.next, leg.next) == ("leg", "conversation")
+        assert (errand.next_null, leg.next_null) == ("work_unit", "work_unit")
+        assert errand.focus and leg.focus
+        assert (errand.one, errand.many, errand.null) == (
+            "Errand",
+            "Errand",
+            "(No Errand)",
+        )
+        assert errand.figures == loaded.dimension("conversation").figures
+        grains = [grain.key for grain in loaded.grains]
+        assert grains[grains.index("work_unit") :] == [
+            "work_unit",
+            "errand",
+            "leg",
+            "event",
+        ]
+
+    def test_each_unit_measure_is_a_figure_of_a_work_unit(
+        self, loaded: Catalogue
+    ) -> None:
+        parts = loaded.figure("parts")
+
+        assert (parts.label, parts.line, parts.fact, parts.format) == (
+            "Parts",
+            "The units it was cut into.",
+            "work_unit",
+            "count",
+        )
+        assert loaded.figures[: len(FIGURES)] == FIGURES
+        assert loaded.fact(parts.fact).counts == "units"
+
+    def test_a_labelled_lists_values_carry_their_line_and_their_place(
+        self, loaded: Catalogue
+    ) -> None:
+        assert _values(loaded, "segment_kind") == [
+            ("prep", "Prep", "Looking things over.", 1),
+            ("cook", "Cook", "The cooking itself.", 2),
+            ("simmer", "Simmer", "Running a command.", 3),
+        ]
+        assert _codes(loaded, "call_class") == [
+            "look",
+            "stir",
+            "run",
+            "send",
+            "spill",
+            "muse",
+            "other",
+        ]
+        assert _codes(loaded, "wait_cause") == [
+            "lighting",
+            "return",
+            "guest",
+            "timer",
+            "helper",
+            "stove",
+        ]
+        assert _values(loaded, "avoidable_kind") == [
+            ("spilt", "Spilt", "A call that failed.", 1)
+        ]
+        assert _codes(loaded, "outcome") == ["served", "sent_back"]
+        assert _values(loaded, "rework_kind") == [
+            ("recooked", "Recooked", "Work cooked again.", 1)
+        ]
+        kinds = loaded.dimension("event_kind").values
+        assert kinds is not None
+        burnt = next(kind for kind in kinds if kind.code == "burnt")
+        assert (burnt.line, burnt.position, burnt.is_error) == (
+            "A script of the kitchen's failed.",
+            1,
+            False,
+        )
+
+    def test_a_value_no_longer_declared_follows_those_declared_with_no_place(
+        self, session: DbSession, loaded: Catalogue
+    ) -> None:
+        session.get_one(models.SegmentKind, "prep").position = None
+        session.flush()
+
+        assert _values(assemble(session, ZONE, GAP), "segment_kind") == [
+            ("cook", "Cook", "The cooking itself.", 2),
+            ("simmer", "Simmer", "Running a command.", 3),
+            ("prep", "Prep", "Looking things over.", None),
+        ]
+
+    def test_the_scenarios_calls_and_units_reach_their_errand_and_leg(
+        self, session: DbSession, loaded: Catalogue
+    ) -> None:
+        names = [loaded.dimension(key).name for key in ("errand", "leg")]
+        assert all(name is not None for name in names)
+
+        calls = read_paths(session, loaded, "call", *names)  # type: ignore[arg-type]
+        units = read_paths(
+            session,
+            loaded,
+            "work_unit",
+            loaded.dimension("work_unit").name,  # type: ignore[arg-type]
+            *names,  # type: ignore[arg-type]
+            loaded.figure("parts").path,
+        )
+
+        assert set(calls) == {
+            ("Scale the recipes", "Halve the stew"),
+            (None, None),
+        }
+        # The leg no session ran reaches no transcript's labels.
+        assert units == [
+            ("Halve the stew", "Scale the recipes", "Halve the stew", None),
+            ("Scale the recipes", "Scale the recipes", None, Decimal(2)),
+        ]
+
+    def test_a_labeller_code_takes_a_key_pilots_code_has_not(
+        self, session: DbSession, loaded: Catalogue
+    ) -> None:
+        for code in ("call", "Round"):
+            declared(session, models.WorkUnitKind, code)
+        declared(session, models.UnitMeasure, "cost", unit="dollars")
+
+        catalogue = assemble(session, ZONE, GAP)
+
+        assert catalogue.dimension("call_2").label == "Call"
+        assert catalogue.dimension("round_2").label == "Round"
+        assert catalogue.dimension("call").label == "Call"
+        assert catalogue.dimension("round").group == "attribute"
+        assert catalogue.figure("cost_2").fact == "work_unit"
+        assert catalogue.figure("cost").fact == "call"
+
+
+class TestADeclaration:
+    def test_one_that_writes_a_row_drops_it_and_the_next_holds_its_parts(
+        self, session: DbSession, container: ServiceContainer
+    ) -> None:
+        service = container.catalogue_service()
+        before = service.catalogue(session)
+        assert "menu" not in {dimension.key for dimension in before.dimensions}
+
+        container.vocabulary_service().declare(vocabularies())
+
+        assert service.catalogue(session) is before
+        run_after_commit_callbacks()
+        after = service.catalogue(session)
+        assert [
+            (dimension.key, dimension.next)
+            for dimension in after.dimensions
+            if dimension.key in ("menu", "course", "dish")
+        ] == [("menu", "course"), ("course", "dish"), ("dish", "conversation")]
+        assert {"planned_dishes", "tastings"} <= {
+            figure.key for figure in after.figures
+        }

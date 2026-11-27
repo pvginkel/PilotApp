@@ -11,14 +11,25 @@ from app import models
 from app.dashboard.dimensions import (
     SOURCES,
     WORK_TYPES,
+    declared_keys,
     own_dimensions,
+    reaches,
     version_dimension,
     version_keys,
 )
-from app.models import Component, Project, User
+from app.models import Component, Project, User, WorkUnitKindNesting
 from app.models.reference import ChatKind, SessionState, TurnCause, WorkTrigger
 from app.services.container import ServiceContainer
-from tests.support.dashboard import ZONE, Record, catalogue, named, read, record
+from tests.support.dashboard import (
+    ZONE,
+    Record,
+    catalogue,
+    labelled,
+    named,
+    read,
+    record,
+)
+from tests.support.labels import COURSE, DISH, MENU, work_unit
 from tests.support.transcripts import OPUS, STARTED
 from tests.support.turns import turn_at
 from tests.support.working_on import Camp
@@ -47,6 +58,7 @@ class TestEveryDimension:
     def test_it_reads_on_every_fact_that_offers_it(
         self, session: DbSession, held: Record
     ) -> None:
+        labelled(session, held)
         index = catalogue(session)
 
         for dimension in index.dimensions:
@@ -106,12 +118,16 @@ class TestEveryDimension:
 
         assert index.offered("project") == ("call", "turn", "event")
         assert index.offered("conversation") == ("call", "turn", "event")
-        assert index.offered("qweek") == ("call", "turn", "event")
+        assert index.offered("qweek") == ("call", "turn", "event", "work_unit")
         assert index.offered("model") == ("call", "event")
         assert index.offered("call") == ("call", "event")
         assert index.offered("estimate") == ("call",)
         assert index.offered("event_kind") == ("event",)
         assert index.offered("event_error") == ("event",)
+        assert index.offered("call_class") == ("call", "event")
+        assert index.offered("segment_kind") == ("call", "event")
+        assert index.offered("work_unit") == ("call", "event", "work_unit")
+        assert index.offered("role") == ("call", "event", "work_unit")
 
 
 class TestParts:
@@ -470,3 +486,134 @@ class TestVersions:
             "Claude Code version",
             "attribute",
         )
+
+
+class TestTheLabels:
+    def test_a_kinds_part_is_a_rows_unit_of_it_its_own_or_one_it_sits_in(
+        self, session: DbSession, held: Record
+    ) -> None:
+        units = labelled(session, held)
+        menu, course = units.menu.id, units.course.id
+
+        rows = _calls(session, "menu", "course", "dish", "work_unit")
+
+        # The sub-agent's Call reaches its unit through its main thread's
+        # Launch; the stand-in and the Call run by hand reach none.
+        assert rows == [
+            (menu, course, None, course),
+            (menu, course, None, course),
+            (menu, course, None, course),
+            (menu, course, None, course),
+            (None, None, None, None),
+            (None, None, None, None),
+        ]
+
+    def test_a_kinds_part_is_named_by_its_units_title(
+        self, session: DbSession, held: Record
+    ) -> None:
+        labelled(session, held)
+        index = catalogue(session)
+        names = [index.dimension(key).name for key in ("menu", "course", "work_unit")]
+
+        rows = read(session, index, "call", *names, by=lambda row: row["at"])  # type: ignore[arg-type]
+
+        assert rows[0] == ("Dinner", "Soup", "Soup")
+        assert rows[-1] == (None, None, None)
+
+    def test_a_kind_reads_the_nearest_unit_of_it_where_a_step_is_skipped(
+        self, session: DbSession, held: Record
+    ) -> None:
+        units = labelled(session, held)
+        session.add(WorkUnitKindNesting(inner_code=DISH, outer_code=MENU))
+        session.flush()
+        bread = work_unit(session, "kitchen|Dinner|Bread", DISH, part_of=units.menu)
+        index = catalogue(session)
+
+        rows = read(
+            session,
+            index,
+            "work_unit",
+            lambda row: row["work_unit_id"],
+            *named(index, "menu", "course", "dish"),
+        )
+
+        menu, course = units.menu.id, units.course.id
+        assert rows == [
+            (menu, menu, None, None),
+            (course, menu, course, None),
+            (bread.id, menu, None, bread.id),
+        ]
+
+    def test_a_unit_carries_its_role_round_variant_outcome_and_rework_kind(
+        self, session: DbSession, held: Record
+    ) -> None:
+        labelled(session, held)
+
+        rows = _calls(session, "role", "round", "variant", "outcome", "rework_kind")
+
+        assert rows[0] == ("cook", 2, "clear", "served", "recooked")
+        assert rows[4] == (None, None, None, None, None)
+
+    def test_a_calls_labels_are_the_labellers(
+        self, session: DbSession, held: Record
+    ) -> None:
+        labelled(session, held)
+
+        rows = _calls(
+            session, "call_class", "wait_cause", "avoidable_kind", "segment_kind"
+        )
+
+        assert rows[:3] == [
+            ("chop", "oven", None, "prep"),
+            ("spill", None, "spilt", "prep"),
+            (None, None, None, None),
+        ]
+
+    def test_with_none_declared_a_labels_list_is_empty(
+        self, session: DbSession
+    ) -> None:
+        index = catalogue(session)
+
+        for key in (
+            "call_class",
+            "avoidable_kind",
+            "wait_cause",
+            "segment_kind",
+            "outcome",
+            "rework_kind",
+        ):
+            assert index.dimension(key).values == (), key
+
+
+class TestDeclaredKeys:
+    def test_a_code_is_its_key_in_a_states_letters_where_it_is_free(self) -> None:
+        assert declared_keys(["menu", "Side-Dish", "call"], {"call"}) == {
+            "menu": "menu",
+            "Side-Dish": "side_dish",
+            "call": "call_2",
+        }
+
+    def test_two_codes_that_read_alike_take_a_number_after_the_first(self) -> None:
+        assert declared_keys(["side-dish", "side_dish", "Side.Dish"], ()) == {
+            "side-dish": "side_dish",
+            "side_dish": "side_dish_2",
+            "Side.Dish": "side_dish_3",
+        }
+
+
+class TestReaches:
+    def test_a_kind_reaches_up_the_longest_chain_that_ends_at_it(self) -> None:
+        nestings = [
+            (COURSE, MENU),
+            (DISH, COURSE),
+            ("garnish", DISH),
+            ("garnish", COURSE),
+        ]
+
+        assert reaches(nestings) == {MENU: 3, COURSE: 2, DISH: 1, "garnish": 0}
+
+    def test_a_kind_is_on_a_chain_once(self) -> None:
+        assert reaches([(COURSE, MENU), (MENU, COURSE)]) == {MENU: 1, COURSE: 1}
+
+    def test_none_reach_nothing(self) -> None:
+        assert reaches([]) == {}

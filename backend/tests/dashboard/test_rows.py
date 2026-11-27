@@ -26,7 +26,7 @@ from app.dashboard.state import Sort
 from app.exceptions import QueryRefusedException, StateRefusedException
 from app.models import Project, User
 from app.services.container import ServiceContainer
-from tests.support.dashboard import Record, record, sent
+from tests.support.dashboard import Labelled, Record, labelled, record, sent
 from tests.support.transcripts import OPUS, STARTED
 
 NOW = datetime(2026, 11, 20, tzinfo=UTC)
@@ -853,3 +853,52 @@ class TestBounded:
             _rows(service, "t=all&by=call&m=cost.median")
 
         assert refused.value.reason == "temp_file_limit"
+
+
+@pytest.mark.usefixtures("worked")
+class TestAWorkUnitKind:
+    """By a Work Unit Kind of the invented labeller's, the Calls its units'
+    Launches made and the units' own figures (F154.4)."""
+
+    @pytest.fixture
+    def units(self, session: DbSession, worked: Record) -> Labelled:
+        return labelled(session, worked)
+
+    def test_its_rows_hold_its_units_calls_and_their_figures(
+        self, service: RowsService, units: Labelled
+    ) -> None:
+        found = _rows(
+            service, "t=all&by=menu&m=cost.sum&m=planned_dishes.sum&m=units.count"
+        )
+
+        rows = _by_key(found)
+        assert rows[units.menu.id].label == "Dinner"
+        assert _round(rows[units.menu.id].values) == (1.85, 3, 2)
+        assert _round(rows[None].values)[0] == 0.8
+        assert rows[None].label == "(No Menu)"
+        assert [measure.label for measure in found.measures][1] == "Planned dishes"
+
+    def test_a_ratio_of_a_calls_figure_over_a_units_reads_per_unit(
+        self, service: RowsService, units: Labelled
+    ) -> None:
+        found = _rows(service, "t=all&by=menu&m=r:per_dish:cost.sum/planned_dishes.sum")
+
+        assert _round(_by_key(found)[units.menu.id].values) == (round(1.85 / 3, 6),)
+
+    def test_a_units_figure_is_refused_by_a_part_no_unit_lies_in(
+        self, service: RowsService, units: Labelled
+    ) -> None:
+        found = _rows(service, "t=all&by=project&m=cost.sum&m=planned_dishes.sum")
+
+        assert found.measures[1].refused == (
+            "planned_dishes is a figure of work units, which have no project"
+        )
+
+    def test_a_filter_on_a_calls_dimension_keeps_no_unit(
+        self, service: RowsService, units: Labelled
+    ) -> None:
+        found = _rows(service, f"t=all&by=menu&m=cost.sum&m=units.count&c=model:{OPUS}")
+
+        menu = _by_key(found)[units.menu.id]
+        assert _round(menu.values)[0] == 1.85
+        assert menu.values[1] is None

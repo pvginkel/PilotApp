@@ -35,9 +35,11 @@ ENTRY_MEASURES = (Simple("cost", "sum"), Simple("misses", "sum"))
 """An entry's measures, cost and the cache misses, one set for every kind
 of focus (F166.1)."""
 
-_ENTRY_LENGTH = 3_000
+_ENTRY_LENGTH = 6_000
 """The bound of the entry's read, which carries the Call fact's source as
-SQL text: some 2,400 characters for Pilot's own foci."""
+SQL text and the path of each part above the focus: some 2,700 characters
+for Pilot's own foci, some 3,300 for a Work Unit Kind three below the
+widest."""
 
 
 @dataclass(frozen=True)

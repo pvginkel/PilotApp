@@ -23,7 +23,8 @@ from app.exceptions import QueryRefusedException, StateRefusedException
 from app.models import Project, QuotaWeek, User
 from app.services.container import ServiceContainer
 from app.services.quota_week_service import Period
-from tests.support.dashboard import Record, catalogue, record, sent
+from tests.support.dashboard import Record, catalogue, labelled, record, sent
+from tests.support.labels import DISH, declared, kinds
 
 THIS = datetime(2026, 11, 19, 10, tzinfo=UTC)
 LAST = THIS - timedelta(days=7)
@@ -178,6 +179,36 @@ class TestEntry:
             f"&dr=psession:{work}@psession&col=none&f=psession:{work}"
         )
 
+    def test_a_work_unit_kinds_with_the_units_of_the_kinds_above_it(
+        self, service: AddressService, session: DbSession, worked: Record
+    ) -> None:
+        units = labelled(session, worked)
+        menu, course = units.menu.id, units.course.id
+
+        found = service.address(f"f=course:{course}")
+
+        assert found.address == (
+            f"#dash/t=wk,{_key(datetime(2026, 11, 5, 10, tzinfo=UTC))}&by=dish"
+            f"&m=cost.sum&m=misses.sum&dr=menu:{menu}@menu"
+            f"&dr=course:{course}@course&col=none&f=course:{course}"
+        )
+        assert found.notes == ()
+
+    def test_a_kinds_three_below_the_widest_reads_under_its_bound(
+        self, service: AddressService, session: DbSession
+    ) -> None:
+        kinds(session)
+        declared(session, models.WorkUnitKind, "garnish")
+        session.add(models.WorkUnitKindNesting(inner_code="garnish", outer_code=DISH))
+        session.flush()
+
+        found = service.address("f=garnish:7")
+
+        assert found.address == (
+            "#dash/t=all&by=conversation&m=cost.sum&m=misses.sum"
+            "&dr=garnish:7@garnish&col=none&f=garnish:7"
+        )
+
     def test_its_read_runs_under_the_engines_bounds(
         self, service: AddressService, session: DbSession, worked: Record
     ) -> None:
@@ -273,3 +304,13 @@ class TestParents:
 
     def test_none_above_a_part_two_name_as_their_next(self, held: Catalogue) -> None:
         assert parents(held, "conversation") == []
+
+    def test_a_work_unit_kinds_are_the_kinds_it_sits_in_by_the_drill(
+        self, session: DbSession
+    ) -> None:
+        kinds(session)
+        index = catalogue(session)
+
+        assert parents(index, "menu") == []
+        assert parents(index, "course") == ["menu"]
+        assert parents(index, "dish") == ["menu", "course"]

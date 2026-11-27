@@ -2022,7 +2022,7 @@
       "state": "by=source&p=lanes",
       "refusal": [
         "Cannot read the view because its state has 1 fault.",
-        "- p=lanes: source is no part, and a lane is a part's. Lanes take a By that is a part: project, psession, pturn, sitting, conversation or call.",
+        "- p=lanes: source is no part, and a lane is a part's. Lanes take a By that is a part: project, psession, pturn, sitting, conversation, call or work_unit.",
         "A presentation reads p=order[,<order dimension>], p=time,<grain>, p=lanes or p=table, as in p=time,day."
       ]
     },
@@ -2052,7 +2052,7 @@
         "- m=coast.sum: \"coast\" is no figure. Did you mean \"cost\"? The catalogue's measures list the figures.",
         "- m=cost.count: count counts a fact's items, on its counting figure alone. cost takes sum, median, mean, max and p90, and calls.count counts its fact's items.",
         "- m=turns.sum.call: turns is a figure of Pilot turns, which have no call. turns takes the grains project, psession, pturn, sitting and conversation.",
-        "- m=cost.sum.events: \"events\" is no grain. Did you mean \"event\"? cost takes the grains project, psession, pturn, sitting, conversation and call.",
+        "- m=cost.sum.events: \"events\" is no grain. Did you mean \"event\"? cost takes the grains project, psession, pturn, sitting, conversation, call and work_unit.",
         "A measure reads m=<figure>.<aggregate>[.<grain>][(<filter>;…)], m=r:<ratio> or m=r:<name>:<measure>/<measure>, as in m=cost.median.conversation or m=cost.sum(miss=1)."
       ]
     },

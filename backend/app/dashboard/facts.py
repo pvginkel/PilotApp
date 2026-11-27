@@ -11,11 +11,16 @@ joins their rows reach the record through (F154.3; DB decision 79.42).
   output's tool and size, a denial's kind and tool, a hook's command, a
   compaction's trigger, a fallback's model. An event is an item by its key,
   its kind and the id of the row that records it (`event_key`).
+- **Work unit**: a Work Unit the labeller recognised, at the start of its
+  work, which its Unit Measures' figures are read on.
 
 Every source carries the columns the joins start from, whatever the fact:
 `transcript_id` the thread, `session_id` and `turn_seq` Pilot's Session and
-Turn, `at` the row's moment. A Call's and an Event's also carry the Call's
-own facts and its `launch_id`. No join here loses or doubles a row.
+Turn, `at` the row's moment; but a Work Unit's, which lies in no thread and
+no Session, carries `at` alone of them. A Call's and an Event's also carry
+the Call's own facts and its `launch_id`, and every fact that reaches a
+Work Unit its `work_unit_id`: a Call's the unit its Launch carried out
+(DB 553), the lowest. No join here loses or doubles a row.
 """
 
 import re
@@ -53,11 +58,14 @@ from app.models import (
     Project,
     QuotaWeek,
     Repository,
+    Segment,
     Session,
     Transcript,
     Turn,
     User,
     Work,
+    WorkUnit,
+    WorkUnitMeasure,
 )
 from app.models.call import RECORDED_ELSEWHERE
 
@@ -153,6 +161,11 @@ _OF_A_CALL: tuple[tuple[str, str, TypeEngine[Any]], ...] = (
     ("context_tokens", "c.context_tokens", Integer()),
     ("cost", "c.cost", Numeric()),
     ("position", "c.position", Integer()),
+    ("work_unit_id", "l.work_unit_id", BigInteger()),
+    ("segment_position", "c.segment_position", Integer()),
+    ("wait_cause_code", "c.wait_cause_code", Text()),
+    ("call_class_code", "c.call_class_code", Text()),
+    ("avoidable_kind_code", "c.avoidable_kind_code", Text()),
 )
 
 _CALLS = (
@@ -174,7 +187,7 @@ SELECT NULL, NULL, NULL, t.session_id, t.seq, coalesce(t.ended_at, t.started_at)
     NULL, NULL, NULL, NULL, NULL, NULL, false, false, false, NULL,
     coalesce(k.input_tokens, 0), coalesce(k.cache_write_tokens, 0),
     coalesce(k.cache_read_tokens, 0), coalesce(k.output_tokens, 0), NULL, t.cost, NULL,
-    coalesce(t.ended_at, t.started_at), true
+    NULL, NULL, NULL, NULL, NULL, coalesce(t.ended_at, t.started_at), true
 FROM turns AS t
 JOIN sessions AS s ON s.id = t.session_id
 LEFT JOIN (
@@ -325,7 +338,22 @@ EVENT = Fact(
     shows=("event_kind", "event_error"),
 )
 
-FACTS = (CALL, TURN, EVENT)
+WORK_UNIT = Fact(
+    key="work_unit",
+    label="Work units",
+    one="work unit",
+    many="work units",
+    source=_source(
+        "work_unit",
+        "SELECT u.id AS work_unit_id, u.started_at AS at FROM work_units AS u",
+        ("work_unit_id", BigInteger()),
+        ("at", DateTime(timezone=True)),
+    ),
+    counts="units",
+    part="work_unit",
+)
+
+FACTS = (CALL, TURN, EVENT, WORK_UNIT)
 
 assert tuple(kind.code for kind in OCCURRENCES) == RECORDED_ELSEWHERE
 
@@ -366,6 +394,7 @@ _environment = Environment.__table__.alias("environment")
 _repository = Repository.__table__.alias("repository")
 _quota_week = QuotaWeek.__table__.alias("quota_week")
 _compaction = Compaction.__table__.alias("compaction")
+_segment = Segment.__table__.alias("segment")
 
 
 def own_joins(sitting_gap: timedelta) -> tuple[Join, ...]:
@@ -439,6 +468,14 @@ def own_joins(sitting_gap: timedelta) -> tuple[Join, ...]:
             _compaction,
             lambda row: _compaction.c.id == row["compaction_id"],
         ),
+        Join(
+            "segment",
+            _segment,
+            lambda row: and_(
+                _segment.c.transcript_id == row["transcript_id"],
+                _segment.c.position == row["segment_position"],
+            ),
+        ),
     )
 
 
@@ -476,3 +513,46 @@ def version_join(component_code: str) -> str:
     """The key of the join that reaches the version of the Component a
     row's Launch ran with."""
     return f"version_{component_code}"
+
+
+def unit_join(hop: int) -> str:
+    """The key of the join that reaches the Work Unit `hop` steps up from a
+    row's own, 0 being its own."""
+    return "unit" if hop == 0 else f"unit_{hop}"
+
+
+def unit_joins(hops: int) -> tuple[Join, ...]:
+    """The joins from a row to its Work Unit and to each unit that sits
+    above it, up to `hops` steps up, one each: a step reaches the unit the
+    one below it sits in."""
+    return tuple(_up(hop) for hop in range(hops + 1))
+
+
+def _up(hop: int) -> Join:
+    table = WorkUnit.__table__.alias(unit_join(hop))
+    if hop == 0:
+        return Join(table.name, table, lambda row: table.c.id == row["work_unit_id"])
+    below = unit_join(hop - 1)
+    return Join(table.name, table, lambda row: table.c.id == row.to(below).c.part_of_id)
+
+
+def measure_join(measure_code: str) -> str:
+    """The key of the join that reaches a row's Work Unit's figure of the
+    Unit Measure."""
+    return f"measure_{measure_code}"
+
+
+def unit_measure_join(measure_code: str) -> Join:
+    """The join from a row's Work Unit to its figure of the Unit Measure,
+    one at most (its key). It holds the measure's code, never its row,
+    which the session that read it lets go while the process keeps the
+    catalogue."""
+    table = WorkUnitMeasure.__table__.alias(measure_join(measure_code))
+    return Join(
+        table.name,
+        table,
+        lambda row: and_(
+            table.c.work_unit_id == row["work_unit_id"],
+            table.c.measure_code == measure_code,
+        ),
+    )

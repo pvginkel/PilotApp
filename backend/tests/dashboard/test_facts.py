@@ -16,14 +16,17 @@ from app.dashboard.facts import (
     FACTS,
     OCCURRENCES,
     TURN,
+    WORK_UNIT,
     event_key,
+    measure_join,
     own_joins,
     read_event_key,
+    unit_join,
 )
 from app.models import Project, QuotaWeek, User
 from app.models.call import RECORDED_ELSEWHERE
 from tests.support import transcripts
-from tests.support.dashboard import GAP, Record, catalogue, read, record
+from tests.support.dashboard import GAP, Record, catalogue, labelled, read, record
 from tests.support.transcripts import OTHER, STARTED
 
 
@@ -390,15 +393,26 @@ class TestEvent:
 class TestSources:
     def test_every_fact_carries_the_columns_the_joins_start_from(self) -> None:
         for fact in FACTS:
+            if fact is WORK_UNIT:
+                continue
             assert {"transcript_id", "session_id", "turn_seq", "at"} <= set(
                 fact.source.c.keys()
             ), fact.key
+
+    def test_a_work_unit_lies_in_no_thread_and_no_session(self) -> None:
+        assert set(WORK_UNIT.source.c.keys()) == {"work_unit_id", "at"}
+
+
+_REACHED = {"call": 13, "turn": 13, "event": 13, "work_unit": 5}
+"""The fewest joins each fact's rows start: a Work Unit's reach only its
+units, its measures and its quota week."""
 
 
 class TestJoins:
     def test_no_join_loses_or_doubles_a_row(
         self, session: DbSession, held: Record
     ) -> None:
+        labelled(session, held)
         index = catalogue(session)
         for fact in index.facts:
             alone = session.scalar(select(func.count()).select_from(fact.source))
@@ -409,7 +423,7 @@ class TestJoins:
             joined = session.scalar(select(func.count()).select_from(row.source()))
 
             assert joined == alone, fact.key
-            assert len(row.taken) >= 13, fact.key
+            assert len(row.taken) >= _REACHED[fact.key], fact.key
 
     def test_a_row_reaches_pilots_record(
         self, session: DbSession, held: Record
@@ -660,3 +674,102 @@ def _starts(index: object, fact: str, join: str) -> bool:
     except Unreachable:
         return False
     return True
+
+
+class TestWorkUnit:
+    def test_one_row_is_a_work_unit_at_the_start_of_its_work(
+        self, session: DbSession, held: Record
+    ) -> None:
+        units = labelled(session, held)
+
+        rows = read(
+            session,
+            catalogue(session),
+            "work_unit",
+            lambda row: row["work_unit_id"],
+            lambda row: row["at"],
+        )
+
+        assert rows == [(units.menu.id, STARTED), (units.course.id, STARTED)]
+
+    def test_a_measures_join_reaches_its_units_figure_of_it(
+        self, session: DbSession, held: Record
+    ) -> None:
+        units = labelled(session, held)
+
+        rows = read(
+            session,
+            catalogue(session),
+            "work_unit",
+            lambda row: row["work_unit_id"],
+            lambda row: row.to(measure_join("planned_dishes")).c.amount,
+        )
+
+        assert rows == [(units.menu.id, Decimal(3)), (units.course.id, None)]
+
+    def test_a_unit_steps_up_to_the_one_it_sits_in(
+        self, session: DbSession, held: Record
+    ) -> None:
+        units = labelled(session, held)
+
+        rows = read(
+            session,
+            catalogue(session),
+            "work_unit",
+            lambda row: row.to(unit_join(0)).c.title,
+            lambda row: row.to(unit_join(1)).c.title,
+            lambda row: row.to(unit_join(2)).c.title,
+            by=lambda row: row["work_unit_id"],
+        )
+
+        assert units.menu.title == "Dinner"
+        assert rows == [("Dinner", None, None), ("Soup", "Dinner", None)]
+
+
+class TestTheCallsLabels:
+    def test_a_call_carries_its_launchs_unit_and_its_labels_a_stand_in_none(
+        self, session: DbSession, held: Record
+    ) -> None:
+        units = labelled(session, held)
+
+        rows = read(
+            session,
+            catalogue(session),
+            "call",
+            *(
+                (lambda row, name=name: row[name])
+                for name in (
+                    "work_unit_id",
+                    "segment_position",
+                    "call_class_code",
+                    "wait_cause_code",
+                    "avoidable_kind_code",
+                    "estimate",
+                )
+            ),
+            by=lambda row: row["at"],
+        )
+
+        course = units.course.id
+        assert rows == [
+            (course, 1, "chop", "oven", None, False),
+            (course, 1, "spill", None, "spilt", False),
+            (course, None, None, None, None, False),
+            (course, None, None, None, None, False),
+            (None, None, None, None, None, True),
+            (None, None, None, None, None, False),
+        ]
+
+    def test_an_event_carries_its_calls(self, session: DbSession, held: Record) -> None:
+        labelled(session, held)
+
+        rows = read(
+            session,
+            catalogue(session),
+            "event",
+            lambda row: row["kind_code"],
+            lambda row: row["call_class_code"],
+            lambda row: row.to("segment").c.kind_code,
+        )
+
+        assert ("api_error", "chop", "prep") in rows

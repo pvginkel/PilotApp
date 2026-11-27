@@ -4,7 +4,9 @@ of it through the catalogue's paths.
 `record` writes: a work item's Session with one Turn, whose thread is
 collected with three Calls under its Launch, a compaction before the third;
 a chat's Session with one Turn and no thread, which stands in; and a thread
-no Session ran, with one Call.
+no Session ran, with one Call. `labelled` gives that record an invented
+labeller's labels: a menu with a course in it, which the work item's Launch
+carried out, the menu's planned dishes, and its first two Calls' labels.
 """
 
 from collections.abc import Iterator
@@ -21,23 +23,35 @@ from app import models
 from app.dashboard.assembly import assemble
 from app.dashboard.catalogue import Catalogue, Path
 from app.models import (
+    AvoidableKind,
     Call,
+    CallClass,
     Chat,
     Event,
     EventKind,
     HookRun,
+    Launch,
     LaunchComponent,
     MissCause,
     Project,
     Repository,
+    ReworkKind,
+    Segment,
+    SegmentKind,
     StopReason,
     TokenCount,
     Transcript,
     Turn,
+    UnitMeasure,
+    UnitOutcome,
     User,
+    WaitCause,
+    WorkUnit,
+    WorkUnitMeasure,
 )
 from app.models.reference import ChatKind, SessionState, TurnCause
 from tests.support import transcripts
+from tests.support.labels import COURSE, declared, work_unit
 from tests.support.transcripts import CAMP, OTHER, SONNET, STARTED, SUB_AGENT
 
 ZONE = "Europe/Amsterdam"
@@ -259,6 +273,53 @@ def record(
         loose=loose,
         calls=[first, second, third, explored, by_hand],
     )
+
+
+@dataclass
+class Labelled:
+    menu: WorkUnit
+    course: WorkUnit
+
+
+def labelled(db: DbSession, held: Record) -> Labelled:
+    """The record's labels: the menu `kitchen|Dinner`, with three planned
+    dishes, and its course `kitchen|Dinner|Soup`, cooked in a second round
+    as a clear soup and served, which the work item's Launch carried out; the
+    thread's first Segment, of prep, which its first two Calls fall in, the
+    first chopping while it waited on the oven, the second a spill."""
+    menu = work_unit(db, "kitchen|Dinner")
+    course = work_unit(
+        db,
+        "kitchen|Dinner|Soup",
+        COURSE,
+        part_of=menu,
+        role="cook",
+        round=2,
+        variant="clear",
+        outcome_code=declared(db, UnitOutcome, "served").code,
+        rework_kind_code=declared(db, ReworkKind, "recooked").code,
+    )
+    planned = declared(db, UnitMeasure, "planned_dishes", unit="dishes")
+    db.add(WorkUnitMeasure(work_unit_id=menu.id, measure_code=planned.code, amount=3))
+    launch = db.get(Launch, held.calls[0].launch_id)
+    assert launch is not None
+    launch.work_unit_id = course.id
+    db.add(
+        Segment(
+            transcript_id=held.thread.id,
+            position=1,
+            kind_code=declared(db, SegmentKind, "prep").code,
+        )
+    )
+    db.flush()
+    first, second = held.calls[:2]
+    first.segment_position = second.segment_position = 1
+    first.call_class_code = declared(db, CallClass, "chop").code
+    first.wait_cause_code = declared(db, WaitCause, "oven").code
+    second.call_class_code = declared(db, CallClass, "spill").code
+    second.avoidable_kind_code = declared(db, AvoidableKind, "spilt").code
+    db.flush()
+    return Labelled(menu=menu, course=course)
 
 
 def catalogue(db: DbSession, zone: str = ZONE, gap: timedelta = GAP) -> Catalogue:

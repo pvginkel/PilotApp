@@ -168,6 +168,61 @@ class TestGetCatalogue:
         assert dimensions["claude_code_version"]["label"] == "Claude Code version"
         assert dimensions["claude_code_version"]["facts"] == ["call", "event"]
 
+    @pytest.mark.usefixtures("service_user")
+    def test_the_labellers_declared_rows_are_parts_values_and_figures(
+        self, client: FlaskClient, project: Project
+    ) -> None:
+        loaded = client.post(
+            "/api/testing/scenarios", json={"projects": {"recipe-box": str(project.id)}}
+        )
+        assert loaded.status_code == 201
+
+        dimensions = _by_key(_part(client, "dimensions")["dimensions"])
+        measures = _part(client, "measures")
+
+        assert dimensions["errand"] == {
+            "key": "errand",
+            "label": "Errand",
+            "group": "part",
+            "line": "The widest kind of work.",
+            "null": "(No Errand)",
+            "facts": ["call", "event", "work_unit"],
+            "values": None,
+            "one": "Errand",
+            "many": "Errand",
+            "next": "leg",
+            "next_null": "work_unit",
+            "base": None,
+            "focus": True,
+            "unit": None,
+        }
+        assert dimensions["segment_kind"]["values"][0] == {
+            "code": "prep",
+            "name": "Prep",
+            "line": "Looking things over.",
+            "position": 1,
+            "is_error": None,
+        }
+        assert _by_key(measures["figures"])["parts"] == {
+            "key": "parts",
+            "label": "Parts",
+            "fact": "work_unit",
+            "line": "The units it was cut into.",
+            "format": "count",
+            "aggregate": "sum",
+            "aggregates": ["sum", "median", "mean", "max", "p90"],
+            "token_kinds": None,
+            "stacks": True,
+        }
+        assert _by_key(measures["grains"])["leg"]["figures"] == [
+            "calls",
+            "cost",
+            "tokens",
+            "misses",
+            "miss_cost",
+            "ctx",
+        ]
+
     def test_a_components_version_is_a_kind_of_marker(
         self, client: FlaskClient, session: DbSession, container: ServiceContainer
     ) -> None:
@@ -197,6 +252,12 @@ class TestGetCatalogue:
                 "grain": "pturn",
             },
             {"key": "event", "label": "Events", "counts": "events", "grain": "event"},
+            {
+                "key": "work_unit",
+                "label": "Work units",
+                "counts": "units",
+                "grain": "work_unit",
+            },
         ]
         figures = _by_key(body["figures"])
         assert figures["tokens"] == {

@@ -297,8 +297,8 @@ class TestPresentation:
             (
                 "by=source&p=lanes",
                 "- p=lanes: source is no part, and a lane is a part's. Lanes take a "
-                "By that is a part: project, psession, pturn, sitting, conversation "
-                "or call.",
+                "By that is a part: project, psession, pturn, sitting, conversation, "
+                "call or work_unit.",
             ),
             (
                 "p=order",
@@ -409,7 +409,7 @@ class TestMeasures:
                 "m=cost.sum.events",
                 '- m=cost.sum.events: "events" is no grain. Did you mean "event"? '
                 "cost takes the grains project, psession, pturn, sitting, "
-                "conversation and call.",
+                "conversation, call and work_unit.",
             ),
             (
                 "m=turns.sum.call",
@@ -806,7 +806,8 @@ class TestDrawer:
             (
                 "ig=calls",
                 '- ig=calls: "calls" is no grain. Did you mean "call"? A grain is '
-                "project, psession, pturn, sitting, conversation, call or event.",
+                "project, psession, pturn, sitting, conversation, call, work_unit "
+                "or event.",
             ),
             ("it=conversation", "- it=conversation: an item reads <grain>,<its key>."),
             (

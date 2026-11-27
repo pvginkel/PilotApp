@@ -1,7 +1,13 @@
-"""The dimensions Pilot's code declares, over Pilot's own record and the
-collector's facts (F154.4), and those the record's rows give: a version
-dimension per Component, with the marker of its versions, and a vocabulary's
-rows as a dimension's values.
+"""The dimensions Pilot's code declares, over Pilot's own record, the
+collector's facts and the labeller's labels (F154.4), and those the record's
+rows give: a version dimension per Component, with the marker of its
+versions, a part per Work Unit Kind the labeller declares, and a
+vocabulary's rows as a dimension's values.
+
+A Work Unit Kind's part is a row's unit of that kind: its own Work Unit, or
+the nearest one it sits in. The nesting is the drill's order: from a kind's
+row to the first kind by its place that sits in it, from one that none sits
+in to the conversation, and from a row with none to the Work Unit itself.
 
 A dimension's key is the mockup's where the mockup has the dimension
 (`design/mockup/dashboard/state.js`), so that a state written there reads
@@ -10,7 +16,7 @@ ends at the gap the joins were made with (DB decision 80.3).
 """
 
 import re
-from collections.abc import Sequence
+from collections.abc import Collection, Sequence
 from dataclasses import replace
 from typing import Any
 
@@ -29,8 +35,8 @@ from sqlalchemy import (
 )
 
 from app.dashboard.catalogue import Dimension, Marker, Path, Row, Value
-from app.dashboard.facts import version_join
-from app.models import ClaimAssignment, Component, ResearchAssignment
+from app.dashboard.facts import unit_join, version_join
+from app.models import ClaimAssignment, Component, ResearchAssignment, WorkUnitKind
 from app.models.reference import ChatKind, TurnCause, WorkTrigger
 
 _CALL_FIGURES = ("cost", "tokens", "ctx", "waited", "took")
@@ -125,7 +131,8 @@ def own_dimensions(zone: str) -> tuple[Dimension, ...]:
 
     return (
         # The parts: a project, a Session of Pilot's, its Turn, a thread, a
-        # Call; and off every project a sitting, a thread, a Call.
+        # Call; off every project a sitting, a thread, a Call; and the Work
+        # Unit a Call's Launch carried out.
         Dimension(
             key="project",
             label="Project",
@@ -213,6 +220,23 @@ def own_dimensions(zone: str) -> tuple[Dimension, ...]:
                 "compaction",
                 "estimate",
             ),
+        ),
+        Dimension(
+            key="work_unit",
+            label="Work unit",
+            group="part",
+            line=(
+                "A piece of work the labeller recognised: a Call's the lowest "
+                "one its Launch carried out"
+            ),
+            path=lambda row: row["work_unit_id"],
+            name=lambda row: row.to("unit").c.title,
+            null="(No work unit)",
+            one="work unit",
+            many="work units",
+            next="conversation",
+            next_null="psession",
+            figures=_ITEM_FIGURES,
         ),
         # Pilot's own attributes.
         Dimension(
@@ -415,6 +439,82 @@ def own_dimensions(zone: str) -> tuple[Dimension, ...]:
             path=_flag(lambda row: row["is_error"]),
             values=_two("Error", "Not an error"),
         ),
+        # The labeller's labels of a Call, and of its Work Unit.
+        Dimension(
+            key="call_class",
+            label="Call class",
+            group="attribute",
+            line="What the Call did, as the labeller classes it",
+            path=lambda row: row["call_class_code"],
+            null="(Not classed)",
+        ),
+        Dimension(
+            key="avoidable_kind",
+            label="Avoidable kind",
+            group="attribute",
+            line="Why the Call need not have been made, as the labeller reads it",
+            path=lambda row: row["avoidable_kind_code"],
+            null="(Not avoidable)",
+        ),
+        Dimension(
+            key="wait_cause",
+            label="Wait cause",
+            group="attribute",
+            line="What the thread waited on before the Call, as the labeller reads it",
+            path=lambda row: row["wait_cause_code"],
+            null="(No wait cause)",
+        ),
+        Dimension(
+            key="segment_kind",
+            label="Segment kind",
+            group="attribute",
+            line=(
+                "What the thread was doing in the stretch the Call falls in, "
+                "as the labeller reads it"
+            ),
+            path=lambda row: row.to("segment").c.kind_code,
+            null="(No segment)",
+        ),
+        Dimension(
+            key="role",
+            label="Role",
+            group="attribute",
+            line="The role the Work Unit was carried out in, as the labeller names it",
+            path=lambda row: row.to("unit").c.role,
+            null="(No role)",
+        ),
+        Dimension(
+            key="round",
+            label="Round",
+            group="attribute",
+            line="The Work Unit's round among the units that repeat it, from 1",
+            path=lambda row: row.to("unit").c.round,
+            null="(No round)",
+        ),
+        Dimension(
+            key="variant",
+            label="Variant",
+            group="attribute",
+            line="The labeller's finer name of the Work Unit within its kind",
+            path=lambda row: row.to("unit").c.variant,
+            null="(No variant)",
+        ),
+        Dimension(
+            key="outcome",
+            label="Outcome",
+            group="attribute",
+            line="How the Work Unit ended",
+            path=lambda row: row.to("unit").c.outcome_code,
+            null="(No outcome)",
+        ),
+        Dimension(
+            key="rework_kind",
+            label="Rework kind",
+            group="attribute",
+            line="Of which sort the Work Unit is work done again, where it is",
+            path=lambda row: row.to("unit").c.rework_kind_code,
+            null="(Not rework)",
+        ),
         # Time, the local ones in the zone.
         Dimension(
             key="qweek",
@@ -478,14 +578,18 @@ def own_dimensions(zone: str) -> tuple[Dimension, ...]:
     )
 
 
+def _slug(code: str) -> str:
+    """A code in the letters a state's part takes."""
+    return re.sub(r"[^a-z0-9]+", "_", code.lower()).strip("_")
+
+
 def version_keys(components: Sequence[Component]) -> dict[str, str]:
     """The key of each Component's version dimension, by its code: the code
     in the letters a state's part takes, and a number after it where two
     codes read alike."""
     keys: dict[str, str] = {}
     for component in sorted(components, key=lambda component: component.code):
-        slug = re.sub(r"[^a-z0-9]+", "_", component.code.lower()).strip("_")
-        key = f"{slug}_version"
+        key = f"{_slug(component.code)}_version"
         alike = sum(
             1 for taken in keys.values() if re.fullmatch(rf"{key}(_\d+)?", taken)
         )
@@ -517,6 +621,79 @@ def version_marker(component: Component, key: str) -> Marker:
         line=f"Where a version of {component.name} was first seen",
         dimension=key,
     )
+
+
+def declared_keys(codes: Sequence[str], taken: Collection[str]) -> dict[str, str]:
+    """The key of each of the labeller's codes in a catalogue's namespace,
+    by its code: the code in the letters a state's part takes, and a number
+    after it where a key `taken`, or an earlier code's, reads the same."""
+    keys: dict[str, str] = {}
+    used = set(taken)
+    for code in codes:
+        slug = key = _slug(code)
+        number = 1
+        while key in used:
+            number += 1
+            key = f"{slug}_{number}"
+        keys[code] = key
+        used.add(key)
+    return keys
+
+
+def reaches(nestings: Sequence[tuple[str, str]]) -> dict[str, int]:
+    """The most steps up from a row's own Work Unit to one of each kind the
+    nestings name, inner and outer: the longest chain of kinds, each sitting
+    in the next and none twice, that ends at it."""
+    inners: dict[str, list[str]] = {}
+    for inner, outer in nestings:
+        inners.setdefault(outer, []).append(inner)
+
+    def longest(kind: str, seen: frozenset[str]) -> int:
+        return max(
+            (
+                1 + longest(inner, seen | {inner})
+                for inner in inners.get(kind, ())
+                if inner not in seen
+            ),
+            default=0,
+        )
+
+    kinds = {kind for pair in nestings for kind in pair}
+    return {kind: longest(kind, frozenset({kind})) for kind in kinds}
+
+
+def kind_dimension(kind: WorkUnitKind, key: str, below: str, hops: int) -> Dimension:
+    """The Work Unit Kind `kind` as a part, under `key`: a row's unit of the
+    kind, its own or the nearest it sits in, up to `hops` steps up; `below`
+    the part a click on one of its rows moves to. Its paths hold the kind's
+    code, never the row, which the session that read it lets go while the
+    process keeps the catalogue."""
+    return Dimension(
+        key=key,
+        label=kind.name,
+        group="part",
+        line=kind.description,
+        path=_level(kind.code, hops, "id"),
+        name=_level(kind.code, hops, "title"),
+        null=f"(No {kind.name})",
+        one=kind.name,
+        many=kind.name,
+        next=below,
+        next_null="work_unit",
+        figures=_ITEM_FIGURES,
+        focus=True,
+    )
+
+
+def _level(code: str, hops: int, column: str) -> Path:
+    """The `column` of a row's Work Unit of the kind `code`: its own, else
+    the nearest it sits in, up to `hops` steps up."""
+
+    def path(row: Row) -> ColumnElement[Any]:
+        steps = [row.to(unit_join(hop)) for hop in range(hops + 1)]
+        return case(*((step.c.kind_code == code, step.c[column]) for step in steps))
+
+    return path
 
 
 def with_values(dimension: Dimension, values: Sequence[Value]) -> Dimension:

@@ -116,14 +116,14 @@ PERCENTILES = {"median": 0.5, "p90": 0.9}
 
 LENGTH = 24_000
 """The bound of a statement, which carries its fact's source as SQL text,
-some 2,400 characters for the Call fact, and every measure's and filter's
+some 2,700 characters for the Call fact, and every measure's and filter's
 expressions over it."""
 
 
 ATTRIBUTES_LENGTH = 2 * LENGTH
 """The bound of the attributes' counts, which carry a path for every
-dimension a fact is the first to offer: some 12,000 characters for the Call
-fact's under no chip."""
+dimension a fact is the first to offer: some 15,000 characters for the Call
+fact's under no chip, with six Work Unit Kinds declared."""
 
 
 @dataclass(frozen=True)
@@ -332,12 +332,13 @@ class _Builder:
     ) -> ColumnElement[bool]:
         """Whether the row's value of the dimension `key` passes `matching`:
         its own where the fact has it, else through the conversations of the
-        first fact that has it, among that fact's rows in the window."""
+        first fact that has it, among that fact's rows in the window; none
+        on a fact whose rows lie in no conversation."""
         dimension = self.catalogue.dimension(key)
         offered = self.catalogue.offered(key)
         if self.row.fact.key in offered:
             return matching(dimension.path(self.row))
-        if not offered:
+        if not offered or not _threaded(self.row):
             return false()
         self.through[key] = offered[0]
         home = self.catalogue.row(self.catalogue.fact(offered[0]))
@@ -398,7 +399,10 @@ class _Builder:
         self, home: _Builder, passing: ColumnElement[bool], key: str
     ) -> ColumnElement[bool]:
         """Whether the row's conversation holds a row of `home`'s fact in
-        the window that `passing` keeps."""
+        the window that `passing` keeps; none where either fact's rows lie
+        in no conversation."""
+        if not (_threaded(self.row) and _threaded(home.row)):
+            return false()
         self.through[key] = home.row.fact.key
         where = [
             home.row["transcript_id"].is_not(None),
@@ -1375,6 +1379,12 @@ def ordered(catalogue: Catalogue, by: Dimension) -> Dimension | None:
 def _within(figure: Figure, value: ColumnElement[Any]) -> ColumnElement[Any]:
     """An item's figure, its rows' taken together as the figure says."""
     return func.max(value) if figure.within == "max" else func.sum(value)
+
+
+def _threaded(row: Row) -> bool:
+    """Whether the fact's rows lie in a conversation, which a filter on a
+    dimension of another fact falls through."""
+    return "transcript_id" in row.fact.source.c
 
 
 def _in_window(row: Row, window: Window) -> ColumnElement[bool]:
