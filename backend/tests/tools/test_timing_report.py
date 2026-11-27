@@ -68,7 +68,9 @@ def test_a_timing_of_some_parts_alone_has_no_burst_table() -> None:
     assert burst([timed, timed]) == []
 
 
-def _timed(calls: int, *parts: tuple[str, str, float]) -> dict[str, Any]:
+def _timed(
+    calls: int, *parts: tuple[str, str, float], refused: str | None = None
+) -> dict[str, Any]:
     return {
         "record": {"rows": {"calls": calls}},
         "parts": [
@@ -77,7 +79,7 @@ def _timed(calls: int, *parts: tuple[str, str, float]) -> dict[str, Any]:
                 "label": key.capitalize(),
                 "range": range_,
                 "ms": ms,
-                "error": None,
+                "error": refused if ms == 0 else None,
             }
             for key, range_, ms in parts
         ],
@@ -131,3 +133,17 @@ def test_a_timing_that_timed_no_views_rows_prints_no_walk_and_no_pane(
     assert "The view" not in printed
     assert "An open filter's pane" not in printed
     assert "At once" not in printed
+
+
+def test_one_walk_reads_a_refused_part_and_its_sum_as_refused() -> None:
+    small = _timed(630_000, ("rows", "all", 1_890.9), ("quick_filters", "all", 3_531.4))
+    large = _timed(
+        3_000_000,
+        ("rows", "all", 9_106.0),
+        ("quick_filters", "all", 0),
+        refused="canceling statement due to statement timeout",
+    )
+
+    assert walk(small, large)[2:] == [
+        "| Rows | all | 1,891 + 3,531 = 5,422 | 9,106 + refused = refused | 18% | refused |",
+    ]

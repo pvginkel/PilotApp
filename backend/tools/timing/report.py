@@ -157,10 +157,20 @@ def burst(results: Sequence[dict[str, Any]]) -> list[str]:
     return lines
 
 
+def _summed(rows: dict[str, Any], counts: dict[str, Any]) -> tuple[str, str]:
+    """A view's rows and the counts, summed, and the sum's share of the
+    walk's 30 s; a sum with a refused part reads refused."""
+    if rows["error"] or counts["error"]:
+        return f"{_ms(rows)} + {_ms(counts)} = refused", "refused"
+    ms = [round(rows["ms"]), round(counts["ms"])]
+    return f"{ms[0]:,} + {ms[1]:,} = {sum(ms):,}", f"{sum(ms) / WALK_MS:.0%}"
+
+
 def walk(small: dict[str, Any], large: dict[str, Any]) -> list[str]:
     """One walk for one page: each view's rows and the quick filters' counts
     over the same range, each to the millisecond, their sum, and the sum's
-    share of the walk's 30 s."""
+    share of the walk's 30 s; a refused part reads refused, as `parts`
+    has it, and so do its sum and share."""
     n1, n2 = _calls(small), _calls(large)
     first, second = _timed(small), _timed(large)
     lines = [
@@ -172,11 +182,11 @@ def walk(small: dict[str, Any], large: dict[str, Any]) -> list[str]:
         if key not in VIEWS:
             continue
         sums = [
-            (round(found[(key, range_)]["ms"]), round(found[(COUNTS, range_)]["ms"]))
+            _summed(found[(key, range_)], found[(COUNTS, range_)])
             for found in (first, second)
         ]
-        cells = [f"{rows:,} + {counts:,} = {rows + counts:,}" for rows, counts in sums]
-        shares = [f"{(rows + counts) / WALK_MS:.0%}" for rows, counts in sums]
+        cells = [cell for cell, _ in sums]
+        shares = [share for _, share in sums]
         lines.append(
             f"| {second[(key, range_)]['label']} | {range_} | "
             + " | ".join(cells + shares)
