@@ -15,7 +15,7 @@ import { ReadFailures } from '@/hooks/use-dashboard-view';
 import { useSSETask } from '@/hooks/use-sse-task';
 import { toApiError } from '@/lib/api/api-error';
 import { api } from '@/lib/api/client';
-import { byCountsKey } from '@/lib/dashboard/queries';
+import { byCountsKey, KEPT_FROM_WRITES } from '@/lib/dashboard/queries';
 import { withoutLook, type ViewState } from '@/lib/dashboard/state';
 
 /** The counts kept for a scope, and whether the task that counted them ended. */
@@ -39,7 +39,7 @@ export function useByCounts(state: ViewState): ReadonlyMap<string, number> {
   const reader = useId();
   const scope = scopeOf(state);
   const written = withoutLook(state);
-  const held = useQuery<Counted>({ queryKey: byCountsKey(scope), queryFn: skipToken, enabled: false }).data;
+  const held = useQuery<Counted>({ queryKey: byCountsKey(scope), queryFn: skipToken, enabled: false, meta: KEPT_FROM_WRITES }).data;
   // Raised by the banner's Retry, which asks again whatever is held.
   const [asked, setAsked] = useState(0);
 

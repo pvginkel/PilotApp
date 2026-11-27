@@ -15,7 +15,8 @@
  * address of a text is the server's at the page's first read of it, and a normal form is its own.
  *
  * What a view may name, the catalogue's parts, and the person's favourites are no figures: the
- * walk's event leaves them. A write of the dashboard's reads again what it changed, and no more.
+ * walk's event leaves them. A write of the dashboard's reads again what it changed, and no more; a
+ * write through a generated mutation hook reads no figure and no label again (`KEPT_FROM_WRITES`).
  *
  * No route labels a value of a dimension, so a value the page was not told the label of, by a row
  * it drilled from or a pane's values, is looked up among the values of a scope that holds it
@@ -26,6 +27,7 @@
 import { queryOptions, type QueryClient } from '@tanstack/react-query';
 import { toApiError } from '@/lib/api/api-error';
 import { api } from '@/lib/api/client';
+import { WRITES_PASS_OVER } from '@/lib/api/generated/hooks';
 import type { components } from '@/lib/api/generated/types';
 import type { Rows } from './rows-layout';
 import { lookOf, readState } from './state';
@@ -45,6 +47,13 @@ export const FIGURES = 'dashboard';
 
 /** The `meta` flag of a query whose answer comes over the stream: one the stream dropped never lands. */
 export const OVER_STREAM = 'overStream';
+
+/**
+ * The `meta` of a read the engine answers, a figure's or a label's: a write's read of every query
+ * passes over it, the walk's event keeping a figure current (`use-walk-reads.ts`) and a label found
+ * kept (`labelQuery`).
+ */
+export const KEPT_FROM_WRITES = { [WRITES_PASS_OVER]: true };
 
 /** The quick filters' counts and amounts of a view (`backend/app/schemas/dashboard.py`, `QuickFilterCountsSchema`), the task's result. */
 interface QuickFilterCounts {
@@ -105,6 +114,7 @@ export function rowsQuery(key: string) {
     },
     staleTime: Infinity,
     refetchOnWindowFocus: false,
+    meta: KEPT_FROM_WRITES,
   });
 }
 
@@ -120,6 +130,7 @@ export function valuesQuery(scope: string, dimension: string, search: string) {
     },
     staleTime: Infinity,
     refetchOnWindowFocus: false,
+    meta: KEPT_FROM_WRITES,
   });
 }
 
@@ -141,7 +152,7 @@ export function quickFilterCountsQuery(key: string, listen: Listen) {
     refetchOnWindowFocus: false,
     // A read asked again starts its task again, which holds the engine again: a failure waits for its Retry.
     retry: false,
-    meta: { [OVER_STREAM]: true },
+    meta: { ...KEPT_FROM_WRITES, [OVER_STREAM]: true },
   });
 }
 
@@ -183,6 +194,7 @@ export function labelQuery(dimension: string, value: string, scope: string) {
     },
     staleTime: (query) => (query.state.data === null ? 0 : Infinity),
     refetchOnWindowFocus: false,
+    meta: KEPT_FROM_WRITES,
   });
 }
 

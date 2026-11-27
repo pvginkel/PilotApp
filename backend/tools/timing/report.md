@@ -11,6 +11,11 @@ all time are refused at the database's limit on temporary files.
 The engine's timeout and its statements at once take their defaults from it: 45 s for a whole
 read and 2 statements at once (below).
 
+The walk's event, every 30 s, has a page with the dashboard open read its view's rows and the
+quick filters' counts again: 2.2 to 2.7 s over a quota week and 4.9 to 6.1 s over all time at
+631,341 Calls; 15.9 to 19.3 s and 35.1 to 41.6 s at three million, over all time longer than the
+walk itself (below).
+
 ## How it was timed
 
 - **The database**: PostgreSQL 18.3 on production's image, `shared_buffers` 256MB, `work_mem`
@@ -32,6 +37,12 @@ read and 2 statements at once (below).
   then three times, the median taken, or once where the first read took over 20 s. Each
   statement was then run again under `EXPLAIN (ANALYZE, BUFFERS)`, whose own timing reads
   slower than the part's.
+- **Timed before the names.** A Pilot session, a Pilot turn, a conversation and a Call were
+  named after the timing, so that a statement that reads one's name now joins what it is read
+  from: In order by Pilot session its Session's work item, chat and kind, and the lanes by
+  conversation, a conversation's calls, the items of conversations and the conversations'
+  values for a filter's pane each Call's thread. Every other part's statements read as they
+  were timed.
 
 Regenerate the tables with
 `uv run python -m tools.timing.report tools/timing/results/630000.json tools/timing/results/3000000.json`.
@@ -116,6 +127,57 @@ CPUs, bounds them.
 | 3 | each 3,191 to 3,277, all 3,280 | each 37,331 to 37,641, all 37,642 |
 | 4 | each 4,434 to 4,960, all 4,960 | each 44,054 to 46,912, all 46,913 |
 
+
+## One walk
+
+The collector's walk ends every 30 s on both stages, and one that published something sends the
+walk's event to every person's connections, as every walk did in pilot-prd's busy hours of 21 to
+26 November. On it a page with the dashboard open reads again, once, what its view in view shows
+(`frontend/tests/dashboard/walk-reads.spec.ts`): the view's rows, the quick filters' counts and
+amounts, a task, and while a filter's pane is open its values. It reads nothing of a view tab
+out of sight until that tab shows, nothing while the browser page is hidden until it shows, no
+By's counts, which By's list asks as it opens, no label and no normal form; a write the person
+makes elsewhere in the app, a chat's message or a pause, reads none of them. The server keeps no
+answer, so each person with the dashboard open reads as much again. The record sets no bar for a
+walk: F154.9's two seconds is an answer's.
+
+One walk for one page, each view's rows and the quick filters' counts as each was timed alone:
+
+| The view | Range | 631,341 calls: rows + counts, ms | 2,976,231 calls: rows + counts, ms | Of 30 s at 631,341 | Of 30 s at 2,976,231 |
+|---|---|---|---|---:|---:|
+| Rows by project, five measures | all | 1,891 + 3,531 = 5,422 | 9,106 + 27,556 = 36,662 | 18% | 122% |
+| Rows by project, five measures | lqw | 282 + 1,949 = 2,231 | 494 + 15,408 = 15,902 | 7% | 53% |
+| The Projects view: four measures, colored by work type | all | 2,602 + 3,531 = 6,133 | 12,676 + 27,556 = 40,232 | 20% | 134% |
+| The Projects view: four measures, colored by work type | lqw | 354 + 1,949 = 2,303 | 540 + 15,408 = 15,948 | 8% | 53% |
+| The Work types view: four measures, colored by model | all | 2,269 + 3,531 = 5,800 | 12,417 + 27,556 = 39,973 | 19% | 133% |
+| The Work types view: four measures, colored by model | lqw | 319 + 1,949 = 2,268 | 451 + 15,408 = 15,859 | 8% | 53% |
+| Median, mean and P90 per conversation, by project | all | 2,099 + 3,531 = 5,630 | 14,064 + 27,556 = 41,620 | 19% | 139% |
+| Median, mean and P90 per conversation, by project | lqw | 349 + 1,949 = 2,298 | 710 + 15,408 = 16,118 | 8% | 54% |
+| Rows by project under a threshold on the By's rows | all | 1,633 + 3,531 = 5,164 | 8,034 + 27,556 = 35,590 | 17% | 119% |
+| Rows by project under a threshold on the By's rows | lqw | 331 + 1,949 = 2,280 | 678 + 15,408 = 16,086 | 8% | 54% |
+| Rows by project under a condition on each conversation | all | 1,322 + 3,531 = 4,853 | 7,575 + 27,556 = 35,131 | 16% | 117% |
+| Rows by project under a condition on each conversation | lqw | 702 + 1,949 = 2,651 | 3,856 + 15,408 = 19,264 | 9% | 64% |
+
+The rows and the counts' task are read side by side, the engine taking two statements at once.
+At 631,341 Calls, where two reads at once take what one takes (the burst), the page has its
+figures after the longer of the two; at three million, where each read added adds its whole
+time, after about their sum. The database's time is the sum either way, and the quick filters'
+counts are most of every sum. Over all time at three million a walk's reads take longer than
+the walk: the next walk's event comes while they are under way, they land, and the page reads
+again, so that it reads without a pause. A read the page cancels, as a change of state
+supersedes it, frees the page alone: the server reads a request to its end, and a task runs on.
+Where the week went, an Over time view, is drawn as its rows until its series is; its rows were
+not timed.
+
+An open filter's pane adds its values. The conversations' were timed before conversations were
+named: their statement now joins each Call's thread for its name too.
+
+| An open filter's pane | Range | 631,341 calls, ms | 2,976,231 calls, ms |
+|---|---|---:|---:|
+| An attribute's values for a filter's pane: the calls | all | 1,512 | 9,700 |
+| An attribute's values for a filter's pane: the calls | lqw | 196 | 399 |
+| An attribute's values for a filter's pane: the conversations | all | 600 | 3,799 |
+| An attribute's values for a filter's pane: the conversations | lqw | 118 | 274 |
 
 ## The engine's defaults
 

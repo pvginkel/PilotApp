@@ -482,6 +482,21 @@ export class DashboardPage {
   }
 
   /**
+   * Every request the page sends to a route of the dashboard's from the call on, as `<path> <state>`,
+   * the state it names, and for a dimension's values `<dimension>` after it; read by the answer.
+   */
+  dashboardReads(): () => string[] {
+    const reads: string[] = [];
+    this.page.on('request', (request) => {
+      const url = new URL(request.url());
+      if (!url.pathname.startsWith('/api/dashboard/')) return;
+      const dimension = url.searchParams.get('dimension');
+      reads.push(`${url.pathname} ${url.searchParams.get('state') ?? ''}${dimension === null ? '' : ` ${dimension}`}`);
+    });
+    return () => reads;
+  }
+
+  /**
    * The tab `hash` names moved to the state it names, a new entry, as the dashboard's own moves
    * write one (F160.4): its entry carries in the history's state the tab's id, and the saved view
    * and the state it opened with that the entry before held of the same tab.

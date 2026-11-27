@@ -1,9 +1,13 @@
 """The timing's tables (`tools/timing/report.py`): where a part's time passes
-two seconds, on the line through its times at two sizes."""
+two seconds, on the line through its times at two sizes; one walk, a view's
+rows and the quick filters' counts summed against the walk's 30 s; and what an
+open filter's pane adds to it."""
+
+from typing import Any
 
 import pytest
 
-from tools.timing.report import parts, passes
+from tools.timing.report import panes, parts, passes, walk
 
 
 @pytest.mark.parametrize(
@@ -54,3 +58,44 @@ def test_a_refused_part_reads_refused_in_every_cell_it_has_no_figure_for() -> No
     assert parts(small, large)[2] == (
         "| By's counts | all | 19,472 | refused |  | refused | refused |"
     )
+
+
+def _timed(calls: int, *parts: tuple[str, str, float]) -> dict[str, Any]:
+    return {
+        "record": {"rows": {"calls": calls}},
+        "parts": [
+            {
+                "key": key,
+                "label": key.capitalize(),
+                "range": range_,
+                "ms": ms,
+                "error": None,
+            }
+            for key, range_, ms in parts
+        ],
+    }
+
+
+def test_one_walk_sums_each_views_rows_and_the_counts_over_its_range() -> None:
+    small = _timed(
+        630_000,
+        ("rows", "all", 1_890.9),
+        ("quick_filters", "all", 3_531.4),
+        ("rows", "lqw", 282.5),
+        ("quick_filters", "lqw", 1_949.0),
+        ("values_call", "all", 1_511.7),
+    )
+    large = _timed(
+        3_000_000,
+        ("rows", "all", 9_106.0),
+        ("quick_filters", "all", 27_556.0),
+        ("rows", "lqw", 494.0),
+        ("quick_filters", "lqw", 15_408.0),
+        ("values_call", "all", 9_700.0),
+    )
+
+    assert walk(small, large)[2:] == [
+        "| Rows | all | 1,891 + 3,531 = 5,422 | 9,106 + 27,556 = 36,662 | 18% | 122% |",
+        "| Rows | lqw | 282 + 1,949 = 2,231 | 494 + 15,408 = 15,902 | 7% | 53% |",
+    ]
+    assert panes(small, large)[2:] == ["| Values_call | all | 1,512 | 9,700 |"]
