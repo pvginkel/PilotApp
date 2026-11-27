@@ -2138,6 +2138,37 @@ class TestTheFilesClasses:
         ) in caplog.messages
         assert set(_classes(committed_app).values()) == {"note"}
 
+    def test_a_labeller_that_keeps_giving_no_classes_is_logged_once(
+        self,
+        committed_app: Flask,
+        walker: Walker,
+        monkeypatch: pytest.MonkeyPatch,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """Asked again at each walk, it is logged where its reason is new,
+        as the stamps' and the clones' warnings are."""
+        asked: list[int] = []
+
+        def unanswered(files: list[HeldFileSchema]) -> Any:
+            asked.append(len(files))
+            raise running.Unanswered("its `classes` call exited 1: KeyError")
+
+        monkeypatch.setattr(walker._labeller, "classes", unanswered)
+
+        with caplog.at_level(logging.WARNING, LOGGER):
+            walker.walk()
+            walker.walk()
+
+        assert asked == [2, 2]
+        assert [
+            message
+            for message in caplog.messages
+            if message.startswith("No File is classed in this walk: ")
+        ] == [
+            "No File is classed in this walk: the labeller did not answer: its"
+            " `classes` call exited 1: KeyError"
+        ]
+
     def test_a_walk_no_labeller_answers_classes_no_file(
         self,
         committed_app: Flask,

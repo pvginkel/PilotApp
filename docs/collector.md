@@ -593,8 +593,8 @@ Pilot holds with no class, or every File after a start and wherever the stamps' 
 from those it last classed every File under, and gives Pilot every class at once
 ([`collection.md`](collection.md#the-files-classes)), "412 Files are classed under the labeller
 1.0.1's file rules". A walk where nothing changed asks Pilot for no File beyond the knowledge that
-none waits. A labeller that gives no classes is asked again at the next walk, "No File is classed in
-this walk: the labeller did not answer: <why>". Classes Pilot refuses have the vocabularies declared
+none waits. A labeller that gives no classes is asked again at the next walk, and logged where its
+reason is new, "No File is classed in this walk: the labeller did not answer: <why>". Classes Pilot refuses have the vocabularies declared
 again and are given once more; refused again, no File is classed until the labeller's version or its
 file rules change, "No File is classed until the labeller's version or its file rules change:
 <why>".

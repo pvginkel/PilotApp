@@ -84,9 +84,10 @@ Files Pilot holds with no class, or every File where the stamps' file rules
 are other than those it last classed every File under, after a start among
 them, and gives Pilot their classes (`labeller.md` § File classes): a walk
 where nothing changed asks Pilot for no File beyond the knowledge that none
-waits. Classes Pilot refuses have the vocabularies declared again and are
-given once more; refused again, no File is classed until the labeller's
-version or its file rules change.
+waits. A labeller that gives no classes is asked again at the next walk,
+and logged where its reason is new. Classes Pilot refuses have the
+vocabularies declared again and are given once more; refused again, no File
+is classed until the labeller's version or its file rules change.
 
 A transcript the collector cannot read, and one Pilot refuses for good, is
 logged with its file and the reason and set aside: no walk takes it again
@@ -343,6 +344,9 @@ class Walker:
         self._unclassable: tuple[str, str] | None = None
         """The labeller's version and file rules whose classes Pilot refused
         twice; none where it took the last."""
+        self._unclassed: str | None = None
+        """Why the labeller gave no classes at the last walk that asked;
+        none where it gave them."""
 
     def run(self) -> None:
         """Walk every interval until `stop` is set."""
@@ -514,8 +518,9 @@ class Walker:
         every File where the file rules of `stamps` are other than those
         every File was last classed under, and give Pilot their classes;
         none while Pilot refuses those of the labeller's version and file
-        rules as they stand. Where it gives none, or Pilot refuses them, the
-        reason is logged."""
+        rules as they stand. Where it gives none the reason is logged where
+        it differs from the last, and where Pilot refuses them it is
+        logged."""
         if (stamps.version, stamps.file_rules) == self._unclassable:
             return
         every = stamps.file_rules != self._classed_under
@@ -528,12 +533,15 @@ class Walker:
             classed = self._labeller.classes(files)
             self._classes_given(classed, stamps)
         except Unanswered as error:
-            logger.warning(
-                "No File is classed in this walk: the labeller did not answer: %s",
-                error,
-            )
+            if str(error) != self._unclassed:
+                logger.warning(
+                    "No File is classed in this walk: the labeller did not answer: %s",
+                    error,
+                )
+            self._unclassed = str(error)
             return
         except Refused as error:
+            self._unclassed = None
             self._unclassable = (classed.version, classed.file_rules)
             logger.warning(
                 "No File is classed until the labeller's version or its file rules"
@@ -543,6 +551,7 @@ class Walker:
             return
         if every:
             self._classed_under = classed.file_rules
+        self._unclassed = None
         self._unclassable = None
         walked.classed = len(files)
         logger.info(
