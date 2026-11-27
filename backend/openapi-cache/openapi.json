@@ -10268,8 +10268,11 @@
                 "type": "null"
               }
             ],
-            "description": "The seconds within which waits and events were merged, past the bound on how many the lanes carry; null where none were",
+            "description": "The seconds within which runs, waits and events were merged, past the bound on how many the lanes carry; null where none were",
             "title": "Resolution"
+          },
+          "run_color": {
+            "$ref": "#/components/schemas/LanesResponseSchema.b67cf98.RunColorSchema"
           },
           "starts_at": {
             "anyOf": [
@@ -10337,6 +10340,7 @@
           "color",
           "all",
           "lanes",
+          "run_color",
           "total_lanes",
           "starts_at",
           "ends_at",
@@ -10753,6 +10757,14 @@
             "title": "N",
             "type": "array"
           },
+          "runs": {
+            "description": "In time order",
+            "items": {
+              "$ref": "#/components/schemas/LanesResponseSchema.b67cf98.RunSchema"
+            },
+            "title": "Runs",
+            "type": "array"
+          },
           "split": {
             "anyOf": [
               {
@@ -10826,6 +10838,7 @@
           "marked",
           "starts_at",
           "ends_at",
+          "runs",
           "waits",
           "events"
         ],
@@ -11056,6 +11069,169 @@
           "median"
         ],
         "title": "RowsMeasureSchema",
+        "type": "object"
+      },
+      "LanesResponseSchema.b67cf98.RunColorSchema": {
+        "description": "What the lanes' runs are colored by: the view's color where it names\none the Calls carry, else the Segment's kind.",
+        "properties": {
+          "key": {
+            "description": "A dimension's key: the view's color's, else `segment_kind`",
+            "examples": [
+              "segment_kind"
+            ],
+            "title": "Key",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "values": {
+            "description": "The values the runs hold: a color's by their runs' cost, the largest first, past twelve folded into one; the Segment kinds in their list's order, none last",
+            "items": {
+              "$ref": "#/components/schemas/LanesResponseSchema.b67cf98.RunColorValueSchema"
+            },
+            "title": "Values",
+            "type": "array"
+          }
+        },
+        "required": [
+          "key",
+          "label",
+          "values"
+        ],
+        "title": "RunColorSchema",
+        "type": "object"
+      },
+      "LanesResponseSchema.b67cf98.RunColorValueSchema": {
+        "description": "A value the lanes' runs are colored by.",
+        "properties": {
+          "key": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The value, typed as its dimension reads it; null for none, or for the values folded",
+            "title": "Key"
+          },
+          "label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Its label; null where the key is its own",
+            "title": "Label"
+          },
+          "others": {
+            "description": "The count of values folded into it; 0 for a value of its own",
+            "title": "Others",
+            "type": "integer"
+          },
+          "total": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Its runs' cost; null where none has one",
+            "title": "Total"
+          }
+        },
+        "required": [
+          "key",
+          "label",
+          "total",
+          "others"
+        ],
+        "title": "RunColorValueSchema",
+        "type": "object"
+      },
+      "LanesResponseSchema.b67cf98.RunSchema": {
+        "description": "A run of a lane's rows: consecutive rows of one value of the runs'\ncolor and one thread, with no wait in it.",
+        "properties": {
+          "color": {
+            "description": "Its value's place among `run_color`'s values, from 0",
+            "title": "Color",
+            "type": "integer"
+          },
+          "conversation": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Its thread, a merged run's that of the costlier of the two it was merged from; null for a Turn standing in",
+            "title": "Conversation"
+          },
+          "cost": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Its rows' cost; null where none has one",
+            "title": "Cost"
+          },
+          "ends_at": {
+            "description": "The next run's first moment, or its own last row's where a wait or the lane's end follows it",
+            "format": "date-time",
+            "title": "Ends At",
+            "type": "string"
+          },
+          "n": {
+            "description": "Its rows",
+            "title": "N",
+            "type": "integer"
+          },
+          "starts_at": {
+            "description": "Its first row's moment",
+            "format": "date-time",
+            "title": "Starts At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "starts_at",
+          "ends_at",
+          "color",
+          "conversation",
+          "n",
+          "cost"
+        ],
+        "title": "RunSchema",
         "type": "object"
       },
       "LanesResponseSchema.b67cf98.SeenKindSchema": {
@@ -30677,7 +30853,7 @@
             "BearerAuth": []
           }
         ],
-        "summary": "Answer a view's lanes from the record at the query: a lane per row of the By that holds Calls, the earliest first, with each measure on it, its waits and its events, each event with its detail, merged past a bound on how many the lanes carry; its time as instants, with the zone its days are in.",
+        "summary": "Answer a view's lanes from the record at the query: a lane per row of the By that holds Calls, the earliest first, with each measure on it, its runs of calls by the view's color or their Segment's kind, its waits and its events, each event with its detail, merged past a bound on how many the lanes carry; its time as instants, with the zone its days are in.",
         "tags": [],
         "x-required-role": "editor"
       }

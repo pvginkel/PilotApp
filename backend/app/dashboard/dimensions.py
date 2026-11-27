@@ -92,6 +92,10 @@ role's configuration follows each value's."""
 CONFIGURATION = "model"
 """The key of the marker of a role's configuration, the mockup's."""
 
+SEGMENT_KIND = "segment_kind"
+"""The dimension a lane's runs are colored by where the view names no color
+the Calls carry."""
+
 
 def _flag(path: Path) -> Path:
     """A two-valued dimension's key, 1 or 0, none read as 0."""
@@ -480,7 +484,7 @@ def own_dimensions(zone: str) -> tuple[Dimension, ...]:
             null="(No wait cause)",
         ),
         Dimension(
-            key="segment_kind",
+            key=SEGMENT_KIND,
             label="Segment kind",
             group="attribute",
             line=(

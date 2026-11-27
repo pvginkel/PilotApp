@@ -760,6 +760,61 @@ class StripResponseSchema(BaseModel):
     )
 
 
+class RunSchema(BaseModel):
+    """A run of a lane's rows: consecutive rows of one value of the runs'
+    color and one thread, with no wait in it."""
+
+    starts_at: datetime = Field(description="Its first row's moment")
+    ends_at: datetime = Field(
+        description=(
+            "The next run's first moment, or its own last row's where a wait or "
+            "the lane's end follows it"
+        )
+    )
+    color: int = Field(
+        description="Its value's place among `run_color`'s values, from 0"
+    )
+    conversation: uuid.UUID | None = Field(
+        description=(
+            "Its thread, a merged run's that of the costlier of the two it was "
+            "merged from; null for a Turn standing in"
+        )
+    )
+    n: int = Field(description="Its rows")
+    cost: float | None = Field(description="Its rows' cost; null where none has one")
+
+
+class RunColorValueSchema(BaseModel):
+    """A value the lanes' runs are colored by."""
+
+    key: Key = Field(
+        description="The value, typed as its dimension reads it; null for none, or for the values folded"
+    )
+    label: str | None = Field(description="Its label; null where the key is its own")
+    total: float | None = Field(description="Its runs' cost; null where none has one")
+    others: int = Field(
+        description="The count of values folded into it; 0 for a value of its own"
+    )
+
+
+class RunColorSchema(BaseModel):
+    """What the lanes' runs are colored by: the view's color where it names
+    one the Calls carry, else the Segment's kind."""
+
+    key: str = Field(
+        description="A dimension's key: the view's color's, else `segment_kind`",
+        examples=["segment_kind"],
+    )
+    label: str
+    values: list[RunColorValueSchema] = Field(
+        description=(
+            "The values the runs hold: a color's by their runs' cost, the "
+            "largest first, past twelve folded into one; the Segment kinds in "
+            "their list's order, none last"
+        )
+    )
+
+
 class WaitSchema(BaseModel):
     """A gap between a lane's rows."""
 
@@ -832,6 +887,7 @@ class LaneSchema(ByRowSchema):
 
     starts_at: datetime | None = Field(description="Its first row's moment")
     ends_at: datetime | None = Field(description="Its last row's moment")
+    runs: list[RunSchema] = Field(description="In time order")
     waits: list[WaitSchema] = Field(description="In time order")
     events: list[LaneEventSchema] = Field(description="In time order")
 
@@ -860,6 +916,7 @@ class LanesResponseSchema(BaseModel):
             "threshold or the outlier rows' chip keeps"
         )
     )
+    run_color: RunColorSchema
     total_lanes: int = Field(description="The lanes, those answered and the rest")
     starts_at: datetime | None = Field(description="The first lane's first moment")
     ends_at: datetime | None = Field(description="The lanes' last moment")
@@ -874,8 +931,8 @@ class LanesResponseSchema(BaseModel):
     )
     resolution: float | None = Field(
         description=(
-            "The seconds within which waits and events were merged, past the "
-            "bound on how many the lanes carry; null where none were"
+            "The seconds within which runs, waits and events were merged, past "
+            "the bound on how many the lanes carry; null where none were"
         )
     )
 

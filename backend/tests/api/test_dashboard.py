@@ -1063,7 +1063,7 @@ def _busy(
 
 
 class TestGetLanes:
-    def test_it_answers_each_lane_its_waits_and_its_events(
+    def test_it_answers_each_lane_its_runs_its_waits_and_its_events(
         self, client: FlaskClient, worked: Record
     ) -> None:
         response = client.get(LANES, query_string={"state": "t=all&p=lanes&z=1,2"})
@@ -1101,6 +1101,36 @@ class TestGetLanes:
             "2026-11-12T09:31:00Z",
             "2026-11-12T11:33:00Z",
         )
+        assert lane["runs"][:2] == [
+            {
+                "starts_at": "2026-11-12T09:31:00Z",
+                "ends_at": "2026-11-12T09:31:00Z",
+                "color": 0,
+                "conversation": str(worked.thread.id),
+                "n": 1,
+                "cost": 0.5,
+            },
+            {
+                "starts_at": "2026-11-12T09:32:00Z",
+                "ends_at": "2026-11-12T09:32:30Z",
+                "color": 0,
+                "conversation": str(worked.thread.id),
+                "n": 1,
+                "cost": 0.25,
+            },
+        ]
+        assert body["run_color"] == {
+            "key": "segment_kind",
+            "label": "Segment kind",
+            "values": [
+                {
+                    "key": None,
+                    "label": "(No segment)",
+                    "total": pytest.approx(2.65),
+                    "others": 0,
+                }
+            ],
+        }
         assert lane["waits"][0] == {
             "starts_at": "2026-11-12T09:31:00Z",
             "ends_at": "2026-11-12T09:32:00Z",

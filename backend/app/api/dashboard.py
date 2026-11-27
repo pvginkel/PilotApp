@@ -97,6 +97,9 @@ from app.schemas.dashboard import (
     RowsDimensionSchema,
     RowsMeasureSchema,
     RowsResponseSchema,
+    RunColorSchema,
+    RunColorValueSchema,
+    RunSchema,
     SeenKindSchema,
     SelectedSchema,
     SeriesResponseSchema,
@@ -326,9 +329,10 @@ def get_lanes(
 ) -> Any:
     """Answer a view's lanes from the record at the query: a lane per row of
     the By that holds Calls, the earliest first, with each measure on it,
-    its waits and its events, each event with its detail, merged past a
-    bound on how many the lanes carry; its time as instants, with the zone
-    its days are in.
+    its runs of calls by the view's color or their Segment's kind, its waits
+    and its events, each event with its detail, merged past a bound on how
+    many the lanes carry; its time as instants, with the zone its days are
+    in.
 
     Returns:
         200: The view's lanes, with its address, its look-only parts and a
@@ -843,6 +847,17 @@ def _lanes(found: Lanes) -> LanesResponseSchema:
                 **_by_row(lane),
                 starts_at=lane.starts_at,
                 ends_at=lane.ends_at,
+                runs=[
+                    RunSchema(
+                        starts_at=run.starts_at,
+                        ends_at=run.ends_at,
+                        color=run.color,
+                        conversation=run.conversation,
+                        n=run.n,
+                        cost=run.cost,
+                    )
+                    for run in lane.runs
+                ],
                 waits=[
                     WaitSchema(
                         starts_at=wait.starts_at,
@@ -871,6 +886,19 @@ def _lanes(found: Lanes) -> LanesResponseSchema:
             )
             for lane in found.lanes
         ],
+        run_color=RunColorSchema(
+            key=found.run_color.key,
+            label=found.run_color.label,
+            values=[
+                RunColorValueSchema(
+                    key=value.key,
+                    label=value.label,
+                    total=value.total,
+                    others=value.others,
+                )
+                for value in found.run_color.values
+            ],
+        ),
         total_lanes=found.total_lanes,
         starts_at=found.starts_at,
         ends_at=found.ends_at,

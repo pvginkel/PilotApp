@@ -43,8 +43,11 @@ A series reads more, each a statement of one fact (`Read`):
 The lanes read, each a statement of one fact: **the spans**, by the By its
 rows' first and last moment; **the waits**, each row that comes a gap or
 more after the one before it of its value of the By, with that one's moment,
-a window's lag; and **the events**, by the By in time order, each with its
-detail. The items read, by index of the thing they are about: **a part's
+a window's lag; **the runs**, by the By the stretches of consecutive rows of
+one value of a dimension and one thread with no such gap in them, each with
+its first and last moment, its rows, their cost and whether a gap opens it,
+a window's lag and a running count of where one opens; and **the events**, by
+the By in time order, each with its detail. The items read, by index of the thing they are about: **a part's
 items**, by each item its first and last moment and each figure taken
 together, the earliest first, with the count of all; **a fact's own rows as
 items**, each with the dimensions shown on it; and **a thread's calls and
@@ -102,6 +105,7 @@ from sqlalchemy import (
     tuple_,
 )
 from sqlalchemy.dialects.postgresql import ARRAY
+from sqlalchemy.sql.functions import FunctionElement
 
 from app.dashboard.assembly import EVENT_KIND
 from app.dashboard.catalogue import COUNT, Catalogue, Dimension, Figure, Row
@@ -949,6 +953,70 @@ class _Builder:
             .order_by(rows.c.b, rows.c.at, rows.c.call_id)
         )
 
+    def runs(self, dimension: Dimension, least: float) -> Read:
+        columns = [
+            self.by().path(self.row).label("b"),
+            dimension.path(self.row).label("v"),
+            self.row["transcript_id"].label("transcript_id"),
+            self.row["at"].label("at"),
+            self.row["call_id"].label("call_id"),
+            self.row["cost"].label("cost"),
+        ]
+        if dimension.name is not None:
+            columns.append(dimension.name(self.row).label("name"))
+        rows = (
+            select(*columns).select_from(self.row.source()).where(*self.scoped())
+        ).subquery("r")
+        r = rows.c
+
+        def over(value: FunctionElement[Any]) -> ColumnElement[Any]:
+            return value.over(partition_by=r.b, order_by=(r.at, r.call_id))
+
+        lagged = select(
+            *r,
+            over(func.lag(r.at)).label("since"),
+            over(func.lag(r.v)).label("was"),
+            over(func.lag(r.transcript_id)).label("thread_was"),
+            # The running count orders by this, so that it takes the rows in
+            # the order the lags did, ties between them included.
+            over(func.row_number()).label("i"),
+        ).subquery("l")
+        lag = lagged.c
+        waited = func.coalesce(
+            func.extract("epoch", lag.at - lag.since) >= least, false()
+        )
+        opens = or_(
+            lag.since.is_(None),
+            waited,
+            lag.v.is_distinct_from(lag.was),
+            lag.transcript_id.is_distinct_from(lag.thread_was),
+        )
+        numbered = select(
+            *(lag[name] for name in ("b", "v", "transcript_id", "at", "cost")),
+            *([lag.name] if "name" in lag else []),
+            waited.label("waited"),
+            func.sum(case((opens, 1), else_=0))
+            .over(partition_by=lag.b, order_by=lag.i, rows=(None, 0))
+            .label("run"),
+        ).subquery("n")
+        n = numbered.c
+        return self.read(
+            select(
+                n.b,
+                n.run,
+                n.v,
+                n.transcript_id,
+                func.min(n.at).label("first"),
+                func.max(n.at).label("last"),
+                func.count().label("n"),
+                func.sum(n.cost).label("cost"),
+                func.bool_or(n.waited).label("waited"),
+                *([func.max(n.name).label("name")] if "name" in n else []),
+            )
+            .group_by(n.b, n.run, n.v, n.transcript_id)
+            .order_by(n.b, n.run)
+        )
+
     def happened(self) -> Read:
         """The events of the lanes, each with its detail and the cost of
         the Call it is held on."""
@@ -1301,6 +1369,17 @@ def waits(found: Plan, catalogue: Catalogue, fact: str, least: float) -> Read:
     after the one before them of their value of the By, each with that
     one's moment, by the By and in time order."""
     return _Builder(found, catalogue, fact).waits(least)
+
+
+def runs(
+    found: Plan, catalogue: Catalogue, fact: str, dimension: Dimension, least: float
+) -> Read:
+    """By the By, the runs of the rows of `fact` the plan reads: each
+    stretch of consecutive rows of one value of `dimension` and one thread
+    with no gap of `least` seconds or more in it, in time order, with its
+    first and last moment, its rows, their cost, its value's name where the
+    dimension has one, and whether such a gap comes before it."""
+    return _Builder(found, catalogue, fact).runs(dimension, least)
 
 
 def grouped(
