@@ -573,6 +573,16 @@ class LabelWrite:
         # A held unit may sit in one written here: the new rows stand before
         # a held one names them.
         self.db.flush()
+        if rekinded:
+            # The new kinds first: the database moves the kind of each unit
+            # placed in one to it, and the held rows are read again, so that
+            # each is written against what the database holds of it.
+            for row, facts in met:
+                if row.id in rekinded:
+                    row.kind_code = facts["kind_code"]
+            self.db.flush()
+            for row, _ in met:
+                self.db.refresh(row)
         for row, facts in met:
             _set(row, facts)
         self.db.flush()

@@ -868,6 +868,32 @@ class TestRelabelled:
         assert stranded == ("dish", None, None)
         assert _placed(session)[BREAD] == ("garnish", STARTERS, "side")
 
+    def test_a_unit_moved_out_of_one_given_another_kind_takes_its_new_place(
+        self,
+        session: DbSession,
+        container: ServiceContainer,
+        publications: PublicationService,
+    ) -> None:
+        """The starters become a side and their soups move to the mains: the
+        side's new kind follows into the soups' rows as the database holds
+        them, and their write places them in the mains all the same."""
+        _declare_sides(container)
+        publications.publish(_published(labelling=_labelling()))
+        mains = "spring|mains"
+        units = _rekinded(starters="side")
+        units.insert(
+            2, {"key": mains, "kind": "course", "part_of": MENU, "title": "Mains"}
+        )
+        for unit in units[3:]:
+            unit["part_of"] = mains
+
+        publications.publish(_published(labelling=_labelling(units=units)))
+
+        placed = _placed(session)
+        assert placed[STARTERS] == ("side", MENU, "menu")
+        assert placed[SOUP] == ("dish", mains, "course")
+        assert placed[AGAIN] == ("dish", mains, "course")
+
     def test_a_test_run_of_another_suite_takes_its_failures_anew(
         self, session: DbSession, publications: PublicationService
     ) -> None:
