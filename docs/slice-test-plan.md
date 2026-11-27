@@ -925,12 +925,13 @@ POD=$(cexec iac kubectl -n pilot-dev get pods -l app.kubernetes.io/name=pilot -o
    cexec iac kubectl -n pilot-dev logs $POD -c backend | grep -E 'Fleet stream connected|Loop fleet'
    ```
 
-4. **The secrets.** Nine ExternalSecrets, each `SecretSynced` and ready: `pilot-oidc`,
-   `pilot-kubecoder`, `pilot-sync`, `pilot-vapid` and `pilot-service-user` (from `openbao-prd`,
-   `eso/prd/pilot/dev/oidc`, `eso/prd/pilot/dev/kubecoder`, `eso/prd/pilot/dev/sync`,
-   `eso/prd/pilot/dev/vapid` and `eso/prd/pilot/dev/service-user`), `pilot-projects-token` (the
-   shared `eso/prd/pilot/projects-token`), and the generated `pilot-secret-key`, `pilot-drain-auth`
-   and `pilot-collector-token`:
+4. **The secrets.** Seven ExternalSecrets, each `SecretSynced` and ready: `pilot-kubecoder`,
+   `pilot-sync` and `pilot-vapid` (from `openbao-prd`, `eso/prd/pilot/dev/kubecoder`,
+   `eso/prd/pilot/dev/sync` and `eso/prd/pilot/dev/vapid`), `pilot-projects-token` (the shared
+   `eso/prd/pilot/projects-token`), and the generated `pilot-secret-key`, `pilot-drain-auth` and
+   `pilot-collector-token`. The two Keycloak clients' ids and secrets, the sign-in client's and the
+   MCP server's service user's, are no ExternalSecret: the stage's Terraform writes them to the
+   Secrets `keycloak-client` and `keycloak-client-service` (PilotDeploy `terraform/keycloak.tf`):
 
    ```bash
    cexec iac kubectl -n pilot-dev get externalsecrets
