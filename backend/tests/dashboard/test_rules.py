@@ -280,6 +280,30 @@ class TestAMarkerWhereARolesConfigurationChanged:
             ),
         )
 
+    def test_a_unit_with_no_start_changes_at_its_first_call(
+        self, session: DbSession, menu: WorkUnit, series: Callable[[str], Series]
+    ) -> None:
+        # Read at a missing start, the unstarted course would follow the
+        # third, and the change fall on the third's start.
+        first = course(session, menu, "Course 0", _day(0), role="cook")
+        unstarted = course(session, menu, "Course 1", None, role="cook")
+        third = course(session, menu, "Course 2", _day(2), role="cook")
+        carried(session, first, _day(0))
+        carried(session, unstarted, _day(1) + timedelta(hours=3), model=SONNET)
+        carried(session, third, _day(2), model=SONNET)
+
+        found = series("t=all&by=course&p=order")
+
+        assert found.markers == (
+            Shift(
+                "model",
+                "cook",
+                Configuration(SONNET, "high"),
+                Configuration(OPUS, "high"),
+                _day(1) + timedelta(hours=3),
+            ),
+        )
+
     def test_a_series_states_list_it_with_the_fact_it_reads(
         self, container: ServiceContainer, cooked: list[WorkUnit]
     ) -> None:
@@ -338,6 +362,63 @@ class TestOutliersAmongTheItemsOfOneRole:
         found = series("t=all&by=course&p=order&m=cost.sum")
 
         assert found.panels[0].outliers == ()
+
+    def test_items_whose_rows_carry_two_roles_or_one_and_none_are_the_rest(
+        self, session: DbSession, series: Callable[[str], Series]
+    ) -> None:
+        # Five menus of a cook's course alone at 10; six of a cook's course
+        # and a taster's, or a cook's and the menu's own Call, at 1 but the
+        # last, at 9. Read as a cook's, the six would sit among the 10s.
+        for day in range(11):
+            menu = work_unit(session, f"kitchen|Menu {day}", started_at=_day(day))
+            cooks = course(session, menu, f"Cook {day}", _day(day), role="cook")
+            if day < 5:
+                carried(session, cooks, _day(day), cost="10")
+                continue
+            half = "4.5" if day == 10 else "0.5"
+            carried(session, cooks, _day(day), cost=half)
+            if day % 2:
+                carried(session, menu, _day(day), cost=half)
+            else:
+                tasters = course(
+                    session, menu, f"Taster {day}", _day(day), role="taster"
+                )
+                carried(session, tasters, _day(day), cost=half)
+
+        found = series("t=all&by=menu&p=order&m=cost.sum")
+
+        assert [point.label for point in found.points][10] == "Menu 10"
+        assert found.panels[0].outliers == (10,)
+
+    def test_a_time_series_spans_are_judged_together(
+        self, costed: list[WorkUnit], series: Callable[[str], Series]
+    ) -> None:
+        # Each day holds one course alone: a day is no item of its role.
+        found = series("t=all&p=time,day&m=cost.sum")
+
+        assert len(found.points) == 11
+        assert found.panels[0].outliers == ()
+
+    def test_a_spike_day_is_ringed_whatever_roles_its_rows_carry(
+        self, session: DbSession, menu: WorkUnit, series: Callable[[str], Series]
+    ) -> None:
+        # Eight days of a cook's course and a taster's at 0.5 each, two of a
+        # cook's alone at 1, and a last of a cook's at 1 beside a course of
+        # no role at 99.
+        for day in range(8):
+            for role in ("cook", "taster"):
+                unit = course(session, menu, f"{role} {day}", _day(day), role=role)
+                carried(session, unit, _day(day), cost="0.5")
+        for day in (8, 9, 10):
+            unit = course(session, menu, f"cook {day}", _day(day), role="cook")
+            carried(session, unit, _day(day))
+        spent = course(session, menu, "Course 10", _day(10))
+        carried(session, spent, _day(10), cost="99")
+
+        found = series("t=all&p=time,day&m=cost.sum")
+
+        assert [point.values[0] for point in found.points] == [1.0] * 10 + [100.0]
+        assert found.panels[0].outliers == (10,)
 
 
 class TestWorkDoneAgain:

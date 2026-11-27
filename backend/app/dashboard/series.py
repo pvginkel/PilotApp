@@ -22,7 +22,8 @@ them, with what a series draws besides.
   under the scope.
 - The **outliers** are a panel's points, or its dots, by the screen's one
   rule (`outliers`), judged among the items of one role (F154.4): those
-  whose rows share a role among the others of it, the rest together.
+  whose rows share a role among the others of it, the rest together, and
+  over time the points all together.
 - A **marker** is where a value of a marker's dimension was first seen,
   under the scope over all time, each value after the first with the one it
   followed; or where a role's configuration changed as it ran, a Work
@@ -419,9 +420,9 @@ class _Drawer:
 
     def roles(self, points: Sequence[Point]) -> list[str | None]:
         """The role each point's rows share, read on the first fact a
-        measure reads that offers the role; none for every point where
-        none does, and where too few points stand for any to be an
-        outlier."""
+        measure reads that offers the role; none for every point over time,
+        a span of it being no item, where no fact offers the role, and
+        where too few points stand for any to be an outlier."""
         offered = self.catalogue.offered(ROLE)
         fact = next(
             (
@@ -431,7 +432,7 @@ class _Drawer:
             ),
             None,
         )
-        if fact is None or len(points) < LEAST:
+        if self.by.group != "order" or fact is None or len(points) < LEAST:
             return [None] * len(points)
         narrowed = replace(
             self.plan, rows=tuple(point.key for point in points), marks=()

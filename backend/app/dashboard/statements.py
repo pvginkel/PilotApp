@@ -1490,9 +1490,14 @@ def ordered(catalogue: Catalogue, by: Dimension) -> Dimension | None:
 
 
 def _shared(value: ColumnElement[Any]) -> ColumnElement[Any]:
-    """The one value a group's rows with one share, none where they share
-    none."""
-    return case((func.min(value) == func.max(value), func.min(value)))
+    """The one value every row of a group carries, none where a row carries
+    none or another."""
+    return case(
+        (
+            and_(func.count(value) == func.count(), func.min(value) == func.max(value)),
+            func.min(value),
+        )
+    )
 
 
 def _within(figure: Figure, value: ColumnElement[Any]) -> ColumnElement[Any]:
