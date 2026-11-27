@@ -1,6 +1,7 @@
 /**
- * The dashboard's writes on what it stores (F161.7, F162.6): a view's star, the person's own
- * (F155.2), and a saved view's rename and remove, for everyone; Save view, a tab's state saved under
+ * The dashboard's writes on what it stores (F161.7, F162.6, F163.2): a view's star and a
+ * dimension's in By's list or Color's, the person's own (F155.2), and a saved view's rename and
+ * remove, for everyone; Save view, a tab's state saved under
  * a name, for everyone, the tab taking it (F161.5); a quick filter made and removed, for everyone,
  * the counts read again. What went well is a toast, and what failed the
  * banner under the global toolbar alone (F160.8): each write's own failure replaces the query
@@ -17,6 +18,9 @@ import { toApiError } from '@/lib/api/api-error';
 import { api } from '@/lib/api/client';
 import { SENDER } from '@/lib/api/generated/hooks';
 import { catalogueQuery, favouritesQuery, knowNormal, normalFormsChanged, quickFiltersChanged, stateOf, type Catalogue, type Favourites, type QuickFilter, type SavedView } from '@/lib/dashboard/queries';
+
+/** By's list or Color's, where a dimension is a favorite. */
+type Menu = keyof Pick<Favourites, 'by' | 'color'>;
 
 /** Shows what failed in the dashboard's banner. */
 export const WriteFailures = createContext<((error: Error) => void) | null>(null);
@@ -102,6 +106,33 @@ export function useViewWrites() {
   });
 
   return { star, rename, remove };
+}
+
+/**
+ * A dimension starred in By's list or Color's (F155.2), the person's own: taken at once, last in
+ * the order starred, the favorites read again after.
+ */
+export function useFavouriteWrites() {
+  const queryClient = useQueryClient();
+  const fail = useContext(WriteFailures)!;
+  const favourites = favouritesQuery().queryKey;
+  const favour = useMutation({
+    mutationFn: async ({ menu, dimension, on }: { menu: Menu; dimension: string; on: boolean }) => {
+      const { error, response } = on
+        ? await api.POST('/api/dashboard/favourites/dimensions', { body: { menu, dimension }, headers })
+        : await api.DELETE('/api/dashboard/favourites/dimensions', { params: { query: { menu, dimension } }, headers });
+      if (error !== undefined) throw toApiError(error, response.status);
+    },
+    onMutate: async ({ menu, dimension, on }) => {
+      await queryClient.cancelQueries({ queryKey: favourites });
+      queryClient.setQueryData<Favourites>(favourites, (was) =>
+        was === undefined ? was : { ...was, [menu]: [...was[menu].filter((key) => key !== dimension), ...(on ? [dimension] : [])] },
+      );
+    },
+    onError: fail,
+    onSettled: () => queryClient.invalidateQueries({ queryKey: favourites }),
+  });
+  return { favour };
 }
 
 /**

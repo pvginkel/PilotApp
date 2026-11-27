@@ -2,9 +2,9 @@
  * One view of the dashboard as it is read (F160.6, F160.8): the state an address carries, read
  * through the server's normal form (`addressQuery`), then its rows, keyed by the state without its
  * look-only parts (`rowsQuery`). While a new state's answer is on its way the last answer stays
- * drawn, and where a read fails it stays drawn too, the failure beside it with its Retry. The
- * presentation the state names is drawn as rows: the rows route answers a By's rows whatever the
- * presentation, and the others are drawn by the presentations' own slices.
+ * drawn, and where a read fails it stays drawn too, the failure beside it with its Retry. The rows
+ * route answers a By's rows whatever the presentation: a table draws them as a table, and every
+ * other presentation as rows until the presentations' own slices draw it.
  */
 
 import { createContext, useContext, useEffect, useId, useLayoutEffect, useRef, useState } from 'react';

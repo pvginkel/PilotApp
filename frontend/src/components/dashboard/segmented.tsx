@@ -10,6 +10,8 @@ import { cn } from '@/lib/utils';
 interface Option<T> {
   value: T;
   label: ReactNode;
+  /** What it shows, its tooltip. */
+  title?: string;
   testId: string;
 }
 
@@ -29,6 +31,7 @@ export function Segmented<T>({ label, options, value, onChange }: SegmentedProps
           type="button"
           className={cn(option.value === value && 'on')}
           aria-pressed={option.value === value}
+          title={option.title}
           onClick={() => onChange(option.value)}
           data-testid={option.testId}
         >

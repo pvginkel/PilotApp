@@ -13,8 +13,13 @@ export const dashboardAddress = (state: string, tab = 't1') => `#dash/${tab}/${s
  * kind and value (F162.3), the chips, each its sign, its words and its ×, the filter picker and a
  * dimension's pane, its search, its values, Is or Is not, Filter or Mark, Add or Apply, Add as quick
  * filter and its name, and Remove (F162.4); the quick filters' line under them, each its name, its
- * count, its amount and its ×, and the dialog its × asks (F162.6); and the view's card: the legend, the headings' row, the All row and a row per value of the By, each its label, its time where it has
- * one, and a figure per measure; the medians, and the cut past 40 rows.
+ * count, its amount and its ×, and the dialog its × asks (F162.6); and the view's card: its head, By
+ * and its list, the presentation's Rows and Table, Color and its list, Relative, and the table's Copy
+ * and CSV (F163.1 to F163.3, F163.7), each list's search, its groups and its entries, each its pick,
+ * its count and its star, By's "n hidden"; the legend, the headings' row, the All row and a row per
+ * value of the By, each its label, its time where it has one, and a figure per measure; the medians,
+ * and the cut past 40 rows; the table, its headings, its All row and its rows, each its label, its
+ * time and its cells.
  */
 export class DashboardPage {
   readonly screen: Locator;
@@ -79,6 +84,23 @@ export class DashboardPage {
   readonly quickFilters: Locator;
   readonly quickFilterRemoveDialog: Locator;
   readonly card: Locator;
+  readonly cardHead: Locator;
+  readonly by: Locator;
+  readonly byWords: Locator;
+  readonly byMore: Locator;
+  readonly color: Locator;
+  readonly colorWords: Locator;
+  readonly rowsPresentation: Locator;
+  readonly tablePresentation: Locator;
+  readonly relative: Locator;
+  readonly copy: Locator;
+  readonly csv: Locator;
+  readonly table: Locator;
+  readonly tableHeads: Locator;
+  readonly tableAll: Locator;
+  readonly tableRows: Locator;
+  readonly tableLabels: Locator;
+  readonly tableTimes: Locator;
   readonly legend: Locator;
   readonly legendValues: Locator;
   readonly byHeading: Locator;
@@ -155,6 +177,23 @@ export class DashboardPage {
     this.quickFilters = page.getByTestId('dashboard.quick-filters');
     this.quickFilterRemoveDialog = page.getByTestId('dashboard.quick-filter.remove-dialog');
     this.card = page.getByTestId('dashboard.card');
+    this.cardHead = page.getByTestId('dashboard.card.head');
+    this.by = page.getByTestId('dashboard.by');
+    this.byWords = page.getByTestId('dashboard.by.words');
+    this.byMore = page.getByTestId('dashboard.by.more');
+    this.color = page.getByTestId('dashboard.color');
+    this.colorWords = page.getByTestId('dashboard.color.words');
+    this.rowsPresentation = page.getByTestId('dashboard.presentation.rows');
+    this.tablePresentation = page.getByTestId('dashboard.presentation.table');
+    this.relative = page.getByTestId('dashboard.relative');
+    this.copy = page.getByTestId('dashboard.copy');
+    this.csv = page.getByTestId('dashboard.csv');
+    this.table = page.getByTestId('dashboard.table');
+    this.tableHeads = page.getByTestId('dashboard.table.head');
+    this.tableAll = page.getByTestId('dashboard.table.all');
+    this.tableRows = page.getByTestId('dashboard.table.row');
+    this.tableLabels = page.getByTestId('dashboard.table.row.label');
+    this.tableTimes = page.getByTestId('dashboard.table.row.at');
     this.legend = page.getByTestId('dashboard.legend');
     this.legendValues = page.getByTestId('dashboard.legend.value');
     this.byHeading = page.getByTestId('dashboard.heads.by');
@@ -191,6 +230,37 @@ export class DashboardPage {
       amount: item.getByTestId('dashboard.quick-filter.amount'),
       remove: item.getByTestId('dashboard.quick-filter.remove'),
     };
+  }
+
+  /** The search of By's list or Color's. */
+  listSearch(of: 'by' | 'color'): Locator {
+    return this.page.getByTestId(`dashboard.${of}.search`);
+  }
+
+  /** The groups of By's list or Color's, in its order, each its heading where it has one. */
+  listGroups(of: 'by' | 'color'): Locator {
+    return this.page.getByTestId(`dashboard.${of}.group`);
+  }
+
+  /** The labels of the entries of By's list or Color's, `group` one of its groups or the whole list, in its order. */
+  listLabels(of: 'by' | 'color', group?: Locator): Locator {
+    return (group ?? this.page.getByTestId(`dashboard.${of}.list`)).getByTestId(`dashboard.${of}.entry.label`);
+  }
+
+  /** The entry of By's list or Color's labelled `label`: its row, its pick, its count and its star. */
+  entry(of: 'by' | 'color', label: string): { item: Locator; pick: Locator; count: Locator; star: Locator } {
+    const item = this.page.getByTestId(`dashboard.${of}.entry`).filter({ has: this.page.getByTestId(`dashboard.${of}.entry.label`).getByText(label, { exact: true }) });
+    return {
+      item,
+      pick: item.getByTestId(`dashboard.${of}.entry.pick`),
+      count: item.getByTestId(`dashboard.${of}.entry.count`),
+      star: item.getByTestId(`dashboard.${of}.entry.star`),
+    };
+  }
+
+  /** A row's cells of the table, its All row's among them, after its label. */
+  cells(row: Locator): Locator {
+    return row.getByTestId('dashboard.table.cell');
   }
 
   /** The picker's group of dimensions `group`, Parts or Attributes. */
@@ -267,6 +337,20 @@ export class DashboardPage {
   /** The states the page asks the quick filters' counts of from the call on, each a task started; read by the answer. */
   countsReads(): () => string[] {
     return this.reads('/api/dashboard/counts/quick-filters');
+  }
+
+  /**
+   * The states whose By's counts the server started from the call on, each a task, a request the
+   * page cancelled left out, as the dev server's second mount of the list cancels the first's; read
+   * by the answer.
+   */
+  byCountsAnswered(): () => string[] {
+    const states: string[] = [];
+    this.page.on('requestfinished', (request) => {
+      const url = new URL(request.url());
+      if (url.pathname === '/api/dashboard/counts/attributes') states.push(url.searchParams.get('state') ?? '');
+    });
+    return () => states;
   }
 
   /** The states the page asks the normal form of from the call on; read by the answer. */

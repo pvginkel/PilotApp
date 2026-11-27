@@ -6,7 +6,9 @@
  * They are kept until the walk's event, never stale by age.
  *
  * The quick filters' counts and amounts are a task's answer over the stream (`task.ts`), read as a
- * figure is: a walk asks them again with the view's rows.
+ * figure is: a walk asks them again with the view's rows. By's counts are a task's too, which By's
+ * panel follows as it opens (`use-by-counts.ts`), kept under `FIGURES` by no query's read: a walk
+ * leaves them stale and asks nothing.
  *
  * A state from outside the page, a link opened cold, is read through the server's normal form
  * first (`GET /api/dashboard/address`), since the page reads the server's forms alone: the
@@ -51,6 +53,8 @@ interface QuickFilterCounts {
 const ADDRESS = 'dashboard.address';
 
 const COUNTS = 'quick-filters';
+
+const BY_COUNTS = 'by-counts';
 
 const CATALOGUE = 'dashboard.catalogue';
 
@@ -144,6 +148,9 @@ export function quickFilterCountsQuery(key: string, listen: Listen) {
 export function quickFiltersChanged(queryClient: QueryClient): Promise<void> {
   return queryClient.invalidateQueries({ queryKey: [FIGURES, COUNTS] });
 }
+
+/** Where By's counts in `scope` are kept, which `use-by-counts.ts` writes and no read fetches. */
+export const byCountsKey = (scope: string) => [FIGURES, BY_COUNTS, scope] as const;
 
 /** A value's text as a state writes it, decoded; none for the value with none. */
 export const valueText = (key: Values['values'][number]['key']): string | null => (key === null ? null : String(key));

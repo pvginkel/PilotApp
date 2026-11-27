@@ -1,7 +1,8 @@
 /* The dashboard (PilotAppSpecs design/mockup/dashboard/dashboard.css), loaded with its screen's
    module: the line of view tabs, the global toolbar and the one view's tab, the new tab's panel,
-   the banner, the main area, the scope and the view's card,
-   the legend and the Rows presentation's chart, its text, lines and surfaces on the app's tokens.
+   the banner, the main area, the scope and the view's card, its head, By's and Color's lists,
+   the legend, the Rows presentation's chart and the Table's, its text, lines and surfaces on the
+   app's tokens.
    The one palette the app has no token for is the categorical one, --series-0 to --series-19 and
    --series-other, the color's values: dark's set is brighter and more saturated than light's, to
    read on the dark surfaces. Where the section stands and when it shows is the shell's (shell.css,
@@ -391,6 +392,90 @@
   }
   .dash .dash-card.changing { cursor: progress; opacity: 0.65; transition: opacity 0.2s 0.15s; }
   .dash .dash-chart { padding: 12px 16px 14px; }
+
+  /* The card's head, the view's toolbar (card-head.tsx; the mockup's `.dash-cardbar`), inside the
+     card's border with a hairline under it: its two ends each wrap within themselves, the right one
+     keeping to the right when the head wraps. */
+  .dash .dash-cardbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 8px 16px; border-bottom: 1px solid hsl(var(--border)); }
+  .dash .dash-cardbar-part { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-width: 0; }
+  .dash .dash-cardbar-part.end { margin-left: auto; }
+  /* A button that picks from a list names what it picks, muted, before the choice at hand, and
+     ends in the chevron, a size down. */
+  .dash .dash-pick .k { margin-right: -1px; color: hsl(var(--muted-foreground)); font-weight: 400; }
+  .dash .dash-pick .chev { width: 0.9em; height: 0.9em; margin: 0 -3px 0 -2px; color: hsl(var(--muted-foreground)); }
+  /* A toggle button: in the muted primary while its setting is on; greyed where it does not apply. */
+  .dash .dash-toggle.on { border-color: hsl(var(--primary-muted-foreground) / 0.3); background: hsl(var(--primary-muted)); color: hsl(var(--primary-muted-foreground)); }
+  .dash .dash-toggle.on:hover { background: hsl(var(--primary-muted-strong)); }
+  .dash .dash-toggle.off { opacity: 0.45; cursor: default; }
+  .dash .dash-toggle.off:hover { background: hsl(var(--background)); }
+  .dash .dash-toggle.on.off:hover { background: hsl(var(--primary-muted)); }
+
+  /* By's list and Color's (the mockup's `.bypanel`), 300px wide under their button, By's from its
+     left, Color's from its right: one scrollbar, the popover's, its search standing at its top. */
+  .dash .dash-list-pop { right: auto; left: 0; width: 300px; max-width: calc(100vw - 24px); }
+  .dash .dash-list-pop.end { left: auto; right: 0; }
+  .dash .dash-list-pop > .popover-body { padding-top: 0; }
+  .dash .dash-dimlist { padding: 0 6px; font-size: var(--text-sm); }
+  .dash .dash-dimlist > .field { position: sticky; top: 0; z-index: 1; height: 30px; margin: 0 -6px 4px; padding: 0 11px; border-width: 10px 6px 0; border-color: hsl(var(--background)); background-clip: padding-box; font-size: var(--text-sm); }
+  .dash .dash-dimlist .menu-head { padding: 6px 10px 3px; font-size: var(--text-xs); font-weight: 600; color: hsl(var(--muted-foreground)); }
+  .dash .dash-dimgroup.bare:not(:first-of-type) { margin-top: 4px; padding-top: 4px; border-top: 1px solid hsl(var(--border)); }
+  .dash .dash-dimlist .empty { padding: 8px 10px; }
+  .dash .dash-dimrow { display: flex; align-items: center; border-radius: 6px; }
+  .dash .dash-dimrow:hover, .dash .dash-dimrow:focus-within { background: hsl(var(--accent)); }
+  .dash .dash-dimrow .menu-item { flex: 1; min-width: 0; gap: 8px; padding: 5px 4px 5px 10px; font-size: var(--text-sm); }
+  .dash .dash-dimrow .menu-item:hover { background: none; }
+  .dash .dash-dimrow .t { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .dash .dash-dimrow .n { flex: none; color: hsl(var(--muted-foreground)); font-size: var(--text-xs); font-variant-numeric: tabular-nums; }
+  .dash .dash-dimrow.on { background: hsl(var(--primary-muted)); color: hsl(var(--primary-muted-foreground)); font-weight: 600; }
+  .dash .dash-dimrow.on .n { color: inherit; opacity: 0.8; }
+  .dash .dash-dimrow.dim .t { color: hsl(var(--muted-foreground)); }
+  .dash .dash-dimrow .star { flex: none; display: grid; place-items: center; width: 26px; height: 26px; margin-right: 2px; padding: 0; border: 0; border-radius: 6px; background: none; color: hsl(var(--foreground)); opacity: 0; cursor: pointer; }
+  .dash .dash-dimrow:hover .star, .dash .dash-dimrow:focus-within .star { opacity: 1; }
+  .dash .dash-dimrow .star:hover { background: hsl(var(--foreground) / 0.08); }
+  .dash .dash-dimrow .star .icon { width: 14px; height: 14px; }
+  .dash .dash-dimrow .star.on .icon { fill: currentColor; }
+  .dash .dash-dimmore { display: block; margin-top: 4px; padding: 6px 10px; border: 0; background: none; color: hsl(var(--link)); font: inherit; font-size: var(--text-sm); cursor: pointer; }
+  .dash .dash-dimmore:hover { text-decoration: underline; }
+
+  /* The table (rows-table.tsx; the mockup's `.rowstable`). While it shows, the main area stands
+     still: the card takes the room the scope leaves and the table scrolls inside it, both ways, its
+     headings in sight above the rows, so that its sideways scrollbar is always in view. The card's
+     least height keeps a few rows: in a window shorter than that the main area scrolls too. */
+  .dash .dash-main.fit { display: flex; flex-direction: column; padding-bottom: 16px; }
+  .dash .dash-main.fit > * { flex: none; }
+  .dash .dash-main.fit > .dash-card { flex: 0 1 auto; min-height: 240px; display: flex; flex-direction: column; }
+  .dash .dash-main.fit .dash-cardbar { flex: none; }
+  .dash .dash-main.fit .dash-chart { flex: 0 1 auto; min-height: 0; display: flex; flex-direction: column; padding-bottom: 10px; }
+  .dash .dash-main.fit .dash-chart > * { flex: none; }
+  .dash .dash-main.fit .dash-chart > .dash-tablewrap { flex: 0 1 auto; min-height: 0; }
+  .dash .dash-tablewrap { overflow: auto; }
+  .dash .dash-table { width: 100%; border-collapse: separate; border-spacing: 0; font-size: var(--text-sm); }
+  .dash .dash-table th {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    padding: 5px 8px;
+    border-bottom: 1px solid hsl(var(--border));
+    background: hsl(var(--card));
+    text-align: left;
+    font-size: var(--text-xs);
+    font-weight: 600;
+    color: hsl(var(--muted-foreground));
+    white-space: nowrap;
+  }
+  .dash .dash-table td { padding: 5px 8px; border-bottom: 1px solid hsl(var(--border) / 0.6); vertical-align: baseline; white-space: nowrap; }
+  .dash .dash-table .num { text-align: right; font-variant-numeric: tabular-nums; }
+  .dash .dash-table .lab { text-align: left; }
+  .dash .dash-table td.lab { max-width: 460px; }
+  .dash .dash-table td.lab > .t { overflow: hidden; text-overflow: ellipsis; font-weight: 500; }
+  .dash .dash-table td.lab > .at { font-size: 10.5px; color: hsl(var(--muted-foreground)); }
+  .dash .dash-table .nn { color: hsl(var(--muted-foreground)); font-size: 11.5px; }
+  .dash .dash-table td.sp, .dash .dash-table th.sp { background-color: hsl(var(--muted) / 0.45); }
+  .dash .dash-table th.sp { background: linear-gradient(hsl(var(--muted) / 0.45), hsl(var(--muted) / 0.45)), hsl(var(--card)); }
+  .dash .dash-table th .sw { margin-right: 4px; vertical-align: -1px; }
+  .dash .dash-table tr.allrow td { font-weight: 600; background: hsl(var(--muted)); }
+  .dash .dash-table tr.marked td { background: hsl(var(--warning) / 0.15); }
+  .dash .dash-table .share { display: inline-block; height: 6px; margin-left: 6px; border-radius: 3px; background: hsl(var(--primary) / 0.45); vertical-align: middle; }
 
   /* The headings' row stays in sight while the main area scrolls: the page's own elements over
      the chart's columns, their text where the chart would draw it (its baseline 14px down), the

@@ -9,7 +9,9 @@
  * (`view-tabs.tsx`); then the tab at hand: on the new tab's panel (`views-panel.tsx`), or its
  * view, the global toolbar, with one view its tab at the toolbar's left and copy-plus at its end;
  * the banner, what failed; the main area, which scrolls, holding the view's scope (`scope.tsx`) and
- * its card, a row of which drills into its value (`scope.ts`). The tabs follow
+ * its card: its head, the view's toolbar (`card-head.tsx`), then the view as rows, a row of which
+ * drills into its value (`scope.ts`), or as a table (`rows-table.tsx`), which scrolls inside the
+ * card, the main area then standing still at the room it has. The tabs follow
  * the address (`use-view-tabs.ts`), read off the hash as the browser holds it; `#dash` names none
  * and shows the tab at hand as it was left, the panel at the first opening. The toolbar's left
  * holds the view's time after the one view's tab (`time-picker.tsx`), its right Reset and Save
@@ -17,10 +19,11 @@
  *
  * Each tab's answers are kept for as long as the tab (F160.6): a tab out of sight holds its view's
  * queries without reading them, so that the walk's event leaves them stale and they are read
- * again as the tab is brought into view. Its scroll is kept with it in the browser (F160.10).
+ * again as the tab is brought into view. Its scroll is kept with it in the browser (F160.10): the
+ * main area's, or the table's where it shows one.
  */
 
-import { useCallback, useLayoutEffect, useRef, useState, type RefObject } from 'react';
+import { useCallback, useState, type RefCallback } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useSseContext } from '@/contexts/sse-context';
 import { ReadFailures, useDashboardView, type Failure } from '@/hooks/use-dashboard-view';
@@ -32,8 +35,11 @@ import { useWalkReads } from '@/hooks/use-walk-reads';
 import { addressQuery, catalogueQuery, knowLabel, quickFilterCountsQuery, rowsQuery, stateOf } from '@/lib/dashboard/queries';
 import { drilled, drills, valuesNamed } from '@/lib/dashboard/scope';
 import { readState, withoutLook, writeState, type ViewState } from '@/lib/dashboard/state';
+import { cn } from '@/lib/utils';
 import { Banner, type Wrote } from './banner';
+import { CardHead } from './card-head';
 import { RowsChart } from './rows-chart';
+import { RowsTable } from './rows-table';
 import { ResetButton, SaveViewButton } from './save-view';
 import { Scope } from './scope';
 import { TimePicker } from './time-picker';
@@ -106,8 +112,9 @@ function View({ tab, now, one, moves, wrote, reads }: ViewProps) {
   const label = useValueLabels(state === null ? [] : valuesNamed(state));
   // The answer's window, where the answer drawn is of the time shown.
   const window = rows !== undefined && state !== null && JSON.stringify(readState(stateOf(rows.address)).time) === JSON.stringify(state.time) ? rows.window : undefined;
-  const main = useKeptScroll(tab.id);
-  const place = (next: ViewState) => moves.set(tab.id, writeState(next));
+  const kept = useKeptScroll(tab.id);
+  const table = state?.presentation === 'table';
+  const place = (next: ViewState, replace = false) => moves.set(tab.id, writeState(next), replace);
   // A row drills where the rows drawn are the By's at hand, the label it was drawn with known.
   const drill =
     state !== null && rows !== undefined && rows.by.key === state.by && drills(state, dimensions)
@@ -131,11 +138,18 @@ function View({ tab, now, one, moves, wrote, reads }: ViewProps) {
         {one && <NewViewButton moves={moves} />}
       </div>
       <Banner failures={[view.failure, ...reads, wrote.failure]} onClose={(failure) => failure === wrote.failure && wrote.close()} />
-      <div ref={main} className="dash-main" data-testid="dashboard.main">
+      <div ref={table ? undefined : kept} className={cn('dash-main', table && 'fit')} data-testid="dashboard.main">
         {state !== null && <Scope state={state} scope={scope!} label={label} onState={place} />}
         <section className={view.changing ? 'dash-card changing' : 'dash-card'} aria-label="View" aria-busy={view.changing} data-testid="dashboard.card">
+          {state !== null && <CardHead state={state} rows={rows} onState={place} />}
           <div className="dash-chart">
-            {rows === undefined ? <p className="empty">Loading the view…</p> : <RowsChart rows={rows} relative={view.relative} onDrill={drill} />}
+            {rows === undefined ? (
+              <p className="empty">Loading the view…</p>
+            ) : table ? (
+              <RowsTable rows={rows} scrollRef={kept} />
+            ) : (
+              <RowsChart rows={rows} relative={view.relative} onDrill={drill} />
+            )}
           </div>
         </section>
       </div>
@@ -144,14 +158,12 @@ function View({ tab, now, one, moves, wrote, reads }: ViewProps) {
 }
 
 /**
- * The main area of the tab `id` set back to where it was left as its view is drawn, the view
- * growing to it, until the person scrolls; where it is scrolled to kept with the tab, a moment
- * after a scroll and as the tab leaves the screen.
+ * The box that scrolls the tab `id`, the main area or the table, set back to where the tab was left
+ * as its view is drawn, the view growing to it, until the person scrolls; where it is scrolled to
+ * kept with the tab, a moment after a scroll and as the box or the tab leaves the screen.
  */
-function useKeptScroll(id: string): RefObject<HTMLDivElement | null> {
-  const main = useRef<HTMLDivElement>(null);
-  useLayoutEffect(() => {
-    const element = main.current!;
+function useKeptScroll(id: string): RefCallback<HTMLDivElement> {
+  return useCallback((element: HTMLDivElement) => {
     let owed = scrollOf(id);
     let set = -1;
     let last = owed;
@@ -179,7 +191,6 @@ function useKeptScroll(id: string): RefObject<HTMLDivElement | null> {
       keepScroll(id, last);
     };
   }, [id]);
-  return main;
 }
 
 /** A tab out of sight: its view's answers held, never read, so that they stay for as long as the tab, its values' labels and its quick filters' counts with them. */
