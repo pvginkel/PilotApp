@@ -95,8 +95,8 @@ CALLS_A_DAY = 9_000
 
 ATTEMPTS = 5
 """How often a day's transaction is tried: another worker's may write a
-vocabulary's row, an environment or an adopted group's project first, or
-deadlock on one with it."""
+vocabulary's row or an adopted group's project first, or deadlock on one
+with it. A day's environments are written before it (`_environments`)."""
 
 LONG_CALLS = 1_200
 """The main thread's Calls of the long conversation every Wednesday has,
@@ -381,6 +381,7 @@ class _Writer:
         return self.db.execute(held).first() is not None
 
     def write(self, day: Day) -> None:
+        self._environments(day)
         builder = day.builder()
         sessions: list[uuid.UUID] = []
         standing: set[str] = set()
@@ -401,16 +402,30 @@ class _Writer:
         self._reported(sessions)
         self.db.commit()
 
+    def _environments(self, day: Day) -> None:
+        """The day's environments, in their order and in a transaction of
+        their own, so that the day's meets them committed: each in the day's
+        own, in its sessions' order, deadlocked four of twelve workers
+        writing a history from empty."""
+        held = sorted(
+            {
+                session.environment
+                for session in day.scenario.sessions
+                if session.ran is not None and session.environment is not None
+            }
+        )
+        if held:
+            self.db.execute(
+                pg_insert(Environment)
+                .values([{"id": name, "name": name, "exempt": False} for name in held])
+                .on_conflict_do_nothing(index_elements=["id"])
+            )
+        self.db.commit()
+
     def _pilots(self, builder: Builder, day: Day, session: Session) -> uuid.UUID:
         ran = session.ran
         assert ran is not None
         conversation = builder.conversation(session)
-        if session.environment is not None:
-            self.db.execute(
-                pg_insert(Environment)
-                .values(id=session.environment, name=session.environment, exempt=False)
-                .on_conflict_do_nothing(index_elements=["id"])
-            )
         project = self.projects[ran.project]
         started = builder.when(ran.turns[0].at)
         ended = builder.when(ran.turns[-1].ended)
