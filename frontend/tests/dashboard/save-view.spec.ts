@@ -29,6 +29,29 @@ async function aProject(people: People, projects: Projects) {
 }
 
 test.describe('Save view and Reset', () => {
+  test('Reset compares the tab’s states by their normal forms: a tab a link opened with its parts in another order, moved to that state as the server writes it, has nothing to reset', async ({
+    page,
+    people,
+    projects,
+    shell,
+    dashboard,
+  }) => {
+    const project = await aProject(people, projects);
+    const link = 'm=cost.sum&by=project&t=qw';
+    await shell.open(`${projectAddress(project)}${dashboardAddress(link, 'link')}`);
+    await expect(dashboard.byHeading).toHaveText('Project');
+
+    await dashboard.go(dashboardAddress(SCRATCH, 'link'));
+
+    // The link's normal form, read as it opened, is the state's own: nothing more is asked.
+    await expect(page).toHaveURL(`${projectAddress(project)}#dash/link/${SCRATCH}`);
+    await page.evaluate(() => new Promise((resolve) => setTimeout(resolve, 500)));
+    await expect(dashboard.reset).toBeDisabled();
+    await dashboard.go(dashboardAddress(BY_MODEL, 'link'));
+    await expect(dashboard.byHeading).toHaveText('Model');
+    await expect(dashboard.reset).toBeEnabled();
+  });
+
   test('Save view asks a name, for everyone, and the tab takes it, the state kept whole, its drawer, Relative and zoom with it; Reset is there to press only where the tab differs from what it opened with, its press a new entry', async ({
     page,
     people,
