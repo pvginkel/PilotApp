@@ -502,6 +502,21 @@ class TestMergedRuns:
         assert resolution == 60
         assert ran == {"lane": [Run(_at(0), _at(10), 0, _thread(1), 3, 1.75)]}
 
+    def test_a_merge_into_the_costlier_joins_the_run_it_then_matches(
+        self,
+    ) -> None:
+        # The short last run merges into the middle one and takes its own
+        # value, which is the first run's: the two then abut with one value
+        # and one thread, and merge.
+        runs = {
+            "lane": [_run(0, 2, 0, 0.25), _run(2, 4, 1, 0.25), _run(4, 4.5, 0, 1.0)]
+        }
+
+        resolution, _, _, ran = merged({}, {}, runs, _at(0), _at(4_000))
+
+        assert resolution == 60
+        assert ran == {"lane": [Run(_at(0), _at(4.5), 0, _thread(1), 3, 1.5)]}
+
     def test_a_merged_runs_cost_is_none_where_neither_has_one(self) -> None:
         runs = {"lane": [_run(0, 0.5, 0, None), _run(0.5, 1, 1, None)]}
 
@@ -541,7 +556,9 @@ class TestMerged:
     ) -> None:
         # Six runs, two waits and thirteen events: within seventeen once the
         # four API errors, thirty seconds in all, are one, and the thread's
-        # last Call's run, of no length, is one with the sub-agent's before it.
+        # last Call's run, of no length, is one with the sub-agent's before it,
+        # which then abuts the run before it with one value and one thread and
+        # is one with it.
         monkeypatch.setattr(lanes_module, "MARKS", 17)
 
         found = _lanes(service, "t=all&p=lanes")
@@ -555,7 +572,7 @@ class TestMerged:
         ]
         assert len(events) == 10
         assert [wait.n for wait in found.lanes[0].waits] == [1, 1]
-        assert [run.n for run in found.lanes[0].runs] == [1, 1, 2, 1]
+        assert [run.n for run in found.lanes[0].runs] == [1, 3, 1]
 
     @pytest.mark.usefixtures("errors")
     def test_the_resolution_doubles_until_they_are_within_the_bound(

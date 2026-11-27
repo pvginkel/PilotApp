@@ -351,6 +351,9 @@ def merged(
 
 
 def _runs(runs: Sequence[Run], resolution: float) -> list[Run]:
+    """The runs merged at `resolution`; a merge into the costlier that
+    leaves the merged run of the value and the thread of the run before it,
+    which it abuts, merges the two as well."""
     joined: list[Run] = []
     for run in runs:
         last = joined[-1] if joined else None
@@ -360,20 +363,35 @@ def _runs(runs: Sequence[Run], resolution: float) -> list[Run]:
             and (
                 _length(last) < resolution
                 or _length(run) < resolution
-                or (last.color, last.conversation) == (run.color, run.conversation)
+                or _alike(last, run)
             )
         ):
-            costlier = run if (run.cost or 0.0) > (last.cost or 0.0) else last
-            joined[-1] = replace(
-                costlier,
-                starts_at=last.starts_at,
-                ends_at=run.ends_at,
-                n=last.n + run.n,
-                cost=_added(last.cost, run.cost),
-            )
+            joined[-1] = _joined(last, run)
+            if len(joined) > 1 and _alike(joined[-2], joined[-1]):
+                joined[-2:] = [_joined(joined[-2], joined[-1])]
         else:
             joined.append(run)
     return joined
+
+
+def _alike(first: Run, second: Run) -> bool:
+    """Whether the two abut and are of one value and one thread."""
+    return first.ends_at == second.starts_at and (first.color, first.conversation) == (
+        second.color,
+        second.conversation,
+    )
+
+
+def _joined(first: Run, second: Run) -> Run:
+    """The run the two merge into, of the costlier's value and thread."""
+    costlier = second if (second.cost or 0.0) > (first.cost or 0.0) else first
+    return replace(
+        costlier,
+        starts_at=first.starts_at,
+        ends_at=second.ends_at,
+        n=first.n + second.n,
+        cost=_added(first.cost, second.cost),
+    )
 
 
 def _length(run: Run) -> float:
