@@ -8,7 +8,8 @@
  * Top to bottom (the mockup's `frame.js`): the line of view tabs, while more than one is open
  * (`view-tabs.tsx`); then the tab at hand: on the new tab's panel (`views-panel.tsx`), or its
  * view, the global toolbar, with one view its tab at the toolbar's left and copy-plus at its end;
- * the banner, what failed; the main area, which scrolls, holding the view's card. The tabs follow
+ * the banner, what failed; the main area, which scrolls, holding the view's scope (`scope.tsx`) and
+ * its card, a row of which drills into its value (`scope.ts`). The tabs follow
  * the address (`use-view-tabs.ts`), read off the hash as the browser holds it; `#dash` names none
  * and shows the tab at hand as it was left, the panel at the first opening. The toolbar's left
  * holds the view's time after the one view's tab (`time-picker.tsx`), its right Reset and Save
@@ -24,13 +25,16 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useDashboardView, type Failure } from '@/hooks/use-dashboard-view';
 import { ScreenInView } from '@/hooks/use-screens';
 import { keepScroll, scrollOf, useViewTabMoves, useViewTabs, useViewTabsAt, type ViewTab } from '@/hooks/use-view-tabs';
-import { WriteFailures } from '@/hooks/use-view-writes';
+import { useValueLabels } from '@/hooks/use-value-labels';
+import { Failures } from '@/hooks/use-view-writes';
 import { useWalkReads } from '@/hooks/use-walk-reads';
-import { addressQuery, rowsQuery, stateOf } from '@/lib/dashboard/queries';
-import { readState, withoutLook, writeState } from '@/lib/dashboard/state';
+import { addressQuery, catalogueQuery, knowLabel, rowsQuery, stateOf } from '@/lib/dashboard/queries';
+import { drilled, drills, valuesNamed } from '@/lib/dashboard/scope';
+import { readState, withoutLook, writeState, type ViewState } from '@/lib/dashboard/state';
 import { Banner, type Wrote } from './banner';
 import { RowsChart } from './rows-chart';
 import { ResetButton, SaveViewButton } from './save-view';
+import { Scope } from './scope';
 import { TimePicker } from './time-picker';
 import { NewViewButton, OneTab, ViewTabLine } from './view-tabs';
 import { ViewsPanel } from './views-panel';
@@ -41,14 +45,14 @@ export function DashboardScreen({ shown }: { shown: boolean }) {
   useViewTabsAt(shown);
   const { tabs, at } = useViewTabs();
   const moves = useViewTabMoves();
-  // A write's failure, until its banner is closed.
+  // A write's failure, or a read's apart from the view's rows, until its banner is closed.
   const [failed, setFailed] = useState<Failure | null>(null);
   const wrote = { failure: failed, close: () => setFailed(null) };
   return (
     <ScreenInView value={shown}>
       <section className={shown ? 'dash' : 'dash away'} inert={!shown} aria-label="Dashboard" data-testid="dashboard">
-        {/* eslint-disable-next-line no-restricted-properties -- a real timestamp: when the write failed, set against a read's errorUpdatedAt */}
-        <WriteFailures.Provider value={(error) => setFailed({ error, at: Date.now() })}>
+        {/* eslint-disable-next-line no-restricted-properties -- a real timestamp: when the write or the read failed, set against a view's read's errorUpdatedAt */}
+        <Failures.Provider value={(error, retry) => setFailed({ error, at: Date.now(), retry })}>
           {at !== null && (
             <>
               {tabs.length > 1 && <ViewTabLine tabs={tabs} at={at} moves={moves} />}
@@ -60,7 +64,7 @@ export function DashboardScreen({ shown }: { shown: boolean }) {
               {tabs.map((tab) => tab !== at && tab.now !== null && <KeptView key={tab.id} now={tab.now} />)}
             </>
           )}
-        </WriteFailures.Provider>
+        </Failures.Provider>
       </section>
     </ScreenInView>
   );
@@ -76,11 +80,28 @@ interface ViewProps {
 }
 
 function View({ tab, now, one, moves, wrote }: ViewProps) {
+  const queryClient = useQueryClient();
   const view = useDashboardView(now);
   const { rows, state } = view;
+  const dimensions = useQuery(catalogueQuery('dimensions')).data;
+  const scope = state === null ? null : withoutLook(state);
+  const label = useValueLabels(state === null ? [] : valuesNamed(state));
   // The answer's window, where the answer drawn is of the time shown.
   const window = rows !== undefined && state !== null && JSON.stringify(readState(stateOf(rows.address)).time) === JSON.stringify(state.time) ? rows.window : undefined;
   const main = useKeptScroll(tab.id);
+  const place = (next: ViewState) => moves.set(tab.id, writeState(next));
+  // A row drills where the rows drawn are the By's at hand, the label it was drawn with known.
+  const drill =
+    state !== null && rows !== undefined && rows.by.key === state.by && drills(state, dimensions)
+      ? (index: number) => {
+          const row = rows.rows[index];
+          const value = row.key === null ? null : String(row.key);
+          const next = drilled(state, value, dimensions);
+          if (next === null) return;
+          if (value !== null) knowLabel(queryClient, state.by, value, row.label);
+          place(next);
+        }
+      : undefined;
   return (
     <>
       <div className="dash-bar" role="toolbar" aria-label="Dashboard" data-testid="dashboard.toolbar">
@@ -93,9 +114,10 @@ function View({ tab, now, one, moves, wrote }: ViewProps) {
       </div>
       <Banner failures={[view.failure, wrote.failure]} onClose={(failure) => failure === wrote.failure && wrote.close()} />
       <div ref={main} className="dash-main" data-testid="dashboard.main">
+        {state !== null && <Scope state={state} scope={scope!} label={label} onState={place} />}
         <section className={view.changing ? 'dash-card changing' : 'dash-card'} aria-label="View" aria-busy={view.changing} data-testid="dashboard.card">
           <div className="dash-chart">
-            {rows === undefined ? <p className="empty">Loading the view…</p> : <RowsChart rows={rows} relative={view.relative} />}
+            {rows === undefined ? <p className="empty">Loading the view…</p> : <RowsChart rows={rows} relative={view.relative} onDrill={drill} />}
           </div>
         </section>
       </div>
@@ -142,11 +164,12 @@ function useKeptScroll(id: string): RefObject<HTMLDivElement | null> {
   return main;
 }
 
-/** A tab out of sight: its view's answers held, never read, so that they stay for as long as the tab. */
+/** A tab out of sight: its view's answers held, never read, so that they stay for as long as the tab, its values' labels with them. */
 function KeptView({ now }: { now: string }) {
   const queryClient = useQueryClient();
   const address = useQuery({ ...addressQuery(queryClient, now), enabled: false });
-  const key = address.data === undefined ? null : withoutLook(readState(stateOf(address.data.address)));
-  useQuery({ ...rowsQuery(key ?? ''), enabled: false });
+  const state = address.data === undefined ? null : readState(stateOf(address.data.address));
+  useQuery({ ...rowsQuery(state === null ? '' : withoutLook(state)), enabled: false });
+  useValueLabels(state === null ? [] : valuesNamed(state), false);
   return null;
 }

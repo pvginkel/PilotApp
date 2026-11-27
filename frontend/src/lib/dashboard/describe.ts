@@ -89,7 +89,7 @@ export function timeWords(time: ViewState['time'], words: Words): string {
 }
 
 /** A measure in a line of them: its figure's label, its aggregate after it where it is not the figure's own; a ratio's name. */
-function measureWords(measure: ViewState['measures'][number], words: Words): string {
+export function measureWords(measure: ViewState['measures'][number], words: Words): string {
   const part = words.measures;
   switch (measure.kind) {
     case 'simple': {

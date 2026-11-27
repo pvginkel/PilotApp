@@ -17,8 +17,8 @@ import { api } from '@/lib/api/client';
 import { SENDER } from '@/lib/api/generated/hooks';
 import { catalogueQuery, favouritesQuery, knowNormal, stateOf, type Catalogue, type Favourites, type SavedView } from '@/lib/dashboard/queries';
 
-/** Shows what failed in the dashboard's banner. */
-export const WriteFailures = createContext<((error: Error) => void) | null>(null);
+/** Shows what failed in the dashboard's banner: a write, or a read apart from the view's rows, with its Retry. */
+export const Failures = createContext<((error: Error, retry?: () => void) => void) | null>(null);
 
 const headers = { 'X-Sender': SENDER };
 
@@ -35,7 +35,7 @@ function useSavedViews() {
 
 export function useViewWrites() {
   const queryClient = useQueryClient();
-  const fail = useContext(WriteFailures)!;
+  const fail = useContext(Failures)!;
   const { showSuccess } = useToast();
   const stored = catalogueQuery('stored').queryKey;
   const favourites = favouritesQuery().queryKey;
@@ -56,7 +56,7 @@ export function useViewWrites() {
         was === undefined ? was : { ...was, views: [...was.views.filter((id) => id !== view.id), ...(on ? [view.id] : [])] },
       );
     },
-    onError: fail,
+    onError: (error) => fail(error),
     onSettled: () => queryClient.invalidateQueries({ queryKey: favourites }),
   });
 
@@ -110,7 +110,7 @@ export function useViewWrites() {
  */
 export function useSaveView() {
   const queryClient = useQueryClient();
-  const fail = useContext(WriteFailures)!;
+  const fail = useContext(Failures)!;
   const { showSuccess } = useToast();
   const moves = useViewTabMoves();
   const savedViews = useSavedViews();
@@ -126,6 +126,6 @@ export function useSaveView() {
       moves.saved(tab, { id: view.id, name: view.name }, stateOf(view.address));
       showSuccess([made ? `Saved the view "${view.name}" for everyone` : `Replaced the saved view "${view.name}" for everyone`, ...notes].join('. '));
     },
-    onError: fail,
+    onError: (error) => fail(error),
   });
 }

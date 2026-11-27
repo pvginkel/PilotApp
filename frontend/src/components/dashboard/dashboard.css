@@ -1,6 +1,6 @@
 /* The dashboard (PilotAppSpecs design/mockup/dashboard/dashboard.css), loaded with its screen's
    module: the line of view tabs, the global toolbar and the one view's tab, the new tab's panel,
-   the banner, the main area and the view's card,
+   the banner, the main area, the scope and the view's card,
    the legend and the Rows presentation's chart, its text, lines and surfaces on the app's tokens.
    The one palette the app has no token for is the categorical one, --series-0 to --series-19 and
    --series-other, the color's values: dark's set is brighter and more saturated than light's, to
@@ -208,6 +208,144 @@
      under.) */
   .dash .dash-main { flex: 1; min-height: 0; overflow-y: auto; padding: 0 24px 40px; }
 
+  /* The scope, above the card: the drill path, the chips and the filter picker in one line, which
+     wraps as a long row of chips does. */
+  .dash .dash-scope { display: flex; flex-direction: column; gap: 8px; padding: 14px 0 2px; }
+  .dash .dash-line { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; min-height: 28px; }
+
+  /* The drill path (scope.tsx; the mockup's `.dash-path`): one segmented bar a small button high,
+     its segments joined by chevrons that span its height. All is in the tint of a segmented
+     control's pressed choice, a step stronger. A parent is a button whose hover fills the arrow
+     its chevrons make; the last, where the view is, stronger text. A level's kind is small and
+     muted before its value, which is cut short past 240px. */
+  .dash .dash-path {
+    --sep: 9px;
+    display: inline-flex;
+    align-items: stretch;
+    max-width: 100%;
+    height: 28px;
+    border: 1px solid hsl(var(--border));
+    border-right-width: 2px;
+    border-bottom-width: 2px;
+    border-radius: var(--radius);
+    background: hsl(var(--background));
+    font-size: var(--text-sm);
+    overflow: hidden;
+  }
+  .dash .dash-path .crumb {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 5px;
+    min-width: 0;
+    margin: 0 calc(-1 * var(--sep));
+    padding: 0 calc(var(--sep) + 9px) 0 calc(var(--sep) + 10px);
+    border: 0;
+    background: none;
+    color: inherit;
+    font: inherit;
+    line-height: 25px;
+    white-space: nowrap;
+  }
+  .dash .dash-path .crumb:first-child { margin-left: 0; padding-left: 12px; }
+  .dash .dash-path .crumb:last-child { margin-right: 0; padding-right: 12px; }
+  .dash .dash-path .crumb.up { cursor: pointer; clip-path: polygon(0 0, calc(100% - var(--sep)) 0, 100% 50%, calc(100% - var(--sep)) 100%, 0 100%, var(--sep) 50%); }
+  .dash .dash-path .crumb.up:first-child { clip-path: polygon(0 0, calc(100% - var(--sep)) 0, 100% 50%, calc(100% - var(--sep)) 100%, 0 100%); }
+  .dash .dash-path .crumb.up:hover { background: hsl(var(--accent)); }
+  .dash .dash-path .crumb.up:focus-visible { outline: none; background: hsl(var(--primary-muted)); }
+  .dash .dash-path .crumb.all { background: hsl(var(--primary) / 0.38); }
+  .dash .dash-path .crumb.all.up:hover, .dash .dash-path .crumb.all.up:focus-visible { background: hsl(var(--primary) / 0.5); }
+  .dash .dash-path .crumb.here { font-weight: 600; }
+  .dash .dash-path .crumb .k { font-size: var(--text-xs); font-weight: 400; color: hsl(var(--muted-foreground)); }
+  .dash .dash-path .crumb .v { max-width: 240px; overflow: hidden; text-overflow: ellipsis; }
+  .dash .dash-path .crumb-sep { position: relative; z-index: 1; flex: none; width: var(--sep); height: 100%; pointer-events: none; }
+  .dash .dash-path .crumb-sep path { fill: none; stroke: hsl(var(--border)); stroke-width: 1.5; }
+
+  /* A chip (the mockup's `.dash-chip`): a small button's height and corners, filled, in segments
+     with a hairline between two, each a press of its own with the pointer's tint, inside a border
+     in the dividers' colour; at most 300px wide, its values cut with an ellipsis and what follows
+     them ("2 more") kept whole. A filter is in the scope, the muted primary; a mark filters
+     nothing, the warning's tint, which the rows lay under what is marked. A negated chip's "is
+     not" is in the destructive's text, bold. Its pane drops from it. */
+  .dash .dash-chip-anchor { display: inline-flex; max-width: min(300px, 100%); }
+  .dash .dash-chip {
+    display: inline-flex;
+    align-items: stretch;
+    max-width: min(300px, 100%);
+    height: 28px;
+    border: 1px solid hsl(var(--border));
+    border-radius: var(--radius);
+    font-size: var(--text-sm);
+    line-height: 26px;
+    white-space: nowrap;
+    overflow: hidden;
+  }
+  .dash .dash-chip-anchor > .dash-chip { max-width: 100%; }
+  .dash .dash-chip.filter { background: hsl(var(--primary-muted)); color: hsl(var(--primary-muted-foreground)); }
+  .dash .dash-chip.mark { background: hsl(var(--warning) / 0.15); color: hsl(var(--warning-text)); }
+  .dash .dash-chip > * { min-width: 0; padding: 0 9px; border: 0; background: none; color: inherit; font: inherit; line-height: inherit; }
+  .dash .dash-chip > * + * { border-left: 1px solid color-mix(in srgb, currentColor 18%, transparent); }
+  .dash .dash-chip > button { cursor: pointer; }
+  .dash .dash-chip > button:hover { background: hsl(var(--foreground) / 0.08); }
+  .dash .dash-chip > button:focus-visible { outline-offset: -2px; }
+  .dash .dash-chip .lab { display: flex; }
+  .dash .dash-chip .lab > span { flex: none; }
+  .dash .dash-chip .lab .not { margin-left: 0.3em; color: hsl(var(--destructive-text)); font-weight: 700; }
+  .dash .dash-chip .lab .what { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+  .dash .dash-chip .kind, .dash .dash-chip .x { flex: none; display: grid; place-items: center; width: 28px; padding: 0; }
+  .dash .dash-chip .icon { width: 14px; height: 14px; }
+  .dash .dash-chip .x .icon { opacity: 0.65; }
+  .dash .dash-chip .x:hover .icon { opacity: 1; }
+  /* "+ Filter" after the chips, in the link's colour. */
+  .dash .dash-add { gap: 4px; padding: 0 8px 0 6px; color: hsl(var(--link)); }
+  .dash .dash-add:hover:not(:disabled) { color: hsl(var(--link)); }
+
+  /* The filter picker and a dimension's pane, dropping from their button at its left, 340px wide:
+     the parts and the attributes in their groups; or the dimension's values, checked, in a list that
+     scrolls by itself, Is or Is not and Filter or Mark under it, Add or Apply and Remove at its
+     foot. */
+  .dash .dash-pane-pop { right: auto; left: 0; width: 340px; max-width: calc(100vw - 24px); }
+  .dash .dash-pane-wait { padding: 6px 10px; }
+  .dash .dash-picker .menu-head, .dash .dash-valuepane > .menu-head { padding: 6px 10px 3px; font-size: var(--text-xs); font-weight: 600; color: hsl(var(--muted-foreground)); }
+  .dash .dash-picker .menu-item { padding: 5px 10px; font-size: var(--text-sm); }
+  .dash .dash-valuepane { display: flex; flex-direction: column; gap: 8px; padding: 0 4px 4px; font-size: var(--text-sm); }
+  .dash .dash-valuepane > .menu-head { padding-left: 2px; padding-bottom: 0; }
+  .dash .dash-valuepane .field { font-size: var(--text-sm); }
+  .dash .dash-valuepane .note { margin: 0; font-size: var(--text-xs); color: hsl(var(--muted-foreground)); }
+  .dash .dash-valuepane .row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+  .dash .dash-valuepane .grow { flex: 1; }
+  .dash .dash-values { max-height: 340px; overflow: auto; padding: 3px; border: 1px solid hsl(var(--border)); border-radius: 6px; scrollbar-width: thin; scrollbar-color: hsl(var(--muted-foreground) / 0.4) transparent; }
+  .dash .dash-values.changing { opacity: 0.65; transition: opacity 0.2s 0.15s; }
+  .dash .dash-values .empty { padding: 4px 6px; }
+  .dash .dash-val { display: flex; align-items: center; gap: 8px; padding: 3px 6px; border-radius: 4px; cursor: pointer; }
+  .dash .dash-val:hover { background: hsl(var(--accent)); }
+  .dash .dash-val input { flex: none; width: 15px; height: 15px; margin: 0; accent-color: hsl(var(--primary)); }
+  .dash .dash-val .l { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .dash .dash-val .a { color: hsl(var(--muted-foreground)); font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+  /* A choice of which one holds (segmented.tsx; the mockup's `.dash-seg`): a rounded track, the
+     one that holds on the primary's tint, its words a pixel above the middle. */
+  .dash .dash-seg { display: inline-flex; flex-wrap: wrap; gap: 2px; padding: 2px; border: 1px solid hsl(var(--border)); border-radius: 15px; background: hsl(var(--muted) / 0.6); }
+  .dash .dash-seg button {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    height: 22px;
+    padding: 0 12px 2px;
+    border: 0;
+    border-radius: 999px;
+    background: none;
+    color: hsl(var(--muted-foreground));
+    font: inherit;
+    font-size: var(--text-sm);
+    font-weight: 500;
+    line-height: 20px;
+    white-space: nowrap;
+    cursor: pointer;
+  }
+  .dash .dash-seg button:hover { color: hsl(var(--foreground)); }
+  .dash .dash-seg button.on { background: hsl(var(--primary) / 0.3); color: hsl(var(--foreground)); box-shadow: 0 1px 2px rgb(0 0 0 / 0.08); cursor: default; }
+  .dash .dash-seg button .icon { width: 13px; height: 13px; }
+
   /* The chart's card: the timeline's item. Under it the legend and the chart. While an answer for
      another state is on its way, the one drawn fades a little; a read again in place does not. */
   .dash .dash-card {
@@ -249,6 +387,9 @@
   /* The rows. */
   .dash svg.rowschart .row .bg { fill: transparent; }
   .dash svg.rowschart .row:hover .bg { fill: hsl(var(--accent)); }
+  .dash svg.rowschart .row.drill { cursor: pointer; }
+  .dash svg.rowschart .row.drill:focus-visible { outline: none; }
+  .dash svg.rowschart .row.drill:focus-visible .bg { fill: hsl(var(--primary-muted)); }
   .dash svg.rowschart .row.marked .bg { fill: hsl(var(--warning) / 0.15); }
   .dash svg.rowschart .allbg { fill: hsl(var(--muted)); }
   .dash svg.rowschart .alltext { font-weight: 600; }

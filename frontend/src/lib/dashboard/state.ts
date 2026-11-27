@@ -90,13 +90,13 @@ type Measure =
   | { kind: 'written'; name: string; numerator: Simple; denominator: Simple };
 
 /** A level of the drill stack, and the dimension asked when it was drilled into. */
-interface Level {
+export interface Level {
   dimension: string;
   value: Value;
   drilledFrom: string | null;
 }
 
-type Chip =
+export type Chip =
   /** A dimension's values kept, all but them kept (`negated`), or marked. */
   | { kind: 'pin'; dimension: string; values: readonly Value[]; negated: boolean; marked: boolean }
   /** A threshold on the By's rows, a ratio's among them. */

@@ -11,6 +11,11 @@
  *
  * What a view may name, the catalogue's parts, and the person's favourites are no figures: the
  * walk's event leaves them. A write of the dashboard's reads again what it changed, and no more.
+ *
+ * No route labels a value of a dimension, so a value the page was not told the label of, by a row
+ * it drilled from or a pane's values, is looked up among the values of a scope that holds it
+ * (`labelQuery`, `valuesNamed` in `scope.ts`): a value has one label in every scope, so the lookup
+ * is keyed without the scope it was asked in, and the walk's event leaves it.
  */
 
 import { queryOptions, type QueryClient } from '@tanstack/react-query';
@@ -21,6 +26,7 @@ import type { Rows } from './rows-layout';
 import { lookOf, readState } from './state';
 
 type Address = components['schemas']['AddressResponseSchema.b67cf98'];
+type Values = components['schemas']['ValuesResponseSchema.b67cf98'];
 export type Catalogue = components['schemas']['CatalogueResponseSchema.b67cf98'];
 export type Favourites = components['schemas']['FavouritesSchema.ddf95d6'];
 export type SavedView = components['schemas']['CatalogueResponseSchema.b67cf98.SavedViewSchema'];
@@ -34,6 +40,8 @@ const ADDRESS = 'dashboard.address';
 const CATALOGUE = 'dashboard.catalogue';
 
 const FAVOURITES = 'dashboard.favourites';
+
+const LABEL = 'dashboard.label';
 
 const PREFIX = '#dash/';
 
@@ -73,6 +81,49 @@ export function rowsQuery(key: string) {
     staleTime: Infinity,
     refetchOnWindowFocus: false,
   });
+}
+
+/** The values of `dimension` in `scope`, a state without its look-only parts, less its own chips: those whose label or key holds `search`. */
+export function valuesQuery(scope: string, dimension: string, search: string) {
+  return queryOptions({
+    queryKey: [FIGURES, 'values', scope, dimension, search],
+    queryFn: async ({ signal }): Promise<Values> => {
+      const query = { state: scope, dimension, ...(search === '' ? {} : { search }) };
+      const { data, error, response } = await api.GET('/api/dashboard/values', { params: { query }, signal });
+      if (error !== undefined) throw toApiError(error, response.status);
+      return data;
+    },
+    staleTime: Infinity,
+    refetchOnWindowFocus: false,
+  });
+}
+
+/** A value's text as a state writes it, decoded; none for the value with none. */
+export const valueText = (key: Values['values'][number]['key']): string | null => (key === null ? null : String(key));
+
+/**
+ * The label of `dimension`'s value `value`, looked up among its values in `scope`, a state; none
+ * where the scope holds no such value, or the value is its own label. A label found is kept; a
+ * value not found is looked up again where a view next shows it.
+ */
+export function labelQuery(dimension: string, value: string, scope: string) {
+  return queryOptions({
+    queryKey: [LABEL, dimension, value],
+    queryFn: async ({ signal }): Promise<string | null> => {
+      const query = { state: scope, dimension, search: value };
+      const { data, error, response } = await api.GET('/api/dashboard/values', { params: { query }, signal });
+      if (error !== undefined) throw toApiError(error, response.status);
+      const found = data.values.find((each) => valueText(each.key) === value);
+      return found === undefined ? null : (found.label ?? value);
+    },
+    staleTime: (query) => (query.state.data === null ? 0 : Infinity),
+    refetchOnWindowFocus: false,
+  });
+}
+
+/** The label of `dimension`'s value `value`, which the page was told, none where the value is its own, known so that it is never looked up. */
+export function knowLabel(queryClient: QueryClient, dimension: string, value: string, label: string | null): void {
+  queryClient.setQueryData(labelQuery(dimension, value, '').queryKey, label ?? value);
 }
 
 /** A part of the catalogue: `stored`, what the dashboard stores, is everyone's and changes under the page. */

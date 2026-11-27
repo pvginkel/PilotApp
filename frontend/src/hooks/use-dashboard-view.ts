@@ -7,8 +7,9 @@
  * presentation, and the others are drawn by the presentations' own slices.
  */
 
-import { useState } from 'react';
+import { useContext, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { keepPreviousData, useQuery, useQueryClient, type UseQueryResult } from '@tanstack/react-query';
+import { Failures } from '@/hooks/use-view-writes';
 import { addressQuery, rowsQuery, stateOf } from '@/lib/dashboard/queries';
 import type { Rows } from '@/lib/dashboard/rows-layout';
 import { readState, withoutLook, type ViewState } from '@/lib/dashboard/state';
@@ -24,6 +25,21 @@ export interface Failure {
 /** A read's failure, with its Retry; none where it has not failed. */
 export function failureOf(query: UseQueryResult<unknown>): Failure | null {
   return query.isError ? { error: query.error, at: query.errorUpdatedAt, retry: () => void query.refetch() } : null;
+}
+
+/** A read apart from the view's rows, `query`, shown in the banner each time it fails, with its Retry; none, nothing shown. */
+export function useFailureShown(query: UseQueryResult<unknown> | undefined): void {
+  const fail = useContext(Failures)!;
+  const report = useRef(() => {});
+  useLayoutEffect(() => {
+    report.current = () => {
+      if (query?.isError) fail(query.error, () => void query.refetch());
+    };
+  });
+  const at = query?.isError ? query.errorUpdatedAt : 0;
+  useEffect(() => {
+    if (at > 0) report.current();
+  }, [at]);
 }
 
 interface DashboardView {

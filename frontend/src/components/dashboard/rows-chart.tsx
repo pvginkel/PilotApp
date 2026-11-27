@@ -6,12 +6,14 @@
  * of the By, its label cut to its column and whole in its tooltip where it is cut, its time under
  * it where the By's values have one; each measure's bar, split by the color, and figure; the
  * peers' median per column. Past 40 rows, Show all draws up to 1,000 until what is shown changes.
+ * A row is a button where the view drills into its value (`onDrill`, by its place in the answer).
  */
 
-import { useLayoutEffect, useRef, useState, type RefObject } from 'react';
+import { useLayoutEffect, useRef, useState, type KeyboardEvent, type RefObject } from 'react';
 import type { Measure } from '@/lib/dashboard/clip';
 import { figure, percent, whole } from '@/lib/dashboard/figures';
 import { layOut, SHOW_ALL, type Layout, type Rows } from '@/lib/dashboard/rows-layout';
+import { cn } from '@/lib/utils';
 
 const measures = new Map<string, Measure>();
 
@@ -45,7 +47,13 @@ function useBox(ref: RefObject<HTMLDivElement | null>): { width: number; measure
   return box;
 }
 
-export function RowsChart({ rows, relative }: { rows: Rows; relative: boolean }) {
+interface RowsChartProps {
+  rows: Rows;
+  relative: boolean;
+  onDrill: ((index: number) => void) | undefined;
+}
+
+export function RowsChart({ rows, relative, onDrill }: RowsChartProps) {
   const holder = useRef<HTMLDivElement>(null);
   const { width, measure } = useBox(holder);
   // Show all holds for the answer it was asked on.
@@ -64,7 +72,7 @@ export function RowsChart({ rows, relative }: { rows: Rows; relative: boolean })
                 Nothing in this scope
               </div>
             ) : (
-              <Plot layout={layout} />
+              <Plot layout={layout} onDrill={onDrill} />
             )}
             {layout.total > layout.shown && (
               <div className="showall" data-testid="dashboard.cut">
@@ -146,8 +154,18 @@ function Headings({ layout }: { layout: Layout }) {
   );
 }
 
-function Plot({ layout }: { layout: Layout }) {
+function Plot({ layout, onDrill }: { layout: Layout; onDrill: RowsChartProps['onDrill'] }) {
   const { all } = layout;
+  const press = (index: number) => ({
+    role: 'button',
+    tabIndex: 0,
+    onClick: () => onDrill!(index),
+    onKeyDown: (event: KeyboardEvent) => {
+      if (event.key !== 'Enter' && event.key !== ' ') return;
+      event.preventDefault();
+      onDrill!(index);
+    },
+  });
   return (
     <svg width={layout.width} height={layout.height} className="chart rowschart" data-testid="dashboard.rows">
       {layout.rules.map((x) => (
@@ -169,7 +187,14 @@ function Plot({ layout }: { layout: Layout }) {
       </g>
       <line x1={0} x2={layout.width} y1={layout.top - 2} y2={layout.top - 2} className="grid" />
       {layout.rows.map((row, index) => (
-        <g key={index} className={row.marked ? 'row marked' : 'row'} data-key={row.key} data-testid="dashboard.row">
+        <g
+          key={index}
+          className={cn('row', row.marked && 'marked', onDrill !== undefined && 'drill')}
+          aria-label={onDrill === undefined ? undefined : row.whole}
+          {...(onDrill === undefined ? {} : press(index))}
+          data-key={row.key}
+          data-testid="dashboard.row"
+        >
           <rect x={0} y={row.y} width={layout.width} height={layout.rowHeight - 2} rx={4} className="bg" />
           <g>
             {row.label !== row.whole && <title data-testid="dashboard.row.whole">{row.whole}</title>}

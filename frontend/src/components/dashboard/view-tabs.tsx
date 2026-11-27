@@ -1,19 +1,22 @@
 /**
  * The dashboard's view tabs (F161.2; the mockup's `tabs.js`), in the document tabs' form
  * (`doc-tabs.tsx`, `.doc-tabs` and `.dtab`): a tab per view, its presentation's icon and its name,
- * its saved view's or else its By's, and its square-x, the middle button closing it too; Close all
- * (copy-x) and, at the far right, a new view (copy-plus). With one view there is no line: its tab
- * stands at the global toolbar's left, its close going back to the new tab's panel, and copy-plus
- * ends the toolbar. A tab on the panel is "New view". The tabs' model is `use-view-tabs.ts`.
+ * its saved view's, else its drill's last level's, else its By's, and its square-x, the middle
+ * button closing it too; Close all (copy-x) and, at the far right, a new view (copy-plus). With
+ * one view there is no line: its tab stands at the global toolbar's left, its close going back to
+ * the new tab's panel, and copy-plus ends the toolbar. A tab on the panel is "New view". The tabs'
+ * model is `use-view-tabs.ts`.
  */
 
 import { useLayoutEffect, useRef, type MouseEvent } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { flushSync } from 'react-dom';
 import { ChartBar, ChartLine, ChartNoAxesGantt, CopyPlus, CopyX, LayoutList, SquareX, Table } from 'lucide-react';
+import { useValueLabels } from '@/hooks/use-value-labels';
 import type { ViewTab, useViewTabMoves } from '@/hooks/use-view-tabs';
 import { dimensionLabel } from '@/lib/dashboard/describe';
 import { addressQuery, catalogueQuery, stateOf } from '@/lib/dashboard/queries';
+import { levelNamed } from '@/lib/dashboard/scope';
 import { readState, StateFormError, type ViewState } from '@/lib/dashboard/state';
 import { cn } from '@/lib/utils';
 
@@ -49,16 +52,22 @@ function readable(written: string): ViewState | null {
   }
 }
 
-/** A tab's name and icon: on the panel "New view"; its saved view's name, as the views are read now; else its By's label. */
+/**
+ * A tab's name and icon: on the panel "New view"; its saved view's name, as the views are read now;
+ * else its drill's last level, its value's label (`use-value-labels.ts`); else its By's label.
+ */
 function useTabFace(tab: ViewTab): { name: string; icon: ViewState['presentation'] | 'panel' } {
   const queryClient = useQueryClient();
   const dimensions = useQuery(catalogueQuery('dimensions')).data;
   const stored = useQuery(catalogueQuery('stored')).data;
   const address = useQuery({ ...addressQuery(queryClient, tab.now ?? ''), enabled: tab.now !== null });
+  const state = tab.now === null ? null : address.data === undefined ? readable(tab.now) : readState(stateOf(address.data.address));
+  const last = state === null || state.levels.length === 0 ? null : levelNamed(state, state.levels.length - 1);
+  const label = useValueLabels(tab.view === null && last !== null ? [last] : []);
   if (tab.now === null) return { name: 'New view', icon: 'panel' };
-  const state = address.data === undefined ? readable(tab.now) : readState(stateOf(address.data.address));
   const view = tab.view === null ? null : (stored?.saved_views?.find((each) => each.id === tab.view!.id)?.name ?? tab.view.name);
-  return { name: view ?? (state === null ? 'View' : dimensionLabel(dimensions, state.by)), icon: state?.presentation ?? 'rows' };
+  const shows = state === null ? 'View' : last !== null ? label(last.dimension, last.value) : dimensionLabel(dimensions, state.by);
+  return { name: view ?? shows, icon: state?.presentation ?? 'rows' };
 }
 
 /** The middle button's press scrolls nothing; its click closes the tab, as a browser's does. */

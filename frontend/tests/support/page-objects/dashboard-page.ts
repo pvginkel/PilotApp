@@ -9,7 +9,10 @@ export const dashboardAddress = (state: string, tab = 't1') => `#dash/${tab}/${s
  * view's copy-plus (F161.2); the new tab's panel, its find, Start from scratch and its two lists of
  * views (F161.4); the global toolbar, the one view's tab at its left, the time and its picker
  * (F162.2), Reset and Save view, its pane asking a name (F161.5), the banner under it, the main
- * area, which scrolls, and the view's card: the legend, the headings' row, the All row and a row per value of the By, each its label, its time where it has
+ * area, which scrolls; the scope above the card, the drill path and its segments, each a level's
+ * kind and value (F162.3), the chips, each its sign, its words and its ×, the filter picker and a
+ * dimension's pane, its search, its values, Is or Is not, Filter or Mark, Add or Apply and Remove
+ * (F162.4); and the view's card: the legend, the headings' row, the All row and a row per value of the By, each its label, its time where it has
  * one, and a figure per measure; the medians, and the cut past 40 rows.
  */
 export class DashboardPage {
@@ -52,6 +55,22 @@ export class DashboardPage {
   readonly retry: Locator;
   readonly closeBanner: Locator;
   readonly main: Locator;
+  readonly path: Locator;
+  readonly pathSegments: Locator;
+  readonly pathKinds: Locator;
+  readonly pathValues: Locator;
+  readonly chips: Locator;
+  readonly addFilter: Locator;
+  readonly filterDimensions: Locator;
+  readonly pane: Locator;
+  readonly paneSearch: Locator;
+  readonly paneValues: Locator;
+  readonly paneLabels: Locator;
+  readonly paneAmounts: Locator;
+  readonly paneIsNot: Locator;
+  readonly paneMark: Locator;
+  readonly paneApply: Locator;
+  readonly paneRemove: Locator;
   readonly card: Locator;
   readonly legend: Locator;
   readonly legendValues: Locator;
@@ -106,6 +125,22 @@ export class DashboardPage {
     this.retry = page.getByTestId('dashboard.banner.retry');
     this.closeBanner = page.getByTestId('dashboard.banner.close');
     this.main = page.getByTestId('dashboard.main');
+    this.path = page.getByTestId('dashboard.path');
+    this.pathSegments = page.getByTestId('dashboard.path.segment');
+    this.pathKinds = page.getByTestId('dashboard.path.kind');
+    this.pathValues = page.getByTestId('dashboard.path.value');
+    this.chips = page.getByTestId('dashboard.chip');
+    this.addFilter = page.getByTestId('dashboard.add-filter');
+    this.filterDimensions = page.getByTestId('dashboard.filter.dimension');
+    this.pane = page.getByTestId('dashboard.pane');
+    this.paneSearch = page.getByTestId('dashboard.pane.search');
+    this.paneValues = page.getByTestId('dashboard.pane.value');
+    this.paneLabels = page.getByTestId('dashboard.pane.value.label');
+    this.paneAmounts = page.getByTestId('dashboard.pane.value.amount');
+    this.paneIsNot = page.getByTestId('dashboard.pane.is-not');
+    this.paneMark = page.getByTestId('dashboard.pane.mark');
+    this.paneApply = page.getByTestId('dashboard.pane.apply');
+    this.paneRemove = page.getByTestId('dashboard.pane.remove');
     this.card = page.getByTestId('dashboard.card');
     this.legend = page.getByTestId('dashboard.legend');
     this.legendValues = page.getByTestId('dashboard.legend.value');
@@ -124,6 +159,21 @@ export class DashboardPage {
   /** The row whose label is `label`. */
   row(label: string): Locator {
     return this.rows.filter({ has: this.page.getByTestId('dashboard.row.label').getByText(label, { exact: true }) });
+  }
+
+  /** A chip's words, which open its pane where it has one. */
+  chipWords(chip: Locator): Locator {
+    return chip.getByTestId('dashboard.chip.words');
+  }
+
+  /** The picker's group of dimensions `group`, Parts or Attributes. */
+  filterGroup(group: 'Parts' | 'Attributes'): Locator {
+    return this.page.getByTestId('dashboard.filter.picker').getByRole('group', { name: group }).getByTestId('dashboard.filter.dimension');
+  }
+
+  /** The pane's value whose label is `label`. */
+  paneValue(label: string): Locator {
+    return this.paneValues.filter({ has: this.page.getByTestId('dashboard.pane.value.label').getByText(label, { exact: true }) });
   }
 
   /** The calendar's day `day` of the month it shows. */

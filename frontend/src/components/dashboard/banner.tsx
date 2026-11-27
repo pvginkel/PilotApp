@@ -8,7 +8,7 @@ import { useState } from 'react';
 import { RefreshCw, X } from 'lucide-react';
 import type { Failure } from '@/hooks/use-dashboard-view';
 
-/** A write's failure, which the banner shows beside a read's, and its close. */
+/** A failure apart from the view's own reads, a write's or a read's of its scope, which the banner shows beside theirs, and its close. */
 export interface Wrote {
   failure: Failure | null;
   close: () => void;

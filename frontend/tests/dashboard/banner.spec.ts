@@ -10,7 +10,7 @@ import { test, expect } from '../support/fixtures';
 import type { Collection } from '../support/collection';
 import { NONE_LEFT } from '../support/dashboard-bounds';
 import { expectConsoleError, makeUnique } from '../support/helpers';
-import { dashboardAddress } from '../support/page-objects/dashboard-page';
+import { dashboardAddress, type DashboardPage } from '../support/page-objects/dashboard-page';
 import type { People } from '../support/people';
 import { projectAddress, type Projects } from '../support/projects';
 
@@ -27,6 +27,9 @@ async function tally(people: People, projects: Projects, collection: Collection)
 }
 
 const declareRefusals = (page: Page) => expectConsoleError(page, /409/);
+
+/** The chip's projects named, their lookups answered before the engine refuses every read. */
+const labelled = (dashboard: DashboardPage) => expect(dashboard.chipWords(dashboard.chips)).toHaveText(/Recipes-.*Bikes-|Bikes-.*Recipes-/);
 
 /** The rows next answered. */
 const rowsAnswered = (page: Page) =>
@@ -85,6 +88,7 @@ test.describe('The dashboard’s banner', () => {
     await shell.open(`${projectAddress(first)}${dashboardAddress(state)}`);
     await deploymentSse.ensureConnected();
     await expect(dashboard.rows).toHaveCount(2);
+    await labelled(dashboard);
     await declareRefusals(page);
     await dashboardBounds.set({ timeout_seconds: NONE_LEFT });
     const reads = dashboard.rowsReads();
@@ -121,6 +125,7 @@ test.describe('The dashboard’s banner', () => {
     const { first, chip } = await tally(people, projects, collection);
     await shell.open(`${projectAddress(first)}${dashboardAddress(`t=all&by=project&m=cost.sum&${chip}`)}`);
     await expect(dashboard.labels).toHaveText([/^Bikes/, /^Recipes/]);
+    await labelled(dashboard);
     await declareRefusals(page);
     await dashboardBounds.set({ timeout_seconds: NONE_LEFT });
 
