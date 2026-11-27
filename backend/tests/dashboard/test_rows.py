@@ -970,7 +970,9 @@ class TestAWorkUnitKind:
         """A Work Unit row lies in no thread, so a chip on each item of a
         Call's figure keeps none, as a filter on a Call's dimension keeps
         none."""
-        found = _rows(service, "t=all&by=menu&m=cost.sum&m=units.count&c=@items,gt,0,cost")
+        found = _rows(
+            service, "t=all&by=menu&m=cost.sum&m=units.count&c=@items,gt,0,cost"
+        )
 
         menu = _by_key(found)[units.menu.id]
         assert menu.values[0] is not None
