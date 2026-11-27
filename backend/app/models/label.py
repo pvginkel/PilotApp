@@ -4,8 +4,10 @@ labeller recognised in a Transcript and in the run records, which Pilot holds
 as labels (DB decisions 79.23 and 81, assertion 561).
 
 A Work Unit, a Test Suite, a Test and a CI Build are written by their keys
-and stay at a relabel: no one Transcript's labels own them. Every other row
-here is a label of one Transcript's, replaced with its labels.
+and stay at a relabel: no one Transcript's labels own them. A Work Unit
+Measure is its unit's, written with it as a labelling that gives the unit
+lists them. Every other row here is a label of one Transcript's, replaced
+with its labels.
 """
 
 import uuid
